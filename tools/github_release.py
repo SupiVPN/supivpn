@@ -133,6 +133,43 @@ def fetch_candidate(run, commit, version, oid, arch):
     return candidate_zip(data, arch, commit, version, oid, run)
 
 
+def verify_provenance(path, commit, version, run):
+    """Verify archive bytes with Sigstore, then bind the certificate to this run."""
+    web = "https://github.com/" + gh.REPOSITORY
+    ref = "refs/tags/" + version
+    identity = web + "/.github/workflows/checks.yml@" + ref
+    command = ["gh", "attestation", "verify", str(path), "--repo", gh.REPOSITORY,
+               "--hostname", "github.com", "--cert-identity", identity,
+               "--cert-oidc-issuer", "https://token.actions.githubusercontent.com",
+               "--source-digest", commit, "--signer-digest", commit, "--source-ref", ref,
+               "--deny-self-hosted-runners", "--predicate-type", "https://slsa.dev/provenance/v1",
+               "--format", "json"]
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        raise a.ValidationError("Build provenance verification unavailable or timed out") from None
+    # Never echo CLI diagnostics: they can contain credentials or untrusted claims.
+    a.require(result.returncode == 0, "Build provenance verification failed")
+    try:
+        verified = json.loads(result.stdout)
+    except (ValueError, UnicodeError):
+        raise a.ValidationError("Invalid build provenance verification result") from None
+    a.require(isinstance(verified, list) and verified, "Missing verified build provenance")
+    expected = {"subjectAlternativeName": identity, "buildConfigURI": identity,
+                "buildConfigDigest": commit, "buildTrigger": "push",
+                "runInvocationURI": web + "/actions/runs/" + str(run["id"])
+                + "/attempts/" + str(run["run_attempt"])}
+    for entry in verified:
+        try:
+            certificate = entry["verificationResult"]["signature"]["certificate"]
+        except (KeyError, TypeError):
+            continue
+        # These fields come from GitHub OIDC, not the workflow-controlled predicate.
+        if isinstance(certificate, dict) and all(certificate.get(k) == v for k, v in expected.items()):
+            return
+    raise a.ValidationError("Build provenance does not match the selected tag run and attempt")
+
+
 def prepare(version, output):
     commit, oid = release_identity.release_identity(version)
     run = select_run(commit, version)
@@ -146,6 +183,13 @@ def prepare(version, output):
     with tempfile.TemporaryDirectory(dir=ROOT / "local") as directory:
         for arch in a.ARCHITECTURES:
             files, record = fetch_candidate(run, commit, version, oid, arch)
+            names = [record["filename"]]
+            if arch == "arm64":
+                names.append(record["source"]["filename"])
+            for name in names:
+                archive = Path(directory) / name
+                archive.write_bytes(files[name])
+                verify_provenance(archive, commit, version, run)
             candidate = a.unpack(files[record["filename"]], record["sha256"], version,
                                  commit, Path(directory) / ("cache-" + arch), expected_sources=sources, arch=arch)
             manifest = a.json_object(a.regular(candidate / "release.json", 65536))
@@ -167,6 +211,8 @@ def prepare(version, output):
     notes += "\n## Packages\n\nCommit: `" + commit + "`. License: AGPL-3.0-only.\n\n"
     notes += "Verified native ARM64 and AMD64 builds from [Checks](https://github.com/" + gh.REPOSITORY
     notes += "/actions/runs/" + str(run["id"]) + ") for this signed tag. Both bundles use format 3.\n\n"
+    notes += "GitHub build provenance was verified for both binary archives and Corresponding Source, "
+    notes += "including the tag commit and Checks run attempt " + str(run["run_attempt"]) + ".\n\n"
     notes += "Database schema: " + str(compatibility["schema"]) + "; compatible VM schemas: "
     notes += ", ".join(sorted(compatibility["compatible_schemas"], key=int)) + ".\n"
     notes += "Isolated Lambda required schema: " + str(compatibility["schema"]) + ".\n\n"

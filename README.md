@@ -51,7 +51,8 @@ Run Go and Make commands from the repository root.
 | `docs/` | Architecture, operations, security and release documentation |
 | `ci/`, `tools/` | CI configuration and repository/release tooling |
 | `local/`, `out/` | Caches, build and CI outputs |
-| [BUILD.md](BUILD.md), [DEVELOPERS.md](DEVELOPERS.md) | Build/test commands and contributor setup |
+| [CONTRIBUTING.md](CONTRIBUTING.md), [BUILD.md](BUILD.md) | Contributor setup and build/test commands |
+| [DEVELOPERS.md](DEVELOPERS.md) | Maintainer and release-signing guide |
 
 Start with [architecture](docs/ARCHITECTURE.md), [runtime commands](docs/RUNTIME.md),
 [host requirements](docs/HOST.md), [controller](docs/CONTROLLER.md),
@@ -68,7 +69,19 @@ Build components with Make or download a versioned release. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for local development and
 [release delivery](docs/RELEASES.md) for artifact verification.
 
-## Getting started
+## Contributing
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). Code contributions need Go, Python,
+Git, Make and a C compiler; `make setup` prepares local tools and `make test`
+runs unit/race tests. Docker is needed only for integration suites. No cloud
+account, real IdP or production credentials are required. Documentation changes
+can be submitted directly as a pull request without installing the toolchain.
+
+Pick a [good first issue](https://github.com/SupiVPN/supivpn/labels/good%20first%20issue)
+or send a small fix. [BUILD.md](BUILD.md) lists the focused test commands;
+hosted CI runs the full architecture matrix.
+
+## Deploying SupiVPN
 
 1. Run `make build` or build a single component as described in [BUILD.md](BUILD.md).
 2. Prepare PostgreSQL and the owner/runtime/migrator roles; apply migrations

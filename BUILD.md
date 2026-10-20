@@ -4,13 +4,17 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](LICENSE) for copyright ownership and licensing terms.
 
 Run `make <target>` from the SupiVPN root, or `make -C /path/to/supivpn <target>`.
-Requirements: GNU Make, the Go version in `go.mod` or a newer supported Go,
+Requirements: GNU Make, the Go version in `go.mod` (currently 1.27.3) or newer Go,
 and a C compiler for the race detector.
 Docker is required only for PostgreSQL/XMLSec/OpenVPN. `make help` lists all targets.
+For a first contribution, follow [CONTRIBUTING.md](CONTRIBUTING.md): `make setup`
+installs the Python audit dependency in `local/dev-venv/` and downloads Go modules,
+then `make test` runs unit/race tests. A full release build is not required to
+make a small code or documentation change.
 
 ## Build
 
-| Command | Artifact in `local/arm64/` by default |
+| Command | Artifact in `local/<arch>/` |
 | --- | --- |
 | `make build` or `make all` | All artifacts below |
 | `make agent` | `supivpn` |
@@ -19,8 +23,9 @@ Docker is required only for PostgreSQL/XMLSec/OpenVPN. `make help` lists all tar
 | `make migrate` | `supivpn-migrate` |
 | `make lambda` | Public, agent and recovery bootstraps plus three Lambda ZIPs |
 
-Deployment binaries target **Linux ARM64, CGO=0** by default. Use
-`make build ARCH=amd64` for AMD64, or `make build-all` for both. Outputs are
+Deployment binaries target **Linux, CGO=0**, using the host's ARM64 or AMD64
+architecture by default. Use `ARCH=arm64` or `ARCH=amd64` to select explicitly,
+or `make build-all` for both. Outputs are
 separate under `local/arm64/` and `local/amd64/`; a partial build cannot silently
 overwrite the other architecture. The packager validates the requested ELF machine.
 The public ZIP contains bootstrap and the profile template; the agent/recovery
@@ -48,7 +53,11 @@ Tests, builds, OpenVPN, source security and both fuzz targets are independent
 jobs. `Required checks` waits for all of them. Signed version tags run the
 complete suite and produce their own release candidates.
 Local Make targets remain independently usable. Audit tooling tests use Python;
-workflow validation also requires PyYAML.
+workflow validation also requires PyYAML. `make setup` installs its pinned
+version in a project-local virtual environment, which Make selects automatically.
+`make audit` lists skip reasons: GPG tests need `gpg` and `gpgconf` on PATH but
+generate disposable keys, and the built-bundle test requires the existing
+`SUPIVPN_TEST_BUILT_BUNDLE=1` opt-in. A skipped check is not a passing check.
 
 Before a release, run `make prepare`: source audit -> unit/race -> vet -> full build.
 `make build` also creates `local/<arch>/release.json` with SHA-256 hashes of all
@@ -127,8 +136,6 @@ Reproduce with `make fuzz FUZZ_TIME=500000x FUZZ_SAML_TIME=100000x TIMEOUT=600s`
 
 ```bash
 make postgres-start
-docker inspect --format '{{.State.Health.Status}}' supivpn-pg18-test
-# Wait for healthy.
 export SUPIVPN_TEST_POSTGRES_URL='postgres://postgres@127.0.0.1:55432/supivpn_test?sslmode=disable'
 export SUPIVPN_TEST_POSTGRES_ALLOW_RESET=1
 make integration
@@ -137,6 +144,11 @@ make postgres-stop
 
 This is a disposable **supivpn_test** database, available over loopback without a
 password. Tests reject RDS, non-loopback addresses, and other database names.
+`postgres-start` waits up to 60 seconds for its new container's health check
+before succeeding. Override `POSTGRES_WAIT_TIMEOUT` if needed. Unhealthy,
+stopped or missing containers and readiness timeouts fail the command. Creation
+failure never causes it to reuse an existing container; readiness failure leaves
+the new container available for inspection and `make postgres-stop` cleanup.
 `sslmode=disable` applies only to this disposable backend; TLS/reconnect tests
 create their own TLS endpoint. Deployment connections continue to use TLS.
 
@@ -176,7 +188,7 @@ The checked-in `ci/Dockerfile` builds OpenVPN **2.7.8** from a checksum-pinned
 upstream archive. No private installer or deployment repository is required.
 See [native tests](testdata/openvpn/README.md).
 Use `OPENVPN_IMAGE` to select an existing image matching `ARCH`. Docker suites
-also default to ARM64; add `ARCH=amd64` to build/test the compatibility target.
+also use the host architecture; set `ARCH=arm64` or `ARCH=amd64` explicitly for cross-testing.
 Test containers have no network; OpenVPN receives TUN/NET_ADMIN only inside the
 container. Tests generate temporary keys and a synthetic IdP.
 
@@ -206,7 +218,7 @@ Review **all** direct and transitive dependencies, AWS SDK, the Go toolchain,
 OpenVPN, and base-image packages. `deps-check` also lists test/tool modules in
 the graph; presence in that graph does not imply inclusion in a binary.
 
-The Makefile pins `govulncheck` (`v1.8.0`); its vulnerability database is refreshed
+The Makefile pins `govulncheck` (`v1.9.0`); its vulnerability database is refreshed
 during checks. Source analysis runs locally; modules and the
 [Go vulnerability database](https://go.dev/doc/security/vuln/) are downloaded.
 `deps-check` changes nothing. For accepted updates, review changelogs, update

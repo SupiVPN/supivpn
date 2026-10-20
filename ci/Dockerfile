@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 # Licensed under AGPL-3.0-only. See LICENSE and COPYRIGHT.md.
 # SPDX-License-Identifier: AGPL-3.0-only
-ARG GO_IMAGE=golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
+ARG GO_IMAGE=golang:1.27.3-bookworm@sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
 ARG POSTGRES_IMAGE=postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
 FROM ${GO_IMAGE} AS go
 FROM ${POSTGRES_IMAGE}

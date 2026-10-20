@@ -14,7 +14,10 @@ Govulncheck found no known vulnerabilities in macOS/Linux source/tests or any of
 the five binaries. [Evidence and limits](SECURITY_REVIEW.md).
 Live AWS Stop/Start and rollout were not performed.
 
-## Current dependencies
+## Dependencies in this dated review
+
+For current versions and subsequent validation, see
+[dependency updates](DEPENDENCY_UPGRADE.md) and [go.mod](../go.mod).
 
 - PostgreSQL: **pgx/v5 v5.11.0** retained; the driver was not rewritten.
 - XML DOM: **etree v1.8.0**. RSA, SHA-256, and X.509 use Go's standard library.

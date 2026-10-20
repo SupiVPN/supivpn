@@ -1,7 +1,8 @@
 # Release delivery
 
 SupiVPN publishes Linux ARM64 and AMD64 bundles and Corresponding Source on
-[GitHub Releases](https://github.com/SupiVPN/supivpn/releases). ARM64 is the default.
+[GitHub Releases](https://github.com/SupiVPN/supivpn/releases). Both architectures
+are tested natively; local Make commands default to the host architecture.
 
 ## Create a release
 
@@ -20,7 +21,9 @@ signed tag and prints the explicit push command; it never pushes.
 
 Pushing the tag starts **Checks** for that tag's exact commit. Native ARM64 and
 AMD64 tests and builds run in parallel with source audit, security checks and
-fuzzing. Wait for the entire tag workflow, including `Required checks`, to
+fuzzing. A separate job attests the exact binary archives and Corresponding
+Source downloaded from that same tag run. Wait for the entire tag workflow,
+including attestations and `Required checks`, to
 succeed. Then start publication from the protected main branch:
 
 ```bash
@@ -45,9 +48,25 @@ The workflow uses exact successful tag candidates retained for seven days.
 It verifies the signed tag object and version, source commit, run/attempt,
 archive digest, schema and architecture. Publication does not rebuild or
 repackage the archives and cannot fall back to main or another tag.
+Before preparation can reach the GPG signing job, `gh attestation verify`
+cryptographically verifies each archive against the canonical repository,
+Checks workflow, signed tag ref and commit, and GitHub-hosted runner identity.
+The verified certificate must also identify that exact run and attempt and a
+push event. Workflow-supplied predicate text is not trusted for these bindings.
+Missing provenance, verification errors and unavailable verification services
+stop preparation; there is no fallback to checksums alone.
 If candidates expired, rerun **all jobs** of the original tag push run, then retry
 publication. A partial rerun that leaves candidates from an earlier attempt is
 refused. A manual Checks run cannot produce release candidates.
+Tags created before the attestation job was added cannot gain this evidence by
+rerunning their older workflow. Publish a new reviewed version containing the
+job; existing release assets remain verifiable with their GPG signatures.
+
+Only the canonical tag-only attestation job receives `id-token: write` and
+`attestations: write`. It runs pinned download/attestation actions without a
+source checkout, build scripts, caches or release keys. PR/main checks retain
+read-only token permissions. Release preparation receives `attestations: read`;
+GPG signing and publication keep their existing permissions.
 
 Publication creates a draft, uploads all checked assets and publishes it.
 Retry a failed **publish job only** to reuse its already signed assets (retained
@@ -94,6 +113,37 @@ For automation, use GnuPG's machine-readable `VALIDSIG` status and require both
 the pinned primary fingerprint and an authorized artifact-signing subkey. Reject
 bad, revoked, expired or unknown signatures and missing checksum entries.
 Do not continue to checksum verification after a failed signature check.
+
+## Verify build provenance
+
+For releases built after provenance was introduced, verify the downloaded
+archive with a current [GitHub CLI](https://cli.github.com/manual/gh_attestation_verify)
+in addition to the GPG signature and checksum checks above. Set `VERSION` to the
+selected release and `COMMIT` to its full commit SHA from the authenticated
+release notes or verified signed tag:
+
+```bash
+gh attestation verify "supivpn-$VERSION-linux-arm64.tar.gz" \
+  --repo SupiVPN/supivpn --hostname github.com \
+  --cert-identity "https://github.com/SupiVPN/supivpn/.github/workflows/checks.yml@refs/tags/$VERSION" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --source-ref "refs/tags/$VERSION" --source-digest "$COMMIT" \
+  --signer-digest "$COMMIT" --deny-self-hosted-runners \
+  --predicate-type https://slsa.dev/provenance/v1
+```
+
+Use the AMD64 filename or `supivpn-source-$COMMIT.tar.gz` to verify those archives.
+Stop on verification failure. The CLI retrieves evidence from GitHub and verifies
+its Sigstore signatures, subject digest and certificate policy. Release
+preparation additionally binds the certificate's run/attempt to its selected
+successful Checks run.
+
+Provenance links these bytes to the tag's GitHub workflow execution. It does not
+prove that the source is safe, dependencies are harmless or builds are
+reproducible. GPG remains the release authority; attestations add evidence of
+build origin. The workflow uses the pinned
+[actions/attest](https://github.com/actions/attest) implementation of build
+provenance without publishing a container or using a persistent signing key.
 
 ## Bundle contract
 

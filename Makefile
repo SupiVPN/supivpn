@@ -10,6 +10,8 @@ GO ?= go
 DOCKER ?= docker
 ROOT := $(CURDIR)
 LOCAL := $(ROOT)/local
+PYTHON ?= $(if $(wildcard $(LOCAL)/dev-venv/bin/python3),$(LOCAL)/dev-venv/bin/python3,python3)
+PYYAML_VERSION := 6.0.3
 export GOPATH := $(LOCAL)/go
 export GOCACHE := $(LOCAL)/build-cache
 export GOTOOLCHAIN := local
@@ -21,14 +23,15 @@ TEST_VERBOSE ?=
 TIMEOUT ?= 300s
 FUZZ_TIME ?= 20s
 FUZZ_SAML_TIME ?= $(FUZZ_TIME)
-GOVULNCHECK_VERSION := v1.8.0
+GOVULNCHECK_VERSION := v1.9.0
 VULNCHECK := $(LOCAL)/tools/$(GOVULNCHECK_VERSION)/govulncheck
 OPENVPN_IMAGE ?= supivpn-openvpn-test:2.7.8-$(ARCH)
 XMLSEC_IMAGE ?= supivpn-xmlsec-test:$(ARCH)
 POSTGRES_IMAGE ?= postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
 POSTGRES_CONTAINER ?= supivpn-pg18-test
 POSTGRES_PORT ?= 55432
-ARCH ?= arm64
+POSTGRES_WAIT_TIMEOUT ?= 60
+ARCH ?= $(shell uname -m | sed -e 's/^x86_64$$/amd64/' -e 's/^aarch64$$/arm64/')
 ifneq ($(words $(ARCH)),1)
 $(error ARCH must be exactly one architecture)
 endif
@@ -47,14 +50,15 @@ unexport VERSION COMMIT
 tag: export SUPIVPN_TAG_VERSION := $(value VERSION)
 tag: export SUPIVPN_TAG_COMMIT := $(value COMMIT)
 
-.PHONY: help all prepare build build-all security-binaries-all agent controller profile migrate lambda bootstrap \
+.PHONY: help setup all prepare build build-all security-binaries-all agent controller profile migrate lambda bootstrap \
  test test-saml test-security vet integration test-all check fuzz fuzz-xml fuzz-saml test-xmlsec test-openvpn test-connect \
  xmlsec-image openvpn-image postgres-start postgres-stop test-db-restart \
  security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag
 
 help:
 	@printf '%s\n' \
-	 'build / all       Build Linux ARM64 binaries and Lambda ZIP; ARCH=amd64 is also supported' \
+	 'setup             Install project-local Python tools and download Go modules' \
+	 'build / all       Build Linux binaries for the host architecture; ARCH=arm64 or amd64 overrides it' \
 	 'build-all         Build both ARM64 and AMD64 into local/<arch>/' \
 	 'ci-test-coverage  Ensure integration tags retain all ordinary Go source and test files' \
 	 'prepare           Source audit -> unit/race -> vet -> build + manifest' \
@@ -83,6 +87,13 @@ help:
 
 all: build
 
+setup: | $(LOCAL)/go.mod
+	@test -x "$(LOCAL)/dev-venv/bin/python3" || python3 -m venv "$(LOCAL)/dev-venv"
+	@"$(LOCAL)/dev-venv/bin/python3" -m pip install --disable-pip-version-check 'PyYAML==$(PYYAML_VERSION)'
+	@$(GO) mod download
+	@$(GO) mod verify
+	@printf '%s\n' 'Setup complete. Run make test; make audit uses the local Python environment automatically.'
+
 build-all:
 	@$(MAKE) build ARCH=arm64
 	@$(MAKE) build ARCH=amd64
@@ -103,13 +114,13 @@ build agent controller profile migrate bootstrap lambda test ci-test-coverage \
  deps-verify deps-check test-xmlsec test-openvpn test-connect $(VULNCHECK): | $(LOCAL)/go.mod
 
 tag:
-	@python3 -B tools/github_release.py tag
+	@$(PYTHON) -B tools/github_release.py tag
 
 audit:
-	@python3 -B -m unittest discover -s tools -p 'test_*.py'
-	@python3 -B tools/release_notes.py --audit
-	@python3 -B tools/repository_audit.py
-	@python3 -B tools/check_language.py
+	@$(PYTHON) -B -m unittest discover -s tools -p 'test_*.py' -v
+	@$(PYTHON) -B tools/release_notes.py --audit
+	@$(PYTHON) -B tools/repository_audit.py
+	@$(PYTHON) -B tools/check_language.py
 
 build: agent controller profile migrate lambda
 	@cd "$(ROOT)" && $(GO) run ./cmd/supivpn-release-manifest -artifact-dir "$(BUILD_DIR)"
@@ -140,7 +151,7 @@ test:
 	@cd "$(ROOT)" && $(GO) test $(TEST_VERBOSE) -race -count=1 -timeout="$(TIMEOUT)" -run="$(RUN)" $(PKG)
 
 ci-test-coverage:
-	@python3 -B ci/check_test_coverage.py
+	@$(PYTHON) -B ci/check_test_coverage.py
 
 test-saml:
 	@$(MAKE) test PKG='./internal/saml ./internal/controller'
@@ -229,11 +240,12 @@ test-connect: agent
 	 "$(OPENVPN_IMAGE)" /test/connect.test -test.run '^TestOpenVPNConnectExpiryManual$$' -test.v -test.timeout 22m
 
 postgres-start:
-	@$(DOCKER) run --detach --rm --platform linux/$(ARCH) --name "$(POSTGRES_CONTAINER)" \
+	@container_id="$$($(DOCKER) run --detach --rm --platform linux/$(ARCH) --name "$(POSTGRES_CONTAINER)" \
 	 --label supivpn.disposable-test=true -p "127.0.0.1:$(POSTGRES_PORT):5432" \
 	 -e POSTGRES_DB=supivpn_test -e POSTGRES_HOST_AUTH_METHOD=trust \
 	 --health-cmd='pg_isready -U postgres -d supivpn_test' --health-interval=1s --health-timeout=3s --health-retries=30 \
-	 "$(POSTGRES_IMAGE)"
+	 "$(POSTGRES_IMAGE)")" && \
+	 $(PYTHON) -B tools/wait_container.py --docker "$(DOCKER)" --timeout "$(POSTGRES_WAIT_TIMEOUT)" "$$container_id"
 
 postgres-stop:
 	@test "$$($(DOCKER) inspect --format '{{index .Config.Labels "supivpn.disposable-test"}}' "$(POSTGRES_CONTAINER)")" = true || \
