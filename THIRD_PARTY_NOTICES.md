@@ -5,7 +5,7 @@ Original SupiVPN materials: AGPL-3.0-only. See [LICENSE](LICENSE) and [COPYRIGHT
 
 This document distinguishes original SupiVPN materials from third-party
 components. Third-party copyrights and license texts remain with their owners.
-Dependency inventory and packaging reviewed on 9 October 2026 against
+Dependency inventory and packaging reviewed on 20 October 2026 against
 `go.mod`, the retained license texts and the current packaging code.
 
 ## Original SupiVPN materials
@@ -105,30 +105,30 @@ cache. Different executables may compile different subsets of these modules.
 | Module | Version | Upstream license |
 | --- | --- | --- |
 | `github.com/aws/aws-lambda-go` | `v1.55.1` | Apache-2.0; MIT-0 for material identified by LICENSE-SUMMARY |
-| `github.com/aws/aws-sdk-go-v2` | `v1.47.2` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/config` | `v1.33.8` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/credentials` | `v1.20.8` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/feature/ec2/imds` | `v1.20.2` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/ec2` | `v1.338.3` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/secretsmanager` | `v1.50.3` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2` | `v1.47.3` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/config` | `v1.33.9` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/credentials` | `v1.20.9` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/feature/ec2/imds` | `v1.20.3` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/ec2` | `v1.339.0` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/secretsmanager` | `v1.50.5` | Apache-2.0 |
 | `github.com/beevik/etree` | `v1.8.1` | BSD-2-Clause |
 | `github.com/jackc/pgx/v5` | `v5.11.0` | MIT |
-| `golang.org/x/sys` | `v0.48.0` | BSD-3-Clause |
-| `github.com/aws/aws-sdk-go-v2/internal/configsources` | `v1.5.5` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/internal/endpoints/v2` | `v2.8.5` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/internal/v4a` | `v1.5.5` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding` | `v1.13.20` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/internal/presigned-url` | `v1.14.5` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/signin` | `v1.10.3` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/sso` | `v1.38.3` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/ssooidc` | `v1.43.3` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/sts` | `v1.51.3` | Apache-2.0 |
-| `github.com/aws/smithy-go` | `v1.28.4` | Apache-2.0 |
+| `golang.org/x/sys` | `v0.49.0` | BSD-3-Clause |
+| `github.com/aws/aws-sdk-go-v2/internal/configsources` | `v1.5.6` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/internal/endpoints/v2` | `v2.8.6` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/internal/v4a` | `v1.5.6` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding` | `v1.13.21` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/internal/presigned-url` | `v1.14.6` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/signin` | `v1.10.4` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/sso` | `v1.38.4` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/ssooidc` | `v1.43.4` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/sts` | `v1.51.4` | Apache-2.0 |
+| `github.com/aws/smithy-go` | `v1.28.5` | Apache-2.0 |
 | `github.com/jackc/pgpassfile` | `v1.0.0` | MIT |
 | `github.com/jackc/pgservicefile` | `v0.0.0-20240606120523-5a60cdf6a761` | MIT |
 | `github.com/jackc/puddle/v2` | `v2.2.3` | MIT |
-| `golang.org/x/sync` | `v0.23.0` | BSD-3-Clause |
-| `golang.org/x/text` | `v0.42.0` | BSD-3-Clause |
+| `golang.org/x/sync` | `v0.24.0` | BSD-3-Clause |
+| `golang.org/x/text` | `v0.43.0` | BSD-3-Clause |
 
 AWS SDK and Smithy also contain Go-derived subcomponents under BSD terms.
 The AWS Lambda module's own LICENSE-SUMMARY distinguishes its Apache-2.0 code
@@ -143,7 +143,7 @@ their source paths listed. It does not relicense these components.
 ## Build, test and deployment components
 
 The Go runtime and standard library are compiled into the executables.
-`THIRD_PARTY_LICENSES.txt` includes the Go 1.27.2 LICENSE/PATENTS and discovered
+`THIRD_PARTY_LICENSES.txt` includes the Go 1.27.3 LICENSE/PATENTS and discovered
 source-tree LICENSE, NOTICE and COPYING texts, with their upstream paths.
 This conservative inventory includes toolchain components beyond those compiled
 into a particular executable. Recheck it when changing the build toolchain.

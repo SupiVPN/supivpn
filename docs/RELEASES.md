@@ -1,7 +1,8 @@
 # Release delivery
 
 SupiVPN publishes Linux ARM64 and AMD64 bundles and Corresponding Source on
-[GitHub Releases](https://github.com/SupiVPN/supivpn/releases). ARM64 is the default.
+[GitHub Releases](https://github.com/SupiVPN/supivpn/releases). Both architectures
+are tested natively; local Make commands default to the host architecture.
 
 ## Create a release
 

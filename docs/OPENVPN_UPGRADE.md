@@ -41,8 +41,9 @@ SHA256:  c070d1d2440b5a6fca6c2c68645c98cd492116ac36ef4f0946177115532c8e36
 ```
 
 The same source checksum is pinned in [ci/Dockerfile](../ci/Dockerfile).
-CI images contain Go 1.27.2 and PostgreSQL 18.6 with official base images pinned
-by digest. Runtime and build dependencies are checked independently.
+This review used Go 1.27.2 and PostgreSQL 18.6 with official base images pinned
+by digest. See [ci/Dockerfile](../ci/Dockerfile) for the current pins and
+[dependency updates](DEPENDENCY_UPGRADE.md) for subsequent toolchain changes.
 
 ## Validation
 
