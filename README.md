@@ -5,6 +5,7 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/SupiVPN/supivpn?style=flat-square&logo=go&logoColor=white)](go.mod)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-2563eb?style=flat-square)](LICENSE)
 [![Linux ARM64 and AMD64](https://img.shields.io/badge/linux-arm64%20%7C%20amd64-475569?style=flat-square&logo=linux&logoColor=white)](docs/RELEASES.md)
+[![Sponsor](https://img.shields.io/badge/Sponsor-enotf-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/enotf)
 
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 Licensed under [AGPL-3.0-only](LICENSE). Copyright ownership: [COPYRIGHT.md](COPYRIGHT.md).
@@ -80,6 +81,13 @@ can be submitted directly as a pull request without installing the toolchain.
 Pick a [good first issue](https://github.com/SupiVPN/supivpn/labels/good%20first%20issue)
 or send a small fix. [BUILD.md](BUILD.md) lists the focused test commands;
 hosted CI runs the full architecture matrix.
+
+## Support development
+
+You can support SupiVPN development and maintenance through
+[GitHub Sponsors](https://github.com/sponsors/enotf).
+Contributions are voluntary and do not include services, priority support,
+or exclusive features.
 
 ## Deploying SupiVPN
 
