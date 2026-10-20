@@ -13,6 +13,36 @@ import signatures
 KEY_ENV = "SUPIVPN_ARTIFACT_SIGNING_KEY"
 PASSPHRASE = "SUPIVPN_ARTIFACT_SIGNING_PASSPHRASE"
 
+FAILURE_STATUSES = frozenset({
+    b"BAD_PASSPHRASE", b"MISSING_PASSPHRASE", b"NO_SECKEY", b"KEYEXPIRED",
+    b"KEYREVOKED", b"INV_SGNR", b"NODATA", b"BADARMOR", b"IMPORT_PROBLEM",
+    b"PINENTRY_LAUNCHED",
+})
+
+
+def failure_detail(stderr):
+    """Report only known machine-status names and bounded numeric error codes."""
+    statuses, codes = set(), set()
+    for line in stderr.splitlines():
+        if not line.startswith(b"[GNUPG:] "):
+            continue
+        fields = line[len(b"[GNUPG:] "):].split()
+        if not fields:
+            continue
+        if fields[0] in FAILURE_STATUSES:
+            statuses.add(fields[0].decode("ascii"))
+        if (fields[0] in {b"ERROR", b"FAILURE"} and len(fields) == 3
+                and len(fields[2]) <= 10 and fields[2].isdigit()):
+            number = int(fields[2])
+            if 0 < number <= 0xFFFFFFFF:
+                codes.add(number)
+    details = []
+    if statuses:
+        details.append("status=" + ",".join(sorted(statuses)))
+    if codes:
+        details.append("gpg-errors=" + ",".join(str(code) for code in sorted(codes)[:8]))
+    return "; ".join(details) or "no recognized GnuPG failure status"
+
 
 def secret_subkey(records, policy):
     """Reject a usable primary, extra private keys, or the tag-signing subkey."""
@@ -70,16 +100,22 @@ def sign(manifest, policy):
         home.chmod(0o700)
         (home / "gpg-agent.conf").write_text("default-cache-ttl 0\nmax-cache-ttl 0\n")
         args = ["gpg", "--no-options", "--homedir", directory, "--batch", "--no-tty",
-                "--no-auto-key-retrieve", "--no-auto-key-import"]
-        def run(extra, data=None):
-            result = subprocess.run([*args, *extra], input=data, capture_output=True, timeout=60, env=env)
-            a.require(result.returncode == 0, "Artifact signing failed; inspect secret configuration and expiry")
+                "--no-auto-key-retrieve", "--no-auto-key-import", "--status-fd=2"]
+        def run(stage, extra, data=None):
+            try:
+                result = subprocess.run([*args, *extra], input=data, capture_output=True, timeout=60, env=env)
+            except subprocess.TimeoutExpired:
+                raise a.ValidationError("Artifact signing timed out at " + stage) from None
+            except OSError:
+                raise a.ValidationError("Cannot execute GnuPG at " + stage) from None
+            a.require(result.returncode == 0,
+                      "Artifact signing failed at " + stage + ": " + failure_detail(result.stderr))
             return result.stdout
         try:
-            run(["--import"], private.encode())
+            run("key-import", ["--import"], private.encode())
             private = ""
-            key = secret_subkey(run(["--with-colons", "--list-secret-keys"]).decode(), policy)
-            raw = run(["--pinentry-mode", "loopback", "--passphrase-fd", "0",
+            key = secret_subkey(run("key-inventory", ["--with-colons", "--list-secret-keys"]).decode(), policy)
+            raw = run("checksum-signing", ["--pinentry-mode", "loopback", "--passphrase-fd", "0",
                        "--local-user", key + "!", "--digest-algo", "SHA512",
                        "--armor", "--detach-sign", "--output", "-", str(manifest)],
                       (passphrase + "\n").encode())
