@@ -63,7 +63,7 @@ class ReleaseTests(unittest.TestCase):
             data["candidate.json"] = json.dumps(record).encode()
             self.candidates[arch] = (data, record)
 
-    def prepared(self):
+    def prepared(self, provenance=None):
         output = self.root / "prepared"
         notes = release.release_notes.generate(V, C, C + "\tImprove release verification\n")
         with patch.object(release, "ROOT", self.root), \
@@ -72,10 +72,37 @@ class ReleaseTests(unittest.TestCase):
                 patch.object(release.release_identity, "release_sources", return_value=self.sources), \
                 patch.object(source_archive, "source_files", return_value=SOURCE), \
                 patch.object(release, "fetch_candidate", side_effect=lambda run, commit, version, oid, arch: self.candidates[arch]), \
+                patch.object(release, "verify_provenance", side_effect=provenance or self.check_provenance) as attest, \
                 patch.object(release.tag, "git", return_value=result(out=signed_tag(V, C, notes))), \
                 contextlib.redirect_stdout(io.StringIO()):
             release.prepare(V, output)
+        self.assertEqual(attest.call_count, 3)
         return output
+
+    def check_provenance(self, path, commit, version, run):
+        self.assertEqual((commit, version, run), (C, V, RUN))
+        expected = {name: raw for files, _ in self.candidates.values() for name, raw in files.items()
+                    if name.endswith(".tar.gz")}
+        self.assertEqual(path.read_bytes(), expected[path.name])
+
+    def test_source_provenance_failure_stops_before_unpacking_or_preparing_manifest(self):
+        def reject_source(path, *args):
+            if path.name.startswith("supivpn-source-"):
+                raise a.ValidationError("Source provenance rejected")
+        with patch.object(a, "unpack") as unpack, self.assertRaises(a.ValidationError):
+            self.prepared(reject_source)
+        unpack.assert_not_called()
+        self.assertFalse((self.root / "prepared/SHA256SUMS").exists())
+        self.assertFalse((self.root / "prepared/release-metadata.json").exists())
+
+    def test_second_architecture_provenance_failure_does_not_prepare_a_release(self):
+        def reject_amd64(path, *args):
+            if "linux-amd64" in path.name:
+                raise a.ValidationError("AMD64 provenance rejected")
+        with self.assertRaises(a.ValidationError):
+            self.prepared(reject_amd64)
+        self.assertFalse((self.root / "prepared/SHA256SUMS").exists())
+        self.assertFalse((self.root / "prepared/release-metadata.json").exists())
 
     def test_prepare_preserves_binaries_and_attaches_matching_source(self):
         output = self.prepared()

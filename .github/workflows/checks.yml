@@ -259,14 +259,39 @@ jobs:
       - name: Native OpenVPN interoperability and failover
         run: make test-openvpn
 
+  attest:
+    name: Attest release candidates
+    needs: [scope, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'SupiVPN/supivpn'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        arch: [arm64, amd64]
+    steps:
+      # Only immutable artifacts from this authenticated tag run; no source execution.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: candidate-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}
+          path: candidate
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: candidate/*.tar.gz
+          create-storage-record: false
+
   required:
     name: Required checks
-    needs: [scope, audit, tests, security, fuzz, build, openvpn]
+    needs: [scope, audit, tests, security, fuzz, build, openvpn, attest]
     if: always()
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 2
     env:
       RESULTS: ${{ toJSON(needs) }}
+      ATTEST_EXPECTED: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'SupiVPN/supivpn' }}
     steps:
       - run: |
           python3 - <<'PY'
@@ -280,4 +305,8 @@ jobs:
           expected = "success" if code == "true" else "skipped"
           for job in ("tests", "security", "fuzz", "build", "openvpn"):
               assert needs[job]["result"] == expected, job + " did not satisfy the required checks"
+          attest = os.environ["ATTEST_EXPECTED"]
+          assert attest in {"true", "false"}, "Missing attestation scope"
+          expected = "success" if attest == "true" else "skipped"
+          assert needs["attest"]["result"] == expected, "Attestation did not satisfy the required checks"
           PY

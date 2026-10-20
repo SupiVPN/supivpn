@@ -62,7 +62,7 @@ class WorkflowTests(unittest.TestCase):
     def workflow(self, name):
         return yaml.load((ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader)
 
-    def test_checks_do_not_write_or_run_on_branch_push_and_use_both_native_architectures(self):
+    def test_regular_checks_are_read_only_and_use_both_native_architectures(self):
         config = self.workflow("checks.yml")
         self.assertEqual(config["permissions"], {"contents": "read"})
         self.assertEqual(config["on"]["push"]["branches"], ["main"])
@@ -73,9 +73,10 @@ class WorkflowTests(unittest.TestCase):
         for name in ("tests", "build", "openvpn"):
             self.assertEqual({x["runner"] for x in config["jobs"][name]["strategy"]["matrix"]["include"]},
                              {"ubuntu-24.04-arm", "ubuntu-24.04"})
-        for job in config["jobs"].values():
+        for name, job in config["jobs"].items():
             self.assertNotIn("environment", job)
-            self.assertNotIn("permissions", job)
+            if name != "attest":
+                self.assertNotIn("permissions", job)
         service = config["jobs"]["tests"]["services"]["postgres"]
         self.assertEqual(service["ports"], ["127.0.0.1:55432:5432"])
 
@@ -92,6 +93,23 @@ class WorkflowTests(unittest.TestCase):
                                  "candidate-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}")
         self.assertNotIn("secrets.", str(jobs))
 
+    def test_only_canonical_tag_artifacts_can_be_attested(self):
+        job = self.workflow("checks.yml")["jobs"]["attest"]
+        self.assertEqual(job["if"], "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')"
+                         " && github.repository == 'SupiVPN/supivpn'")
+        self.assertEqual(set(job["needs"]), {"scope", "build"})
+        self.assertEqual(job["permissions"], {"contents": "read", "id-token": "write", "attestations": "write"})
+        self.assertEqual(job["strategy"]["matrix"]["arch"], ["arm64", "amd64"])
+        # No checkout, shell, cache restore, cross-run download or private signing key.
+        download, attest = job["steps"]
+        self.assertEqual(set(download), {"uses", "with"})
+        self.assertTrue(download["uses"].startswith("actions/download-artifact@"))
+        self.assertEqual(download["with"], {"name": "candidate-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}",
+                                            "path": "candidate"})
+        self.assertEqual(set(attest), {"uses", "with"})
+        self.assertTrue(attest["uses"].startswith("actions/attest@"))
+        self.assertEqual(attest["with"], {"subject-path": "candidate/*.tar.gz", "create-storage-record": "false"})
+
     def test_independent_checks_run_in_parallel_with_a_complete_final_gate(self):
         jobs = self.workflow("checks.yml")["jobs"]
         executable = {"tests", "security", "fuzz", "build", "openvpn"}
@@ -101,37 +119,41 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(jobs[name]["needs"], "scope")
             self.assertEqual(jobs[name]["if"], "needs.scope.outputs.code == 'true'")
         gate = jobs["required"]
-        self.assertEqual(set(gate["needs"]), executable | {"scope", "audit"})
+        self.assertEqual(set(gate["needs"]), executable | {"scope", "audit", "attest"})
+        self.assertEqual(gate["env"]["ATTEST_EXPECTED"], "${{ " + jobs["attest"]["if"] + " }}")
         self.assertEqual(gate["if"], "always()")
         self.assertEqual(gate["name"], "Required checks")
         # Execute the actual gate against success, skips, failures and cancellations.
         command = gate["steps"][0]["run"]
         self.assertTrue(command.startswith("python3 - <<'PY'\n") and command.endswith("PY\n"))
         program = command.split("\n", 1)[1].rsplit("PY\n", 1)[0]
-        def passed(results):
+        def passed(results, attest):
             return subprocess.run([sys.executable, "-c", program],
-                                  env=dict(os.environ, RESULTS=json.dumps(results)),
+                                  env=dict(os.environ, RESULTS=json.dumps(results), ATTEST_EXPECTED=attest),
                                   capture_output=True, timeout=5).returncode == 0
-        for code in ("true", "false"):
+        for code, attest in (("true", "true"), ("true", "false"), ("false", "false")):
             good = {name: {"result": "success" if code == "true" else "skipped"}
                     for name in executable}
             good.update(scope={"result": "success", "outputs": {"code": code}},
-                        audit={"result": "success"})
-            self.assertTrue(passed(good))
+                        audit={"result": "success"},
+                        attest={"result": "success" if attest == "true" else "skipped"})
+            self.assertTrue(passed(good, attest))
             for name in gate["needs"]:
-                for result in ("failure", "cancelled", "skipped"):
+                for result in ("success", "failure", "cancelled", "skipped"):
                     if result == good[name]["result"]:
                         continue
                     bad = dict(good, **{name: dict(good[name], result=result)})
-                    self.assertFalse(passed(bad), (code, name, result))
+                    self.assertFalse(passed(bad, attest), (code, attest, name, result))
             for code_value in ("", "unknown", None):
                 bad = dict(good, scope={"result": "success", "outputs": {"code": code_value}})
-                self.assertFalse(passed(bad))
+                self.assertFalse(passed(bad, attest))
+            self.assertFalse(passed(good, ""))
 
     def test_only_environment_approved_publication_can_write(self):
         config = self.workflow("release.yml")
         self.assertEqual(set(config["on"]), {"workflow_dispatch"})
-        self.assertEqual(config["jobs"]["prepare"]["permissions"], {"contents": "read", "actions": "read"})
+        self.assertEqual(config["jobs"]["prepare"]["permissions"],
+                         {"contents": "read", "actions": "read", "attestations": "read"})
         publish = config["jobs"]["publish"]
         signer = config["jobs"]["sign"]
         self.assertEqual(signer["environment"], "release")
