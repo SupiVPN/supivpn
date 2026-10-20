@@ -1,0 +1,15 @@
+{
+  "logging": {"output": "stderr"},
+  "public_url": "https://login.example.test",
+  "database_tls": {"mode": "require"},
+  "pending_seconds": 180,
+  "gateway": {
+    "api_id": "replace-with-api-id",
+    "account_id": "123456789012",
+    "stage": "$default",
+    "domains": ["login.example.test", "agents.example.test"],
+    "agent_principals": {
+      "arn:aws:sts::123456789012:assumed-role/supivpn-agent/i-0123456789abcdef0": "node-a"
+    }
+  }
+}

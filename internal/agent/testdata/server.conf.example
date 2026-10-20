@@ -1,0 +1,43 @@
+# OpenVPN Community 2.7.8 with management interface version >= 5.
+# Run on the separate SupiVPN host, after supivpn has opened its Unix socket.
+port 1194
+proto udp4
+dev supivpn0
+dev-type tun
+topology subnet
+server 10.203.0.0 255.255.255.0 nopool
+max-clients 16
+max-routes-per-client 1
+script-security 2
+learn-address "/opt/supivpn/supivpn -learn-address"
+
+# Deliver server certificate and key using the deployment's secret mechanism.
+cert /etc/supivpn/tls/crt.pem
+extra-certs /etc/supivpn/tls/chain.pem
+key /etc/supivpn/tls/key.pem
+tls-crypt-v2 /var/lib/supivpn/tls-crypt-v2-server.key
+ca /etc/ssl/certs/ca-certificates.crt
+dh none
+tls-version-min 1.2
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+allow-compression no
+disable-dco
+
+verify-client-cert none
+auth-user-pass-optional
+duplicate-cn
+management /run/supivpn/management.sock unix
+management-client
+management-client-auth
+management-hold
+
+# Both sides need time for browser login/MFA.
+hand-window 180
+reneg-sec 600 600
+keepalive 10 60
+persist-key
+persist-tun
+
+# Isolated protocol-test fixture; deployment must configure routing and forwarding.
+# No redirect-gateway, DNS pushes or client-to-client.
+verb 2

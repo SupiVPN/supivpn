@@ -1,0 +1,11 @@
+{
+  "release_signers": [
+    "A43155B36661034A4FA89E373681E6DFB83B35E2"
+  ],
+  "tag_signing_subkeys": [
+    "6C7A3DDF51331D58E0C25EDCFAC49FA8FBB7640F"
+  ],
+  "artifact_signing_subkeys": [
+    "867CC295DFBEE8E0888F7AFF113339EEAC58A9C5"
+  ]
+}

@@ -1,0 +1,19 @@
+version = 1
+
+# Released SQL bytes are immutable because databases store their checksums.
+# This annotation supersedes historical licensing headers in these files.
+[[annotations]]
+path = [
+  "internal/postgres/migrations/001_auth.sql",
+  "internal/postgres/migrations/002_profiles.sql",
+  "internal/postgres/migrations/003_sessions.sql",
+  "internal/postgres/migrations/004_renewals.sql",
+  "internal/postgres/migrations/005_recovery.sql",
+  "internal/postgres/migrations/006_session_expiry.sql",
+  "internal/postgres/migrations/007_safe_recovery.sql",
+  "internal/postgres/migrations/008_audit_username.sql",
+  "internal/postgres/migrations/009_component_isolation.sql",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Stanislav Kazachkov (SupiVPN)"
+SPDX-License-Identifier = "AGPL-3.0-only"

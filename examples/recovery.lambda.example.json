@@ -1,0 +1,6 @@
+{
+  "logging": {"output": "stderr"},
+  "database_tls": {"mode": "require"},
+  "node_ids": ["i-0123456789abcdef0", "i-0123456789abcdef1"],
+  "automatic_recovery": true
+}

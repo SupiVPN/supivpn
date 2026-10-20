@@ -1,0 +1,36 @@
+{
+  "logging": {
+    "output": "file",
+    "file": "/var/log/supivpn/agent.jsonl",
+    "retention_days": 7,
+    "max_size_mb": 10,
+    "max_files": 10
+  },
+  "public_url": "https://supivpn.example.test:8443",
+  "listen": ":8443",
+  "tls_certificate": "/etc/supivpn/tls/crt.pem",
+  "tls_chain": "/etc/supivpn/tls/chain.pem",
+  "tls_private_key": "/etc/supivpn/tls/key.pem",
+  "idp_metadata": "/etc/supivpn/idp-metadata.xml",
+  "management_socket": "/run/supivpn/management.sock",
+  "allowed_subjects": [],
+  "pending_seconds": 180,
+  "session_seconds": 43200,
+  "max_connections_per_user": 1,
+  "saml_groups_attribute": "groups",
+  "vpn_network": "10.203.0.0/24",
+  "group_pools": [
+    {
+      "group_name": "admins-vpn",
+      "priority": 10,
+      "max_connections_per_user": 2,
+      "cidr": "10.203.0.0/26"
+    },
+    {
+      "group_name": "engineers-production-vpn",
+      "priority": 20,
+      "session_seconds": 3600,
+      "cidr": "10.203.0.64/26"
+    }
+  ]
+}

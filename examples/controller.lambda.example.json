@@ -1,0 +1,35 @@
+{
+  "logging": {"output": "stderr"},
+  "public_url": "https://login.example.test",
+  "database_tls": {"mode": "require"},
+  "idp_metadata": "/opt/idp-metadata.xml",
+  "saml_groups_attribute": "groups",
+  "groups": [
+    {
+      "name": "admins-vpn",
+      "priority": 10,
+      "max_connections_per_user": 2
+    },
+    {
+      "name": "engineers-production-vpn",
+      "priority": 20,
+      "session_seconds": 3600
+    }
+  ],
+  "pending_seconds": 180,
+  "session_seconds": 43200,
+  "max_connections_per_user": 1,
+  "profile": {
+    "endpoint": "vpn.example.test",
+    "template_file": "/var/task/client.ovpn.template"
+  },
+  "gateway": {
+    "api_id": "replace-with-api-id",
+    "account_id": "123456789012",
+    "stage": "$default",
+    "domains": [
+      "login.example.test"
+    ],
+    "agent_principals": {}
+  }
+}

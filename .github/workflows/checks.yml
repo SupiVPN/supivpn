@@ -1,0 +1,283 @@
+name: Checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scope:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      tag_oid: ${{ steps.tag.outputs.tag_oid }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: tag
+        name: Authenticate release tag before running release checks
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          SUPIVPN_GPG_PUBLIC_KEY: ${{ vars.SUPIVPN_GPG_PUBLIC_KEY }}
+        run: python3 -B ci/github_candidate.py verify-tag
+      - id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 -B ci/github_scope.py
+
+  audit:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml gnupg
+      - run: make audit
+
+  tests:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
+        env:
+          POSTGRES_DB: supivpn_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - '127.0.0.1:55432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres -d supivpn_test"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            local/go/pkg/mod
+            local/build-cache
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xmlsec1
+      - name: Unit, race, PostgreSQL and XMLSec tests
+        env:
+          SUPIVPN_TEST_POSTGRES_URL: postgres://postgres@127.0.0.1:55432/supivpn_test?sslmode=disable
+          SUPIVPN_TEST_POSTGRES_ALLOW_RESET: '1'
+          SUPIVPN_TEST_XMLSEC: /usr/bin/xmlsec1
+        run: make ci-test-coverage integration TIMEOUT=600s
+
+  security:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            local/go/pkg/mod
+            local/build-cache
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-
+      - run: make vet deps-verify security-source
+      - name: Dependency freshness
+        if: github.event_name == 'schedule'
+        run: make deps-check
+
+  fuzz:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fuzz-xml, fuzz-saml]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            local/go/pkg/mod
+            local/build-cache
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-
+      - name: Bounded fuzzing
+        env:
+          TARGET: ${{ matrix.target }}
+          FUZZ_TIME: ${{ github.event_name == 'schedule' && '5000000x' || '500000x' }}
+          FUZZ_SAML_TIME: ${{ github.event_name == 'schedule' && '1000000x' || '100000x' }}
+        run: make "$TARGET" TIMEOUT=600s
+
+  build:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      ARCH: ${{ matrix.arch }}
+      SUPIVPN_TAG_OID: ${{ needs.scope.outputs.tag_oid }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            local/go/pkg/mod
+            local/build-cache
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-
+      - name: Build and scan release binaries
+        run: make security-binaries
+      - name: Prepare release candidate
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'SupiVPN/supivpn'
+        run: python3 -B ci/github_candidate.py
+      - name: Retain candidate for the complete workflow gate
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'SupiVPN/supivpn'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: candidate-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}
+          path: out/github/${{ matrix.arch }}/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  openvpn:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            local/go/pkg/mod
+            local/build-cache
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}-${{ strategy.job-index || 0 }}-
+            go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}-
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build isolated OpenVPN test image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ci
+          load: true
+          push: false
+          tags: supivpn-openvpn-test:2.7.8-${{ matrix.arch }}
+          cache-from: type=gha,scope=toolchain-${{ matrix.arch }}
+          cache-to: type=gha,scope=toolchain-${{ matrix.arch }},mode=max
+      - name: Native OpenVPN interoperability and failover
+        run: make test-openvpn
+
+  required:
+    name: Required checks
+    needs: [scope, audit, tests, security, fuzz, build, openvpn]
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 2
+    env:
+      RESULTS: ${{ toJSON(needs) }}
+    steps:
+      - run: |
+          python3 - <<'PY'
+          import json
+          import os
+          needs = json.loads(os.environ["RESULTS"])
+          assert needs["scope"]["result"] == "success", "Scope check did not succeed"
+          assert needs["audit"]["result"] == "success", "Audit did not succeed"
+          code = needs["scope"]["outputs"].get("code")
+          assert code in {"true", "false"}, "Missing verification scope"
+          expected = "success" if code == "true" else "skipped"
+          for job in ("tests", "security", "fuzz", "build", "openvpn"):
+              assert needs[job]["result"] == expected, job + " did not satisfy the required checks"
+          PY

@@ -1,0 +1,8 @@
+* @enotf
+/.github/ @enotf
+/ci/ @enotf
+/tools/ @enotf
+/internal/saml/ @enotf
+/internal/postgres/migrations/ @enotf
+/LICENSE @enotf
+/COPYRIGHT.md @enotf
