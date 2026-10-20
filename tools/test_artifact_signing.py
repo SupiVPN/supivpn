@@ -13,6 +13,54 @@ import artifacts as a
 import artifact_signing as signing
 
 
+class FailureDiagnosticTests(unittest.TestCase):
+    def test_only_allowlisted_status_names_and_numeric_codes_are_reported(self):
+        private_text = b"synthetic-sensitive-payload"
+        diagnostic = signing.failure_detail(
+            b"gpg: " + private_text + b"\n"
+            b"[GNUPG:] IMPORT_PROBLEM 0 " + private_text + b"\n"
+            b"[GNUPG:] ERROR " + private_text + b" 67108949\n"
+            b"[GNUPG:] FAILURE " + private_text + b" 67108949\n"
+            b"[GNUPG:] BAD_PASSPHRASE " + private_text + b"\n"
+            b"[GNUPG:] UNKNOWN_STATUS " + private_text + b"\n"
+        )
+        self.assertEqual(diagnostic,
+                         "status=BAD_PASSPHRASE,IMPORT_PROBLEM; gpg-errors=67108949")
+        self.assertNotIn(private_text.decode(), diagnostic)
+
+    def test_malformed_and_freeform_diagnostics_cannot_escape(self):
+        for stderr in (
+            b"gpg: arbitrary sensitive text",
+            b"[GNUPG:] FAILURE arbitrary sensitive-text",
+            b"[GNUPG:] ERROR arbitrary -1",
+            b"[GNUPG:] ERROR arbitrary 4294967296",
+            b"[GNUPG:] ERROR arbitrary " + b"9" * 10000,
+            b"[GNUPG:] ERROR arbitrary 123 extra",
+            b"[GNUPG:] \xff sensitive-text",
+            b"",
+        ):
+            with self.subTest(stderr=stderr[:40]):
+                self.assertEqual(signing.failure_detail(stderr),
+                                 "no recognized GnuPG failure status")
+
+    def test_failed_import_reports_stage_without_echoing_input_or_child_output(self):
+        private = "-----BEGIN PGP PRIVATE KEY BLOCK-----\nsynthetic-private-material"
+        password = "test-only-passphrase"
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory).resolve() / "SHA256SUMS"
+            manifest.write_bytes(b"synthetic test")
+            failed = subprocess.CompletedProcess([], 2, private.encode(), (
+                password + "\n[GNUPG:] IMPORT_PROBLEM 0 synthetic-key\n"
+            ).encode())
+            with patch.dict(os.environ, {signing.KEY_ENV: private, signing.PASSPHRASE: password}), \
+                    patch.object(signing.subprocess, "run", return_value=failed), \
+                    self.assertRaisesRegex(a.ValidationError, "at key-import: status=IMPORT_PROBLEM") as caught:
+                signing.sign(manifest, {})
+            self.assertNotIn(private, str(caught.exception))
+            self.assertNotIn(password, str(caught.exception))
+            self.assertFalse(manifest.with_name("SHA256SUMS.asc").exists())
+
+
 class InventoryTests(unittest.TestCase):
     def test_private_primary_other_subkey_and_hardware_reference_are_rejected(self):
         primary, ci, tag = "A" * 40, "B" * 40, "C" * 40
@@ -113,6 +161,9 @@ class RealSigningTests(unittest.TestCase):
                 manifest = Path(directory) / "SHA256SUMS"
                 manifest.write_bytes(b"synthetic test")
                 with patch.dict(os.environ, {signing.KEY_ENV: private, signing.PASSPHRASE: password}), \
-                        self.assertRaises(a.ValidationError):
+                        self.assertRaises(a.ValidationError) as caught:
                     signing.sign(manifest, self.policy)
+                if private == self.private:
+                    self.assertIn("at checksum-signing:", str(caught.exception))
+                    self.assertNotIn(password, str(caught.exception))
                 self.assertFalse(manifest.with_name("SHA256SUMS.asc").exists())
