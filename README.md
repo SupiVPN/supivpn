@@ -1,5 +1,11 @@
 # SupiVPN
 
+[![Checks](https://img.shields.io/github/actions/workflow/status/SupiVPN/supivpn/checks.yml?branch=main&event=push&style=flat-square&logo=github&label=checks)](https://github.com/SupiVPN/supivpn/actions/workflows/checks.yml)
+[![Latest release](https://img.shields.io/github/v/release/SupiVPN/supivpn?style=flat-square&color=16a34a&label=release)](https://github.com/SupiVPN/supivpn/releases/latest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/SupiVPN/supivpn?style=flat-square&logo=go&logoColor=white)](go.mod)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-2563eb?style=flat-square)](LICENSE)
+[![Linux ARM64 and AMD64](https://img.shields.io/badge/linux-arm64%20%7C%20amd64-475569?style=flat-square&logo=linux&logoColor=white)](docs/RELEASES.md)
+
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 Licensed under [AGPL-3.0-only](LICENSE). Copyright ownership: [COPYRIGHT.md](COPYRIGHT.md).
 
