@@ -49,6 +49,7 @@ type agent struct {
 	now          func() time.Time
 	pools        *poolAllocator
 	nextRevision uint64
+	reconcileDue time.Time
 	remote       *remoteAgent
 }
 
@@ -117,14 +118,20 @@ func (a *agent) denyLocked(e clientEvent) {
 }
 
 // A successful kill command is not proof of disconnection. Keep the IP/slot
-// until DISCONNECT; an unresponsive daemon must not retain an expired grant.
+// until DISCONNECT or a complete status snapshot confirms absence.
 func (a *agent) closeClientLocked(c *connection) {
     if !c.closeBy.IsZero() { return }
     c.closing = true
     c.closeBy = a.now().Add(30*time.Second)
     delete(a.tickets, c.ticket)
-    if a.commandLocked(fmt.Sprintf("client-kill %d", c.cid)) != nil {
-        a.management.close()
+    if err := a.commandLocked(fmt.Sprintf("client-kill %d", c.cid)); err != nil {
+        // The CID may have disappeared without DISCONNECT. A rejection alone
+        // is not proof; retain the slot until the ordered snapshot is handled.
+        if errors.Is(err, errManagementRejected) {
+            _ = a.management.requestStatus() // Closes management on uncertainty.
+        } else {
+            a.management.close()
+        }
     }
 }
 
@@ -210,6 +217,15 @@ func (a *agent) handleEvent(e clientEvent) {
 		} else {
 			a.management.close()
 		}
+	case "STATUS":
+		for cid, c := range a.connections {
+			if _, exists := e.clients[cid]; !exists {
+				// The daemon no longer owns this CID, even if it never emitted
+				// DISCONNECT for the abandoned handshake. Use normal cancellation.
+				a.logTunnelEvent("vpn.disconnected", c)
+				a.removeLocked(c)
+			}
+		}
 	}
 }
 
@@ -246,7 +262,7 @@ func (a *agent) expire() {
 		if c.sessionValid(a.now()) {
 			continue
 		}
-		// Keep the lease reserved until DISCONNECT confirms the old client is gone.
+		// Keep the lease reserved until the daemon confirms the old client is gone.
 		// Kill both an abandoned pending handshake and an expired active session.
         a.closeClientLocked(c)
 		if !a.readyLocked() { return }
@@ -265,11 +281,28 @@ func (a *agent) events(ctx context.Context, m *management) {
 			}
 			a.handleEvent(e)
 		case <-ticker.C:
-			a.expire()
+			if !a.reconcile() {
+				a.expire()
+			}
 		case <-ctx.Done():
 			return
 		case <-m.done:
 			return
 		}
 	}
+}
+
+// Periodically reconcile daemon-owned CIDs. Status is delivered through the
+// event queue, so all preceding connection events are handled before cleanup.
+func (a *agent) reconcile() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.readyLocked() || len(a.connections) == 0 || a.now().Before(a.reconcileDue) {
+		return false
+	}
+	a.reconcileDue = a.now().Add(5 * time.Second)
+	if err := a.management.requestStatus(); err != nil {
+		a.management.close()
+	}
+	return true
 }

@@ -17,11 +17,14 @@ import (
 	"time"
 )
 
+var errManagementRejected = errors.New("OpenVPN rejected command")
+
 type clientEvent struct {
-	kind string
-	cid  uint64
-	kid  uint64
-	sso  string
+	kind    string
+	cid     uint64
+	kid     uint64
+	sso     string
+	clients map[uint64]struct{}
 }
 
 type management struct {
@@ -35,6 +38,7 @@ type management struct {
 	initialized atomic.Bool
 	probeMu sync.Mutex
 	healthUntil atomic.Int64
+	statusRequested atomic.Bool
 }
 
 func newManagement(conn net.Conn) *management {
@@ -91,6 +95,10 @@ func (m *management) authorizeIPv4(cid, kid uint64, address netip.Addr, netmask 
 func (m *management) exchange(cmd string) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
+	return m.exchangeLocked(cmd)
+}
+
+func (m *management) exchangeLocked(cmd string) error {
 	select {
 	case <-m.done:
 		return errors.New("management unavailable")
@@ -109,7 +117,7 @@ func (m *management) exchange(cmd string) error {
 	select {
 	case success := <-m.replies:
 		if !success {
-			return errors.New("OpenVPN rejected command")
+			return errManagementRejected
 		}
 		return nil
 	case <-m.done:
@@ -151,8 +159,34 @@ func (m *management) read() {
 	scanner.Buffer(make([]byte, 4096), 64<<10)
 	var pending *clientEvent
 	seenHold := false
+	var status managementStatus
 	for scanner.Scan() {
 		line := scanner.Text()
+		if m.statusRequested.Load() && !strings.HasPrefix(line, ">") {
+			done, err := status.line(line)
+			if err != nil {
+				return
+			}
+			if done {
+				if pending != nil {
+					return
+				}
+				// Preserve wire order relative to CONNECT/ESTABLISHED/DISCONNECT.
+				// A snapshot cannot remove a connection whose event arrived later.
+				select {
+				case m.events <- clientEvent{kind: "STATUS", clients: status.clients}:
+				default:
+					return
+				}
+				status = managementStatus{}
+				select {
+				case m.replies <- true:
+				default:
+					return
+				}
+			}
+			continue
+		}
 		switch {
 		case strings.HasPrefix(line, ">INFO:OpenVPN Management Interface Version "):
 			fields := strings.Fields(strings.TrimPrefix(line, ">INFO:OpenVPN Management Interface Version "))

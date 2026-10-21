@@ -16,6 +16,8 @@ import (
     "time"
 
     "supivpn/internal/controller"
+    "supivpn/internal/agentapi"
+    "supivpn/internal/agentclient"
     "supivpn/internal/postgres"
 )
 
@@ -147,6 +149,35 @@ func TestSessionLimitsAndFencingIntegration(t *testing.T) {
         expectLimit(2) // A lost grant/ACK response must still reserve a slot.
         if err:=first.Cancel(ctx,a,postgres.Connection{CID:1,KID:1});err!=nil { t.Fatal(err) }
         grant(b,3,1)
+    })
+    t.Run("cancelled-login-census-releases-controller-reservation",func(t *testing.T) {
+        for _, acknowledged := range []bool{false,true} {
+            reset();grant(a,1,1)
+            if acknowledged {
+                d,err:=first.Fetch(ctx,a,postgres.Connection{CID:1,KID:1})
+                if err!=nil { t.Fatal(err) }
+                if err=first.Acknowledge(ctx,a,d.ID,postgres.Applied);err!=nil {t.Fatal(err)}
+            }
+            expectLimit(2)
+            cancelCalls:=0
+            runtime,_:=remoteFixture(t,remoteAPIFunc(func(ctx context.Context,op string,q agentclient.Request)(*agentapi.Decision,error){
+                if op!="cancel" || q.CID==nil || q.KID==nil || *q.CID!=1 || *q.KID!=1 {t.Fatal("unexpected cancellation target")}
+                cancelCalls++
+                if err:=first.Cancel(ctx,a,postgres.Connection{CID:1,KID:1});err!=nil {return nil,err}
+                if cancelCalls==1 {return nil,&agentclient.Error{Status:503}} // Lost committed response.
+                return nil,nil
+            }))
+            runtime.remote.node,runtime.remote.generation=a.NodeID,a.Generation
+            runtime.connections[1]=&connection{cid:1,kid:1,active:acknowledged}
+            runtime.handleEvent(clientEvent{kind:"STATUS",clients:map[uint64]struct{}{1:{}}})
+            if len(runtime.remote.jobs)!=0 {t.Fatal("live CID scheduled cancellation")}
+            runtime.handleEvent(clientEvent{kind:"STATUS",clients:map[uint64]struct{}{}})
+            expectLimit(3) // The local snapshot alone cannot release a cluster reservation.
+            remoteStepNow(runtime)
+            remoteStepNow(runtime)
+            if cancelCalls!=2 || len(runtime.remote.jobs)!=0 {t.Fatal("committed cancel retry did not converge")}
+            grant(b,4,1)
+        }
     })
     t.Run("pool-exhaustion-denial-releases-reservation",func(t *testing.T) {
         reset();grant(a,1,1)

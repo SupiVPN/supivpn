@@ -81,16 +81,28 @@ If the user does not complete the new login, no new VPN access is granted.
 Old tickets/assertions/callbacks cannot restore the previous tunnel.
 Expiring one user does not disconnect other users on the node.
 
-The local IP is released after OpenVPN `DISCONNECT`; the cluster slot after
-committed `cancel`. Neither deadline expiry nor successful kill proves tunnel
-closure. If `DISCONNECT` is absent for 30 seconds, the agent stops its OpenVPN
-pair; uncertain slots await confirmed restart/fencing.
-Delayed cancel may make a new attempt receive `connection_limit`.
+The agent reconciles its CIDs with a complete OpenVPN `status 3` snapshot every
+five seconds while connections exist. The local IP is released after
+`DISCONNECT` or confirmed CID absence; the cluster slot after committed `cancel`.
+Only numeric CIDs are retained from status; names and addresses are discarded.
+Incomplete or invalid status closes management without releasing uncertain slots.
+Neither deadline expiry nor successful kill proves tunnel closure. If a closing
+CID is still present after 30 seconds, the agent stops its OpenVPN pair;
+uncertain slots await confirmed restart/fencing.
+
+Cancelling a client and immediately reconnecting can temporarily return
+`connection_limit` if the first SAML authorization has already reserved a slot.
+An unauthenticated attempt alone consumes no personal slot. In particular, a
+silent UDP cancellation is not immediately visible to OpenVPN: handshake or
+keepalive timeout must remove the old CID first. Reconciliation repairs missing
+disconnect notifications; it does not shorten those transport timeouts or evict
+another live session. Wait for the previous connection to close, then start a
+fresh connection/login. Replaying the denied browser callback cannot reopen it.
 
 PostgreSQL serializes concurrent slot allocation with a per-user advisory lock.
 The grant reserves a slot before ACK: a lost response cannot allocate another slot.
 Profile downloads use no slots. A new connection's `denied/failed` ACK releases
-the reservation; `applied` requires confirmed `DISCONNECT → cancel` or fencing
+the reservation; `applied` requires confirmed CID removal followed by `cancel`, or fencing,
 before reuse.
 
 When every CIDR of the selected group **on this node** is exhausted, the agent
