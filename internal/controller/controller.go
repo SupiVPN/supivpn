@@ -301,7 +301,7 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "VPN group authorization refused. Contact your administrator.", http.StatusForbidden)
 		case errors.Is(err, ErrConnectionLimit):
 			logging.Emit(r.Context(), "saml.authorization_decided", slog.String("purpose", loginPurpose(ticket)), slog.String("outcome", "denied"), slog.String("reason", "connection_limit"))
-			http.Error(w, "VPN connection limit reached. Disconnect another device and try again.", http.StatusForbidden)
+			http.Error(w, "VPN connection limit reached. If you just cancelled or disconnected, wait for the previous connection to close, then reconnect. Otherwise, disconnect another VPN session and try again.", http.StatusForbidden)
 		default:
 			http.Error(w, "VPN unavailable. Reconnect.", http.StatusServiceUnavailable)
 		}

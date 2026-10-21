@@ -346,7 +346,7 @@ func (a *agent) validRemoteDecision(c *connection, d *agentapi.Decision) bool {
 	}
 }
 
-// Called only after DISCONNECT, never just after sending client-kill.
+// Called after DISCONNECT or confirmed CID absence, never just after client-kill.
 func (a *agent) cancelRemoteLocked(c *connection) {
 	for _, j := range a.remote.jobs {
 		if j.conn == c {
