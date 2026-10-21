@@ -130,6 +130,13 @@ or exclusive features.
 
 ## Deploying SupiVPN
 
+The planned guided installation targets **Debian 13 with `.deb` packages and
+systemd**: `supivpn-node`, `supivpn-controller`, and the `supivpn` metapackage.
+Start with [DEPLOYMENT.md](DEPLOYMENT.md) for the implementation sequence and
+[package/service design](docs/DEBIAN_PACKAGING.md) for the proposed layout.
+These packages and the complete Debian walkthrough are not available yet;
+the steps below summarize the existing component deployment work.
+
 1. Run `make build` or build a single component as described in [BUILD.md](BUILD.md).
 2. Prepare PostgreSQL and the owner/runtime/migrator roles; apply migrations
    before starting the controller.
