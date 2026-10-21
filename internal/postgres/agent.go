@@ -161,7 +161,7 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 	defer tx.Rollback(context.Background())
 	logins, err := tx.Exec(ctx, `WITH expired AS (
         SELECT ticket_hash FROM supivpn.logins
-        WHERE expires_at<clock_timestamp()-interval '24 hours'
+        WHERE expires_at<(SELECT clock_timestamp()-interval '24 hours')
           AND NOT (denial_reason='' AND state IN ('decided','acknowledged')
             AND (ack_result IS NULL OR ack_result='applied')
             AND EXISTS (SELECT 1 FROM supivpn.nodes n WHERE n.node_id=logins.node_id
@@ -173,7 +173,7 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 	}
 	assertions, err := tx.Exec(ctx, `WITH expired AS (
         SELECT assertion_hash FROM supivpn.assertions
-        WHERE expires_at<=clock_timestamp()
+        WHERE expires_at<=(SELECT clock_timestamp())
         ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED
     ) DELETE FROM supivpn.assertions USING expired WHERE assertions.assertion_hash=expired.assertion_hash`, limit)
 	if err != nil {
@@ -181,7 +181,7 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 	}
 	profiles, err := tx.Exec(ctx, `WITH expired AS (
         SELECT ticket_hash FROM supivpn.profile_logins
-        WHERE expires_at<=clock_timestamp()
+        WHERE expires_at<=(SELECT clock_timestamp())
         ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED
     ) DELETE FROM supivpn.profile_logins USING expired WHERE profile_logins.ticket_hash=expired.ticket_hash`, limit)
 	if err != nil {

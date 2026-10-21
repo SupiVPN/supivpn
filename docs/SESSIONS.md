@@ -204,8 +204,10 @@ Contract: [docs/RECOVERY.md](RECOVERY.md).
 
 ## Upgrades and verification
 
-The current VM controller supports **schemas 7/8/9**; isolated Lambda components
-require **schema 9**. Migration 009 adds restricted SQL functions and separate
+The current VM controller supports **schemas 7/8/9/10**; isolated Lambda components
+require **schema 10**. Migration 010 rechecks heartbeat expiry after row-lock
+waits and improves cleanup queries without releasing active grants.
+Migration 009 adds restricted SQL functions and separate
 role grants. A combined-Lambda deployment requires the [controlled cutover](LAMBDA_ISOLATION.md#upgrade-and-rollback).
 `008_audit_username.sql` adds verified NameID for logs; session accounting still
 uses `subject_hash`. `007_safe_recovery.sql` adds durable maintenance, operator

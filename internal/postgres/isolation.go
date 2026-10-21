@@ -76,13 +76,13 @@ func NewIsolated(ctx context.Context, pool *pgxpool.Pool, c Component, f Fencer)
 }
 
 func CheckPrivileges(ctx context.Context, pool *pgxpool.Pool, c Component) error {
-	refused := errors.New("database component privileges invalid; require schema 9 and separate restricted roles")
+	refused := errors.New("database component privileges invalid; require schema 10 and separate restricted roles")
 	policy, ok := componentPrivileges(c)
 	if !ok || pool == nil {
 		return refused
 	}
 	var version int
-	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 9 {
+	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 10 {
 		return refused
 	}
 	var unsafe bool
@@ -320,7 +320,7 @@ func (s *Store) pruneIsolated(ctx context.Context, limit int) (int64, error) {
 func pruneRecoveryAttempts(ctx context.Context, tx pgx.Tx, limit int) error {
 	for _, table := range []string{"node_recovery_starts", "node_recovery_stops"} {
 		_, err := tx.Exec(ctx, `WITH expired AS (SELECT node_id,attempted_at FROM supivpn.`+table+`
-            WHERE attempted_at<clock_timestamp()-interval '24 hours' ORDER BY attempted_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+            WHERE attempted_at<(SELECT clock_timestamp()-interval '24 hours') ORDER BY attempted_at LIMIT $1 FOR UPDATE SKIP LOCKED)
             DELETE FROM supivpn.`+table+` s USING expired e WHERE s.node_id=e.node_id AND s.attempted_at=e.attempted_at`, limit)
 		if err != nil {
 			return err

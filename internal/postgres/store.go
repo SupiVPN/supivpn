@@ -108,7 +108,7 @@ func (s *Store) Ready(ctx context.Context) bool {
 	}
 	var version int
 	return s.pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) == nil &&
-		((s.component == "" && (version == 7 || version == 8 || version == 9)) || (s.component != "" && version == 9))
+		((s.component == "" && (version == 7 || version == 8 || version == 9 || version == 10)) || (s.component != "" && version == 10))
 }
 
 // RotateNode is a compare-and-swap performed by the authenticated node bootstrap
@@ -310,14 +310,17 @@ func (s *Store) withLogin(ctx context.Context, hash []byte, actor *Agent,
 	}
 	defer tx.Rollback(context.Background())
 	var nodeID string
-	if err = tx.QueryRow(ctx, "SELECT node_id FROM supivpn.logins WHERE ticket_hash=$1", hash).Scan(&nodeID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return controller.ErrLoginExpired
+	if actor != nil {
+		// Agent operations already have an authenticated node identity. The
+		// locked record below must still match that identity and generation.
+		nodeID = actor.NodeID
+	} else {
+		if err = tx.QueryRow(ctx, "SELECT node_id FROM supivpn.logins WHERE ticket_hash=$1", hash).Scan(&nodeID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return controller.ErrLoginExpired
+			}
+			return publicError(err)
 		}
-		return publicError(err)
-	}
-	if actor != nil && actor.NodeID != nodeID {
-		return controller.ErrLoginExpired
 	}
 	generation, err := s.lockNode(ctx, tx, nodeID)
 	if err != nil {
@@ -506,7 +509,7 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err = tx.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version); err != nil {
 			return err
 		}
-		if version != 7 && version != 8 && version != 9 {
+		if version != 7 && version != 8 && version != 9 && version != 10 {
 			return controller.ErrUnavailable
 		}
 		if version >= 8 {

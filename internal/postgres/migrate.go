@@ -85,49 +85,49 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, asOwner bool) error {
     `); err != nil {
 		return errors.New("cannot initialize migration metadata")
 	}
-    files := []string{"001_auth.sql", "002_profiles.sql", "003_sessions.sql", "004_renewals.sql", "005_recovery.sql", "006_session_expiry.sql", "007_safe_recovery.sql", "008_audit_username.sql", "009_component_isolation.sql"}
-    rows, err := tx.Query(ctx, "SELECT version, checksum FROM public.supivpn_schema_migrations ORDER BY version")
-    if err != nil {
-        return errors.New("cannot read migration metadata")
-    }
-    var recorded [][]byte
-    for rows.Next() {
-        var version int
-        var checksum []byte
-        if rows.Scan(&version, &checksum) != nil || version != len(recorded)+1 || version > len(files) {
-            rows.Close()
-            return errors.New("unsupported or modified schema migration")
-        }
-        recorded = append(recorded, checksum)
-    }
-    if err = rows.Err(); err != nil {
-        rows.Close()
-        return errors.New("cannot read migration metadata")
-    }
-    rows.Close()
-    for i, name := range files {
-        data, err := migrations.ReadFile("migrations/" + name)
-        if err != nil {
-            return errors.New("migration file unavailable")
-        }
-        checksum := sha256.Sum256(data)
-        if i < len(recorded) {
-            if string(recorded[i]) != string(checksum[:]) {
-                return errors.New("unsupported or modified schema migration")
-            }
-            continue
-        }
-        if _, err = tx.Exec(ctx, string(data)); err != nil {
-            var databaseError *pgconn.PgError
-            if errors.As(err, &databaseError) {
-                return fmt.Errorf("schema migration %d failed (SQLSTATE %s)", i+1, databaseError.Code)
-            }
-            return fmt.Errorf("schema migration %d failed", i+1)
-        }
-        if _, err = tx.Exec(ctx, "INSERT INTO public.supivpn_schema_migrations(version, checksum) VALUES ($1, $2)", i+1, checksum[:]); err != nil {
-            return errors.New("cannot record migration")
-        }
-    }
+	files := []string{"001_auth.sql", "002_profiles.sql", "003_sessions.sql", "004_renewals.sql", "005_recovery.sql", "006_session_expiry.sql", "007_safe_recovery.sql", "008_audit_username.sql", "009_component_isolation.sql", "010_runtime_queries.sql"}
+	rows, err := tx.Query(ctx, "SELECT version, checksum FROM public.supivpn_schema_migrations ORDER BY version")
+	if err != nil {
+		return errors.New("cannot read migration metadata")
+	}
+	var recorded [][]byte
+	for rows.Next() {
+		var version int
+		var checksum []byte
+		if rows.Scan(&version, &checksum) != nil || version != len(recorded)+1 || version > len(files) {
+			rows.Close()
+			return errors.New("unsupported or modified schema migration")
+		}
+		recorded = append(recorded, checksum)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return errors.New("cannot read migration metadata")
+	}
+	rows.Close()
+	for i, name := range files {
+		data, err := migrations.ReadFile("migrations/" + name)
+		if err != nil {
+			return errors.New("migration file unavailable")
+		}
+		checksum := sha256.Sum256(data)
+		if i < len(recorded) {
+			if string(recorded[i]) != string(checksum[:]) {
+				return errors.New("unsupported or modified schema migration")
+			}
+			continue
+		}
+		if _, err = tx.Exec(ctx, string(data)); err != nil {
+			var databaseError *pgconn.PgError
+			if errors.As(err, &databaseError) {
+				return fmt.Errorf("schema migration %d failed (SQLSTATE %s)", i+1, databaseError.Code)
+			}
+			return fmt.Errorf("schema migration %d failed", i+1)
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO public.supivpn_schema_migrations(version, checksum) VALUES ($1, $2)", i+1, checksum[:]); err != nil {
+			return errors.New("cannot record migration")
+		}
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return errors.New("migration commit outcome unknown; retry with the same migrations")
 	}

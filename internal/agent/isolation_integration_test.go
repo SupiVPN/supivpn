@@ -88,6 +88,35 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 		return p
 	}
 	public, agent, recovery := open(roles.Public), open(roles.Agent), open(roles.Recovery)
+	securityMetadata := func() string {
+		t.Helper()
+		var metadata string
+		if err := admin.QueryRow(ctx, `SELECT md5(jsonb_agg(jsonb_build_array(
+			p.proname,p.proowner,p.prosecdef,p.proconfig,p.proacl) ORDER BY p.proname)::text)
+			FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+			WHERE n.nspname='supivpn'`).Scan(&metadata); err != nil {
+			t.Fatal("cannot inspect disposable function ownership and grants")
+		}
+		return metadata
+	}
+	beforeUpgrade := securityMetadata()
+	restoreSchema9Functions(t, admin)
+	for _, component := range []struct {
+		pool *pgxpool.Pool
+		kind postgres.Component
+	}{{public, postgres.Public}, {agent, postgres.AgentAPI}, {recovery, postgres.Recovery}} {
+		if postgres.CheckPrivileges(ctx, component.pool, component.kind) == nil {
+			t.Fatal("isolated runtime accepted schema 9 without heartbeat fix")
+		}
+	}
+	for range 2 {
+		if err := postgres.MigrateAsOwner(ctx, admin); err != nil {
+			t.Fatal("isolated schema 9 to 10 upgrade failed", err)
+		}
+		if securityMetadata() != beforeUpgrade {
+			t.Fatal("function upgrade changed owners, security mode, search path or runtime grants")
+		}
+	}
 	f := &isolatedPower{recoveryStub: &recoveryStub{power: map[string]string{"node-a": "running", "node-b": "running"}, starts: map[string]int{}, stops: map[string]int{}}}
 	pub, err := postgres.NewIsolated(ctx, public, postgres.Public, nil)
 	if err != nil {
@@ -97,6 +126,9 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal("agent privileges", err)
 	}
+	t.Run("heartbeat-after-row-lock", func(t *testing.T) {
+		testHeartbeatRechecksConcurrentNodeChange(t, admin, ag)
+	})
 	rec, err := postgres.NewIsolated(ctx, recovery, postgres.Recovery, f)
 	if err != nil {
 		t.Fatal("recovery privileges", err)

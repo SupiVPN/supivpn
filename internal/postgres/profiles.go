@@ -142,8 +142,9 @@ func (s *ProfileBackend) Complete(ctx context.Context, p controller.Pending, d c
 	}
 	tag, err := tx.Exec(ctx, `UPDATE supivpn.profile_logins SET consumed=true
         WHERE ticket_hash=$1 AND NOT consumed AND expires_at>clock_timestamp()
-            AND clock_timestamp()>=$2 AND clock_timestamp()<$3 AND clock_timestamp()<$4`,
-		ticketHash(p.Ticket), d.NotBefore, d.NotOnOrAfter, d.SessionExpiresAt)
+            AND clock_timestamp()>=$2 AND clock_timestamp()<$3
+            AND ($5 OR clock_timestamp()<$4)`,
+		ticketHash(p.Ticket), d.NotBefore, d.NotOnOrAfter, d.SessionExpiresAt, d.SessionUnlimited)
 	if err != nil {
 		return publicError(err)
 	}

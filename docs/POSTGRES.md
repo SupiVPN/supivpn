@@ -54,7 +54,11 @@ See the [profile issuance contract](PROFILES.md).
 
 ## Connections and migrations
 
-The current schema is **9**: `009_component_isolation.sql` adds restricted SQL
+The current schema is **10**: `010_runtime_queries.sql` checks heartbeat expiry
+after acquiring the node row lock and makes cleanup expiry filters indexable.
+It replaces two functions without changing their signatures, ownership or ACLs;
+there are no table rewrites, new indexes or data backfills.
+`009_component_isolation.sql` adds restricted SQL
 functions for separate Lambda roles. See [privileges and cutover](LAMBDA_ISOLATION.md).
 `008_audit_username.sql` adds audit username with an
 empty default for existing records, without changing active grants.
@@ -231,8 +235,42 @@ committed DDL or restore an older database snapshot that could revive stale gran
 or fencing generations. An incompatible change needs explicit maintenance and a
 reviewed recovery procedure.
 
-The VM runtime supports schemas 7/8/9; isolated Lambda components require 9.
+The VM runtime supports schemas 7/8/9/10; isolated Lambda components require 10.
 Previously applied SQL migration files remain unchanged.
+
+### Schema 9 to 10
+
+For VM deployments, first install this release's runtime while the database is
+still on schema 9, then apply migration 010 with the migration identity and
+verify readiness, SAML admission and heartbeat. The runtime's direct heartbeat
+query enforces the new lock/expiry ordering on each supported schema.
+For isolated Lambdas, use the [controlled cutover](LAMBDA_ISOLATION.md#upgrade-and-rollback):
+old bundles reject schema 10 and new bundles reject schema 9.
+
+Migration 010 is transactional and preserves logins, decisions, replay entries,
+generation history and recovery budgets. Its function replacement uses the
+existing migration lock/statement timeouts; if it cannot complete, stop the
+deployment and retry the same migrator after resolving contention. Do not
+increase timeouts automatically. This release is the first runtime compatible
+with schema 10; v0.4.5 cannot be used for rollback after migration. Keep schema 10
+and restore only a verified compatible runtime, without deleting migration
+metadata or restoring old authorization state.
+
+### Query costs and safety
+
+Authenticated Fetch/ACK/Cancel operations use the transport-derived node identity
+when acquiring the node lock, then compare it and its generation with the locked
+login record. This removes a redundant node lookup while preserving node-before-login
+lock ordering. Heartbeat uses one atomic statement; lease and fence checks run
+after its node lock has been acquired. Writer checks on pool acquisition remain
+mandatory, and uncertain SQL outcomes are not automatically retried.
+
+Cleanup takes one database-clock cutoff per statement, allowing the existing
+expiry indexes to bound scans. Entries that expire during that statement may
+remain until the next batch. This does not extend authorization: admission and
+delivery still check current database time, independently of cleanup. Batch
+limits, `SKIP LOCKED`, replay retention and protection of potentially active
+grants remain enforced.
 
 ## Running integration tests
 

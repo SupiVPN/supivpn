@@ -7,13 +7,13 @@ package main
 
 import (
 	"context"
-	"supivpn/internal/logging"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"supivpn/internal/logging"
 	"supivpn/internal/postgres"
 )
 
@@ -37,8 +37,8 @@ func writeManifest(directory string) error {
 		artifacts[name] = fmt.Sprintf("%x", sha256.Sum256(data))
 	}
 	data, err := json.MarshalIndent(map[string]any{
-		"format": 1, "schema": 9, "schema_digest": postgres.MigrationDigest(),
-		"lambda_components":  map[string]any{"public": map[string]any{"artifact": "supivpn-lambda.zip", "required_schema": 9}, "agent": map[string]any{"artifact": "supivpn-agent-lambda.zip", "required_schema": 9}, "recovery": map[string]any{"artifact": "supivpn-recovery-lambda.zip", "required_schema": 9}},
+		"format": 1, "schema": 10, "schema_digest": postgres.MigrationDigest(),
+		"lambda_components":  map[string]any{"public": map[string]any{"artifact": "supivpn-lambda.zip", "required_schema": 10}, "agent": map[string]any{"artifact": "supivpn-agent-lambda.zip", "required_schema": 10}, "recovery": map[string]any{"artifact": "supivpn-recovery-lambda.zip", "required_schema": 10}},
 		"compatible_schemas": postgres.CompatibleSchemaDigests(), "artifacts": artifacts,
 	}, "", "  ")
 	if err != nil {
