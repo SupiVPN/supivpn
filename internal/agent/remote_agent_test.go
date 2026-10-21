@@ -130,39 +130,27 @@ func TestRemoteDecisionAndLostAcknowledgement(t *testing.T) {
 }
 
 func TestRemoteRefusesInvalidDecisions(t *testing.T) {
-	for _, name := range []string{"node", "generation", "cid", "kid", "expired", "session-expired", "session-too-long", "missing-group", "unknown-group", "denied", "denial-with-group", "bad-denial", "missing-id"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*agentapi.Decision)
+	}{
+		{"node", func(d *agentapi.Decision) { d.NodeID = "other" }},
+		{"generation", func(d *agentapi.Decision) { d.Generation = "old" }},
+		{"cid", func(d *agentapi.Decision) { d.CID++ }},
+		{"kid", func(d *agentapi.Decision) { d.KID++ }},
+		{"expired", func(d *agentapi.Decision) { d.ExpiresAt = time.Now().Add(-time.Second) }},
+		{"session-expired", func(d *agentapi.Decision) { d.SessionExpiresAt = time.Now().Add(-time.Second) }},
+		{"session-too-long", func(d *agentapi.Decision) { d.SessionExpiresAt = time.Now().Add(time.Hour) }},
+		{"missing-group", func(d *agentapi.Decision) { d.GroupName = "" }},
+		{"unknown-group", func(d *agentapi.Decision) { d.GroupName = "other-vpn" }},
+		{"denied", func(d *agentapi.Decision) { d.GroupName, d.DenialReason = "", "no_vpn_group" }},
+		{"denial-with-group", func(d *agentapi.Decision) { d.DenialReason = "no_vpn_group" }},
+		{"bad-denial", func(d *agentapi.Decision) { d.GroupName, d.DenialReason = "", "anything" }},
+		{"missing-id", func(d *agentapi.Decision) { d.ID = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			d := allowedRemoteDecision(coreGroup)
-			switch name {
-			case "node":
-				d.NodeID = "other"
-			case "generation":
-				d.Generation = "old"
-			case "cid":
-				d.CID++
-			case "kid":
-				d.KID++
-			case "expired":
-				d.ExpiresAt = time.Now().Add(-time.Second)
-			case "session-expired":
-				d.SessionExpiresAt = time.Now().Add(-time.Second)
-			case "session-too-long":
-				d.SessionExpiresAt = time.Now().Add(time.Hour)
-			case "missing-group":
-				d.GroupName = ""
-			case "unknown-group":
-				d.GroupName = "other-vpn"
-			case "denied":
-				d.GroupName = ""
-				d.DenialReason = "no_vpn_group"
-			case "denial-with-group":
-				d.DenialReason = "no_vpn_group"
-			case "bad-denial":
-				d.GroupName = ""
-				d.DenialReason = "anything"
-			case "missing-id":
-				d.ID = ""
-			}
+			tc.mutate(d)
 			api := remoteAPIFunc(func(_ context.Context, op string, _ agentclient.Request) (*agentapi.Decision, error) {
 				if op == "fetch" {
 					return d, nil

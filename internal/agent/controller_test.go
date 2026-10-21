@@ -9,9 +9,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"supivpn/internal/agentapi"
+	"supivpn/internal/agentclient"
 	"supivpn/internal/controller"
 
 	"supivpn/internal/saml"
@@ -133,6 +136,54 @@ func TestLocalBackendStartOnlyOnce(t *testing.T) {
 	}
 	if err := a.Start(context.Background(), "test-ticket", "other-request", hash); !errors.Is(err, controller.ErrLoginStarted) {
 		t.Fatal("browser binding was overwritten")
+	}
+}
+
+func TestPendingLoginLifetimeAcrossTransports(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		invalidate func(*agent, *connection)
+	}{
+		{"active", func(_ *agent, c *connection) { c.active = true }},
+		{"closing", func(_ *agent, c *connection) { c.closing = true }},
+		{"expired", func(a *agent, c *connection) { a.now = func() time.Time { return c.expires } }},
+		{"disconnected", func(a *agent, c *connection) { delete(a.connections, c.cid) }},
+		{"replaced", func(a *agent, c *connection) { replacement := *c; a.connections[c.cid] = &replacement }},
+		{"management-lost", func(a *agent, _ *connection) { a.management.close() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, commands := testApp(t, nil)
+			c := a.connections[7]
+			tc.invalidate(a.agent, c)
+			if _, err := a.Lookup(context.Background(), c.ticket, c.browserHash); !errors.Is(err, controller.ErrLoginExpired) {
+				t.Fatal("stale pending login remained readable")
+			}
+			c.requestID = ""
+			if err := a.Start(context.Background(), c.ticket, "new-request", c.browserHash); !errors.Is(err, controller.ErrLoginExpired) {
+				t.Fatal("stale pending login was rebound to a browser")
+			}
+			if len(commands) != 0 {
+				t.Fatal("stale local login reached management")
+			}
+
+			remote, remoteCommands := remoteFixture(t, remoteAPIFunc(func(_ context.Context, op string, _ agentclient.Request) (*agentapi.Decision, error) {
+				if op == "fetch" {
+					t.Error("stale pending login fetched a decision")
+				}
+				return nil, nil
+			}))
+			connectRemote(t, remote, remoteCommands)
+			tc.invalidate(remote, remote.connections[7])
+			remoteStepNow(remote)
+			for len(remoteCommands) > 0 {
+				if !strings.HasPrefix(<-remoteCommands, "client-deny ") {
+					t.Fatal("stale remote login authorized")
+				}
+			}
+			if len(remote.pools.leases) != 0 {
+				t.Fatal("stale remote login acquired an IP")
+			}
+		})
 	}
 }
 

@@ -11,10 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"supivpn/internal/logging"
-	"supivpn/internal/tracecontext"
 	"net/netip"
 	"net/url"
+	"supivpn/internal/logging"
+	"supivpn/internal/tracecontext"
 	"sync"
 	"time"
 )
@@ -22,28 +22,28 @@ import (
 const maxConnections = 16
 
 type connection struct {
-	username string
-    sessionUnlimited bool
-    closeBy time.Time
-	subjectHash [32]byte
-	cid, kid    uint64
-	revision    uint64
-	ticket      string
-	expires     time.Time
-	active      bool
-	requestID   string
-	browserHash [32]byte
-	closing     bool
-	groupName   string
-	address     netip.Addr
-	peer        netip.AddrPort
-	client      clientInfo
+	username                   string
+	sessionUnlimited           bool
+	closeBy                    time.Time
+	subjectHash                [32]byte
+	cid, kid                   uint64
+	revision                   uint64
+	ticket                     string
+	expires                    time.Time
+	active                     bool
+	requestID                  string
+	browserHash                [32]byte
+	closing                    bool
+	groupName                  string
+	address                    netip.Addr
+	peer                       netip.AddrPort
+	client                     clientInfo
 	requestedAt, establishedAt time.Time
-	disconnectReason string
+	disconnectReason           string
 }
 
 type agent struct {
-	logger *logging.Logger
+	logger       *logging.Logger
 	mu           sync.Mutex
 	config       config
 	origin       *url.URL
@@ -59,13 +59,15 @@ type agent struct {
 
 // Unlimited is valid only for an explicitly authorized active session.
 func (c *connection) sessionValid(now time.Time) bool {
-    return c.active && c.sessionUnlimited && c.expires.IsZero() || !c.sessionUnlimited && !c.expires.IsZero() && now.Before(c.expires)
+	if c.sessionUnlimited {
+		return c.active && c.expires.IsZero()
+	}
+	return !c.expires.IsZero() && now.Before(c.expires)
 }
 
 func newAgent(c config, origin *url.URL) *agent {
-	a := &agent{config: c, origin: origin, connections: make(map[uint64]*connection),
+	return &agent{config: c, origin: origin, connections: make(map[uint64]*connection),
 		tickets: make(map[string]*connection), now: time.Now}
-	return a
 }
 
 func randomToken() (string, error) {
@@ -107,6 +109,13 @@ func (a *agent) removeLocked(c *connection) {
 	}
 }
 
+// Every authorization path rechecks the same live pending connection under mu.
+// Pointer identity fences replies to a CID that OpenVPN has since reused.
+func (a *agent) pendingConnectionLocked(c *connection) bool {
+	return c != nil && !c.active && !c.closing && a.readyLocked() &&
+		a.connections[c.cid] == c && a.now().Before(c.expires)
+}
+
 func (a *agent) commandLocked(command string) error {
 	if !a.readyLocked() {
 		return errors.New("OpenVPN unavailable")
@@ -121,23 +130,34 @@ func (a *agent) denyLocked(e clientEvent) {
 	}
 }
 
+func (a *agent) denyConnectionLocked(c *connection, reason string) {
+	c.closing = true
+	c.disconnectReason = reason
+	delete(a.tickets, c.ticket)
+	a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
+}
+
 // A successful kill command is not proof of disconnection. Keep the IP/slot
 // until DISCONNECT or a complete status snapshot confirms absence.
 func (a *agent) closeClientLocked(c *connection, reason string) {
-    if !c.closeBy.IsZero() { return }
-    if c.disconnectReason == "" { c.disconnectReason = reason }
-    c.closing = true
-    c.closeBy = a.now().Add(30*time.Second)
-    delete(a.tickets, c.ticket)
-    if err := a.commandLocked(fmt.Sprintf("client-kill %d", c.cid)); err != nil {
-        // The CID may have disappeared without DISCONNECT. A rejection alone
-        // is not proof; retain the slot until the ordered snapshot is handled.
-        if errors.Is(err, errManagementRejected) {
-            _ = a.management.requestStatus() // Closes management on uncertainty.
-        } else {
-            a.management.close()
-        }
-    }
+	if !c.closeBy.IsZero() {
+		return
+	}
+	if c.disconnectReason == "" {
+		c.disconnectReason = reason
+	}
+	c.closing = true
+	c.closeBy = a.now().Add(30 * time.Second)
+	delete(a.tickets, c.ticket)
+	if err := a.commandLocked(fmt.Sprintf("client-kill %d", c.cid)); err != nil {
+		// The CID may have disappeared without DISCONNECT. A rejection alone
+		// is not proof; retain the slot until the ordered snapshot is handled.
+		if errors.Is(err, errManagementRejected) {
+			_ = a.management.requestStatus() // Closes management on uncertainty.
+		} else {
+			a.management.close()
+		}
+	}
 }
 
 // Management events and authorization commits share this lock. No web callback
@@ -190,11 +210,11 @@ func (a *agent) handleEvent(e clientEvent) {
 	case "REAUTH":
 		c := a.connections[e.cid]
 		if c != nil && c.active && (c.closing || !c.sessionValid(a.now())) {
-            // Normal expiry requests RESTART, not AUTH_FAILED: Connect must be
-            // allowed to reconnect and perform a fresh browser authentication.
-            a.closeClientLocked(c, "session_expired")
-            return
-        }
+			// Normal expiry requests RESTART, not AUTH_FAILED: Connect must be
+			// allowed to reconnect and perform a fresh browser authentication.
+			a.closeClientLocked(c, "session_expired")
+			return
+		}
 		if c == nil || c.closing || !c.active || !c.sessionValid(a.now()) {
 			a.denyLocked(e)
 			// client-deny alone may leave the old TLS key alive until it expires.
@@ -225,7 +245,9 @@ func (a *agent) handleEvent(e clientEvent) {
 		}
 	case "ESTABLISHED":
 		if c := a.connections[e.cid]; c != nil && c.active && !c.closing {
-			if c.establishedAt.IsZero() { c.establishedAt = a.now() }
+			if c.establishedAt.IsZero() {
+				c.establishedAt = a.now()
+			}
 			if e.peer.IsValid() {
 				c.peer = e.peer
 			}
@@ -246,25 +268,39 @@ func (a *agent) handleEvent(e clientEvent) {
 }
 
 func (a *agent) logEvent(event string, c *connection, attrs ...slog.Attr) {
-	if c != nil { attrs = append(attrs, slog.Uint64("cid", c.cid), slog.Uint64("kid", c.kid)) }
-	if a.remote != nil { attrs = append(attrs, slog.String("node_id", a.remote.node), slog.String("generation", a.remote.generation)) }
+	if c != nil {
+		attrs = append(attrs, slog.Uint64("cid", c.cid), slog.Uint64("kid", c.kid))
+	}
+	if a.remote != nil {
+		attrs = append(attrs, slog.String("node_id", a.remote.node), slog.String("generation", a.remote.generation))
+	}
 	ctx := logging.WithLogger(context.Background(), a.logger)
-	if c != nil { ctx = tracecontext.WithID(ctx, tracecontext.ForLogin(c.ticket)) }
+	if c != nil {
+		ctx = tracecontext.WithID(ctx, tracecontext.ForLogin(c.ticket))
+	}
 	logging.Emit(ctx, event, attrs...)
 }
 func (a *agent) logTunnelEvent(event string, c *connection, attrs ...slog.Attr) {
 	if event == "vpn.tunnel_established" && c.active {
-		if c.client.version != "" { attrs = append(attrs, slog.String("client_version", c.client.version)) }
-		if c.client.platform != "" { attrs = append(attrs, slog.String("client_platform", c.client.platform)) }
+		if c.client.version != "" {
+			attrs = append(attrs, slog.String("client_version", c.client.version))
+		}
+		if c.client.platform != "" {
+			attrs = append(attrs, slog.String("client_platform", c.client.platform))
+		}
 		if !c.requestedAt.IsZero() && !c.establishedAt.IsZero() && !c.establishedAt.Before(c.requestedAt) {
 			attrs = append(attrs, slog.Int64("establishment_ms", c.establishedAt.Sub(c.requestedAt).Milliseconds()))
 		}
 	}
-	if c.active { attrs = append(attrs, slog.String("username", c.username)) }
+	if c.active {
+		attrs = append(attrs, slog.String("username", c.username))
+	}
 	if c.active && c.peer.IsValid() {
 		attrs = append(attrs, slog.String("peer_ip", c.peer.Addr().String()), slog.Uint64("peer_port", uint64(c.peer.Port())))
 	}
-	if c.address.IsValid() { attrs = append(attrs, slog.String("group_name", c.groupName), slog.String("address", c.address.String())) }
+	if c.address.IsValid() {
+		attrs = append(attrs, slog.String("group_name", c.groupName), slog.String("address", c.address.String()))
+	}
 	a.logEvent(event, c, attrs...)
 }
 
@@ -278,10 +314,10 @@ func (a *agent) expire() {
 	}
 	for _, c := range a.connections {
 		if c.closing {
-            if !c.closeBy.IsZero() && !a.now().Before(c.closeBy) {
-                a.management.close()
-                return
-            }
+			if !c.closeBy.IsZero() && !a.now().Before(c.closeBy) {
+				a.management.close()
+				return
+			}
 			continue
 		}
 		if c.sessionValid(a.now()) {
@@ -289,10 +325,14 @@ func (a *agent) expire() {
 		}
 		// Keep the lease reserved until the daemon confirms the old client is gone.
 		// Kill both an abandoned pending handshake and an expired active session.
-        reason := "pending_auth_expired"
-        if c.active { reason = "session_expired" }
-        a.closeClientLocked(c, reason)
-		if !a.readyLocked() { return }
+		reason := "pending_auth_expired"
+		if c.active {
+			reason = "session_expired"
+		}
+		a.closeClientLocked(c, reason)
+		if !a.readyLocked() {
+			return
+		}
 		a.logEvent("vpn.session_expired", c)
 	}
 }
