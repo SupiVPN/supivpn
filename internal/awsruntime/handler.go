@@ -9,9 +9,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"slices"
 
+	"supivpn/internal/jsonobject"
 	"supivpn/internal/operatorapi"
 )
 
@@ -23,31 +23,8 @@ func RecoveryHandler(tick func(context.Context) error, rule string, operator fun
 		if len(raw) > 8192 {
 			return nil, refused
 		}
-		d := json.NewDecoder(bytes.NewReader(raw))
-		token, err := d.Token()
-		if err != nil || token != json.Delim('{') {
-			return nil, refused
-		}
-		fields := map[string]json.RawMessage{}
-		for d.More() {
-			token, err = d.Token()
-			key, ok := token.(string)
-			if err != nil || !ok {
-				return nil, refused
-			}
-			if _, duplicate := fields[key]; duplicate {
-				return nil, refused
-			}
-			var v json.RawMessage
-			if d.Decode(&v) != nil {
-				return nil, refused
-			}
-			fields[key] = v
-		}
-		if token, err = d.Token(); err != nil || token != json.Delim('}') {
-			return nil, refused
-		}
-		if _, err = d.Token(); err != io.EOF {
+		fields, err := jsonobject.Decode(bytes.NewReader(raw))
+		if err != nil {
 			return nil, refused
 		}
 		var source, kind string
