@@ -58,6 +58,11 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def checksums(assets):
+    """Render the already validated asset names and digests in canonical order."""
+    return "".join(digest + "  " + name + "\n" for name, digest in sorted(assets.items())).encode("ascii")
+
+
 def identity(version, commit):
     require(VERSION.fullmatch(version) and COMMIT.fullmatch(commit), "Invalid version or commit")
 
@@ -181,8 +186,8 @@ def package(root, version, commit, output, *, bundle_layout=False, arch="arm64")
         digest = sha(regular(Path(pending), MAX_BUNDLE))
         # Exclusive publication; never overwrite an existing version.
         os.link(pending, target)
-        with (output / "SHA256SUMS").open("x", encoding="ascii") as handle:
-            handle.write(digest + "  " + target.name + "\n")
+        with (output / "SHA256SUMS").open("xb") as handle:
+            handle.write(checksums({target.name: digest}))
         return target, digest
     finally:
         os.unlink(pending)

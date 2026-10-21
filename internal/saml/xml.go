@@ -9,6 +9,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"maps"
 	"net/url"
 	"regexp"
 	"sort"
@@ -166,15 +167,8 @@ func parseXML(data []byte) (*etree.Element, error) {
 	return root, nil
 }
 func isNS(a etree.Attr) bool { return a.Space == "xmlns" || a.Space == "" && a.Key == "xmlns" }
-func cloneNS(m map[string]string) map[string]string {
-	n := make(map[string]string, len(m)+2)
-	for k, v := range m {
-		n[k] = v
-	}
-	return n
-}
 func namespaces(e *etree.Element, parent map[string]string) (map[string]string, error) {
-	n := cloneNS(parent)
+	n := maps.Clone(parent)
 	seen := map[string]bool{}
 	for _, a := range e.Attr {
 		if !isNS(a) {
@@ -299,12 +293,15 @@ func allowed(ns string, names ...string) map[string]int {
 	}
 	return m
 }
+
+var textEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\r", "&#xD;")
+var attributeEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", "\"", "&quot;", "\t", "&#x9;", "\n", "&#xA;", "\r", "&#xD;")
+
 func escaped(s string, attr bool) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\r", "&#xD;")
 	if attr {
-		r = strings.NewReplacer("&", "&amp;", "<", "&lt;", "\"", "&quot;", "\t", "&#x9;", "\n", "&#xA;", "\r", "&#xD;")
+		return attributeEscaper.Replace(s)
 	}
-	return r.Replace(s)
+	return textEscaper.Replace(s)
 }
 
 // canonicalize implements only Exclusive XML C14N 1.0 without comments, over a
@@ -353,7 +350,7 @@ func canonicalize(root, omit *etree.Element, prefixes string) ([]byte, error) {
 				}
 			}
 		}
-		next := cloneNS(rendered)
+		next := maps.Clone(rendered)
 		decl := []string{}
 		for p := range visible {
 			if p == "xml" {

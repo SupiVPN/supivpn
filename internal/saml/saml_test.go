@@ -180,14 +180,17 @@ func TestExclusiveCanonicalization(t *testing.T) {
 		{`<r a="&quot;&amp;&#x9;&#xA;&#xD;">&lt;&amp;&gt;&#xD;<!--gone--><![CDATA[<]]></r>`, "", `<r a="&quot;&amp;&#x9;&#xA;&#xD;">&lt;&amp;&gt;&#xD;&lt;</r>`},
 	}
 	for _, tc := range cases {
-		root, err := parseXML([]byte(tc.input))
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, err := canonicalize(root, nil, tc.prefixes)
-		if err != nil || string(got) != tc.want {
-			t.Fatalf("canonical bytes mismatch: %q", got)
-		}
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			root, err := parseXML([]byte(tc.input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := canonicalize(root, nil, tc.prefixes)
+			if err != nil || string(got) != tc.want {
+				t.Fatalf("canonical bytes mismatch: %q", got)
+			}
+		})
 	}
 	// Namespace inherited from an unsigned envelope must remain available.
 	root, err := parseXML([]byte(`<r xmlns="urn:default" xmlns:a="urn:a" xmlns:q="urn:q"><a:c><d/></a:c></r>`))
@@ -197,6 +200,16 @@ func TestExclusiveCanonicalization(t *testing.T) {
 	got, err := canonicalize(root.ChildElements()[0], nil, "#default q")
 	if err != nil || string(got) != `<a:c xmlns="urn:default" xmlns:a="urn:a" xmlns:q="urn:q"><d></d></a:c>` {
 		t.Fatalf("ancestor context lost: %q", got)
+	}
+}
+
+func BenchmarkCanonicalize(b *testing.B) {
+	_, _, root := fixture(b)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := canonicalize(root, nil, ""); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 func TestMalformedXMLRefused(t *testing.T) {

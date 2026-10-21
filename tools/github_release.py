@@ -108,7 +108,7 @@ def candidate_zip(data, arch, commit, version, oid, run):
     if arch == "arm64":
         identity["source"] = {"filename": source, "sha256": a.sha(files[source])}
     a.require(record == identity, "Candidate provenance mismatch")
-    a.require(files["SHA256SUMS"] == (record["sha256"] + "  " + filename + "\n").encode(),
+    a.require(files["SHA256SUMS"] == a.checksums({filename: record["sha256"]}),
               "Candidate checksum record mismatch")
     return files, record
 
@@ -220,9 +220,9 @@ def prepare(version, output):
     notes += "SupiVPN release key, then verify the downloaded files against SHA256SUMS before use.\n"
     (output / "release-notes.md").write_text(notes, encoding="utf-8")
     assets["release-notes.md"] = a.sha(notes.encode())
-    sums = "".join(digest + "  " + name + "\n" for name, digest in sorted(assets.items()))
-    (output / "SHA256SUMS").write_text(sums, encoding="ascii")
-    assets["SHA256SUMS"] = a.sha(sums.encode())
+    sums = a.checksums(assets)
+    (output / "SHA256SUMS").write_bytes(sums)
+    assets["SHA256SUMS"] = a.sha(sums)
     metadata = {"format": 1, "repository": gh.REPOSITORY, "version": version, "commit": commit,
                 "tag": oid, "run_id": run["id"], "run_attempt": run["run_attempt"], "assets": assets}
     (output / "release-metadata.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
@@ -243,8 +243,7 @@ def checked_release(directory, version, *, signed=False):
     for name, digest in metadata["assets"].items():
         a.require(a.HEX.fullmatch(digest) and a.sha(a.regular(directory / name, a.MAX_BUNDLE)) == digest,
                   "Prepared release changed")
-    sums = "".join(digest + "  " + name + "\n" for name, digest in sorted(metadata["assets"].items())
-                   if name != "SHA256SUMS").encode()
+    sums = a.checksums({name: digest for name, digest in metadata["assets"].items() if name != "SHA256SUMS"})
     a.require(a.regular(directory / "SHA256SUMS", 8192) == sums, "Checksum manifest does not cover all release assets")
     if signed:
         policy = tag.signatures.read_policy(ROOT / "ci/signers.json")
@@ -275,18 +274,17 @@ def publish(version, directory):
     a.require(all(release.get(key) == value for key, value in expected.items())
               and type(release.get("id")) is int and release["id"] > 0, "Conflicting release exists")
     records = release.get("assets", [])
-    names = [asset.get("name") for asset in records]
-    a.require(len(names) == len(set(names)) and set(names) <= metadata["assets"].keys(), "Unexpected published assets")
+    assets = {asset.get("name"): asset for asset in records}
+    a.require(len(assets) == len(records) and assets.keys() <= metadata["assets"].keys(), "Unexpected published assets")
     for name, digest in metadata["assets"].items():
-        matches = [asset for asset in records if asset.get("name") == name]
+        existing = assets.get(name)
         raw = a.regular(directory / name, a.MAX_BUNDLE)
-        if not matches:
+        if existing is None:
             a.require(release.get("draft") is True, "Published release is incomplete; never replace it")
             url = "https://uploads.github.com/repos/" + gh.REPOSITORY + "/releases/" + str(release["id"]) + "/assets?name=" + name
             status, reply = gh.request(url, method="POST", data=raw)
             a.require(status == 201, "Release asset upload failed")
-            matches = [a.json_object(reply)]
-        existing = matches[0]
+            existing = a.json_object(reply)
         a.require(existing.get("name") == name and existing.get("state") == "uploaded"
                   and existing.get("size") == len(raw) and existing.get("digest") == "sha256:" + digest,
                   "Published release bytes conflict")

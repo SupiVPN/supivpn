@@ -96,6 +96,17 @@ func readPrivateKey(path, kind string) ([]byte, error) {
 	return data, nil
 }
 
+func privateDirectory(path string) error {
+	if err := os.MkdirAll(path, 0700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+		return errors.New("server key directory must be private (0700)")
+	}
+	return nil
+}
+
 // publish uses an atomic, no-replace link; neither a partial file nor an
 // overwrite of an existing key/profile is visible to readers.
 func publish(path string, data []byte) error {
@@ -158,12 +169,8 @@ func (i Issuer) EnsureServerKey(ctx context.Context, path string) error {
 		return err
 	}
 	parent := filepath.Dir(path)
-	if err := os.MkdirAll(parent, 0700); err != nil {
+	if err := privateDirectory(parent); err != nil {
 		return err
-	}
-	info, err := os.Lstat(parent)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
-		return errors.New("server key directory must be private (0700)")
 	}
 	if err := i.checkVersion(ctx); err != nil {
 		return err
@@ -192,12 +199,8 @@ func (i Issuer) EnsureServerKeyInStore(ctx context.Context, path, secretID strin
 		return errors.New("server key must be an absolute path")
 	}
 	parent := filepath.Dir(path)
-	if err := os.MkdirAll(parent, 0700); err != nil {
+	if err := privateDirectory(parent); err != nil {
 		return err
-	}
-	info, err := os.Lstat(parent)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
-		return errors.New("server key directory must be private (0700)")
 	}
 	local, localErr := readPrivateKey(path, serverType)
 	if localErr != nil && !errors.Is(localErr, os.ErrNotExist) {
@@ -253,13 +256,17 @@ func Render(template, clientKey []byte) ([]byte, error) {
 	if err := validateKey(clientKey, clientType); err != nil {
 		return nil, err
 	}
-	slot := "<tls-crypt-v2>\n" + Placeholder + "\n</tls-crypt-v2>"
 	source := strings.ReplaceAll(string(template), "\r\n", "\n")
-	if strings.Count(source, Placeholder) != 1 || strings.Count(source, "<tls-crypt-v2>") != 1 ||
-		strings.Count(source, "</tls-crypt-v2>") != 1 || !strings.Contains(source, slot) {
+	if !validTemplate(source) {
 		return nil, errors.New("profile template must contain exactly one tls-crypt-v2 inline placeholder")
 	}
 	return []byte(strings.Replace(source, Placeholder, strings.TrimSpace(string(clientKey)), 1)), nil
+}
+
+func validTemplate(source string) bool {
+	return strings.Count(source, Placeholder) == 1 && strings.Count(source, "<tls-crypt-v2>") == 1 &&
+		strings.Count(source, "</tls-crypt-v2>") == 1 &&
+		strings.Contains(source, "<tls-crypt-v2>\n"+Placeholder+"\n</tls-crypt-v2>")
 }
 
 // Issue creates one new per-profile key. The wrapping key never leaves its path

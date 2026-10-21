@@ -46,6 +46,12 @@ def fixture(root, arch="arm64"):
 
 
 class ArtifactTests(unittest.TestCase):
+    def test_checksum_bytes_are_sorted_and_stable(self):
+        assets = {"z.tar.gz": "a" * 64, "a.tar.gz": "b" * 64}
+        expected = ("b" * 64 + "  a.tar.gz\n" + "a" * 64 + "  z.tar.gz\n").encode("ascii")
+        self.assertEqual(a.checksums(assets), expected)
+        self.assertEqual(a.checksums(dict(reversed(list(assets.items())))), expected)
+
     def test_component_swap_is_rejected_even_with_updated_zip_checksum(self):
         files = fixture(self.root)
         files["lambda/supivpn-agent-lambda.zip"] = files["lambda/supivpn-recovery-lambda.zip"]

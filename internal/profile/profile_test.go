@@ -98,31 +98,59 @@ func TestPrivateProfilesAndPersistentServerKey(t *testing.T) {
 }
 
 func TestInitializationRefusesInvalidExistingKey(t *testing.T) {
-	for _, name := range []string{"corrupt", "public", "symlink"} {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			key := filepath.Join(dir, "server.key")
-			data := testKey(serverType)
-			mode := os.FileMode(0600)
-			switch name {
-			case "corrupt":
-				data = []byte("invalid test-only data")
-			case "public":
-				mode = 0644
-			case "symlink":
-				if err := os.Symlink(filepath.Join(dir, "missing"), key); err != nil {
+	for mode, initialize := range map[string]func(context.Context, string) error{
+		"local": fakeIssuer().EnsureServerKey,
+		"shared": func(ctx context.Context, path string) error {
+			return fakeIssuer().EnsureServerKeyInStore(ctx, path, "cluster", &memorySecretStore{})
+		},
+	} {
+		for _, name := range []string{"corrupt", "public", "symlink", "public-directory", "directory-symlink"} {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				dir := t.TempDir()
+				if err := os.Chmod(dir, 0700); err != nil {
 					t.Fatal(err)
 				}
-			}
-			if name != "symlink" {
-				if err := os.WriteFile(key, data, mode); err != nil {
-					t.Fatal(err)
+				key := filepath.Join(dir, "server.key")
+				data := testKey(serverType)
+				permissions := os.FileMode(0600)
+				switch name {
+				case "corrupt":
+					data = []byte("invalid test-only data")
+				case "public":
+					permissions = 0644
+				case "symlink":
+					if err := os.Symlink(filepath.Join(dir, "missing"), key); err != nil {
+						t.Fatal(err)
+					}
+				case "public-directory":
+					if err := os.Chmod(dir, 0755); err != nil {
+						t.Fatal(err)
+					}
+				case "directory-symlink":
+					alias := filepath.Join(t.TempDir(), "alias")
+					if err := os.Symlink(dir, alias); err != nil {
+						t.Fatal(err)
+					}
+					key = filepath.Join(alias, "server.key")
 				}
-			}
-			if fakeIssuer().EnsureServerKey(context.Background(), key) == nil {
-				t.Fatal("unsafe existing key accepted or replaced")
-			}
-		})
+				if name == "corrupt" || name == "public" {
+					if err := os.WriteFile(key, data, permissions); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if initialize(context.Background(), key) == nil {
+					t.Fatal("unsafe existing key accepted or replaced")
+				}
+				if name == "corrupt" || name == "public" {
+					after, err := os.ReadFile(key)
+					if err != nil || !bytes.Equal(after, data) {
+						t.Fatal("refused initialization changed existing key")
+					}
+				} else if _, err := os.Stat(key); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("refused initialization created a key")
+				}
+			})
+		}
 	}
 }
 
@@ -131,10 +159,19 @@ func TestRenderRejectsWrappingKeyAndMalformedTemplate(t *testing.T) {
 	if _, err := Render([]byte(template), testKey(serverType)); err == nil {
 		t.Fatal("server key included in profile")
 	}
-	for _, source := range []string{"client", Placeholder, template + template, template + Placeholder} {
-		if _, err := Render([]byte(source), testKey(clientType)); err == nil {
-			t.Fatal("invalid inline slot accepted")
-		}
+	for _, source := range []string{"client", Placeholder, template + template, template + Placeholder, template + "<tls-crypt-v2>", template + "</tls-crypt-v2>"} {
+		t.Run(source, func(t *testing.T) {
+			if _, err := Render([]byte(source), testKey(clientType)); err == nil {
+				t.Fatal("invalid inline slot accepted")
+			}
+			load := func(context.Context) ([]byte, error) {
+				t.Fatal("invalid template accessed wrapping key")
+				return nil, nil
+			}
+			if _, err := DownloadIssuer([]byte("remote supivpn.example.test 1194\n"+source), "vpn.test", load); err == nil {
+				t.Fatal("invalid download inline slot accepted")
+			}
+		})
 	}
 }
 
