@@ -36,6 +36,7 @@ type connection struct {
 	closing     bool
 	groupName   string
 	address     netip.Addr
+	peer        netip.AddrPort
 }
 
 type agent struct {
@@ -166,7 +167,7 @@ func (a *agent) handleEvent(e clientEvent) {
 		}
 		a.nextRevision++
 		c := &connection{cid: e.cid, kid: e.kid, revision: a.nextRevision, ticket: token,
-			expires: a.now().Add(time.Duration(a.config.PendingSeconds) * time.Second)}
+			expires: a.now().Add(time.Duration(a.config.PendingSeconds) * time.Second), peer: e.peer}
 		a.connections[e.cid], a.tickets[token] = c, c
 		a.logEvent("vpn.connection_requested", c)
 		if a.remote != nil {
@@ -202,10 +203,16 @@ func (a *agent) handleEvent(e clientEvent) {
 		if a.commandLocked(fmt.Sprintf("client-auth-nt %d %d", e.cid, e.kid)) != nil {
 			a.management.close()
 		} else {
+			if e.peer.IsValid() {
+				c.peer = e.peer
+			}
 			a.logEvent("vpn.tls_reauthenticated", c, slog.Uint64("kid", e.kid))
 		}
 	case "DISCONNECT":
 		if c := a.connections[e.cid]; c != nil {
+			if e.peer.IsValid() {
+				c.peer = e.peer
+			}
 			a.logTunnelEvent("vpn.disconnected", c)
 			a.removeLocked(c)
 		} else {
@@ -213,6 +220,9 @@ func (a *agent) handleEvent(e clientEvent) {
 		}
 	case "ESTABLISHED":
 		if c := a.connections[e.cid]; c != nil && c.active && !c.closing {
+			if e.peer.IsValid() {
+				c.peer = e.peer
+			}
 			a.logTunnelEvent("vpn.tunnel_established", c)
 		} else {
 			a.management.close()
@@ -239,6 +249,9 @@ func (a *agent) logEvent(event string, c *connection, attrs ...slog.Attr) {
 func (a *agent) logTunnelEvent(event string, c *connection) {
 	var attrs []slog.Attr
 	if c.active { attrs = append(attrs, slog.String("username", c.username)) }
+	if c.active && c.peer.IsValid() {
+		attrs = append(attrs, slog.String("peer_ip", c.peer.Addr().String()), slog.Uint64("peer_port", uint64(c.peer.Port())))
+	}
 	if c.address.IsValid() { attrs = append(attrs, slog.String("group_name", c.groupName), slog.String("address", c.address.String())) }
 	a.logEvent(event, c, attrs...)
 }

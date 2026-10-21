@@ -140,7 +140,7 @@ to obtain application audit fields.
 ## Schema and event selection
 
 ```json
-{"timestamp":"2026-10-15T12:00:00Z","level":"INFO","message":"VPN tunnel established","schema_version":1,"service":"supivpn","component":"agent","event":"vpn.tunnel_established","trace_id":"eea51fe908d8e94e6dffc2411ebb05ea","cid":12,"kid":0,"node_id":"node-a","generation":"generation-a","username":"alice","group_name":"admins-vpn","address":"10.200.0.129"}
+{"timestamp":"2026-10-15T12:00:00Z","level":"INFO","message":"VPN tunnel established","schema_version":1,"service":"supivpn","component":"agent","event":"vpn.tunnel_established","trace_id":"eea51fe908d8e94e6dffc2411ebb05ea","cid":12,"kid":0,"node_id":"node-a","generation":"generation-a","username":"alice","group_name":"admins-vpn","address":"10.200.0.129","peer_ip":"198.51.100.24","peer_port":54321}
 ```
 
 Always present: `timestamp` (UTC RFC3339Nano), `level`, `message`,
@@ -149,7 +149,7 @@ Correlate on `event` and typed fields, not message wording. The JSON schema
 version is independent of the database schema and release version.
 
 Optional fields depend on the event: `trace_id`, `cid`, `kid`, `node_id`, `generation`,
-`username`, `group_name`, `address`, `purpose`, `outcome`, `reason`,
+`username`, `group_name`, `address`, `peer_ip`, `peer_port`, `purpose`, `outcome`, `reason`,
 `operation`, `status`, `phase`, `action`, `operator_request_id`.
 Lambda records additionally use the platform invocation's `request_id` when
 available. Client headers cannot set it. Invocation context is reset between
@@ -159,7 +159,7 @@ identifies just one Lambda invocation and must not replace it.
 | Events | Meaning / severity |
 | --- | --- |
 | `vpn.connection_requested`, `vpn.tls_reauthenticated` | Connection accepted for authentication, or existing session accepted a TLS rekey; INFO |
-| `vpn.tunnel_established`, `vpn.disconnected` | Verified tunnel identity and address; INFO |
+| `vpn.tunnel_established`, `vpn.disconnected` | Verified tunnel identity, VPN address and last observed peer endpoint; INFO |
 | `vpn.browser_auth_requested`, `vpn.authorization_applied`, `vpn.session_expired` | VPN authentication/session lifecycle; INFO |
 | `vpn.authentication_refused`, `vpn.authorization_denied` | Local capacity/authorization rejection; WARN |
 | `saml.login_started`, `saml.authorization_decided` | Browser login purpose and decision; denied decisions are WARN |
@@ -186,6 +186,53 @@ retries before acknowledgement. Successful idempotent ACK/cancel retries can
 also repeat events with the same trace ID; these are not new connections.
 These events are not a complete HTTP access log or a list of every rejected
 network packet. API/front-proxy metrics remain necessary.
+
+### VPN address and observed peer endpoint
+
+`address` remains the IPv4 address allocated inside the VPN. Starting with
+v0.4.4, authorized tunnel establishment/disconnection events can additionally
+include `peer_ip` (canonical IPv4 or IPv6, without a port) and `peer_port`
+(an integer from 1 to 65535). These optional fields are an additive extension
+of JSON schema version 1; collectors must tolerate their absence on older nodes.
+
+The agent reads only OpenVPN's daemon-generated `untrusted_ip`/`untrusted_ip6`
+and `untrusted_port` during CONNECT/REAUTH, and `trusted_ip`/`trusted_ip6` and
+`trusted_port` during ESTABLISHED/DISCONNECT. Values must form one valid,
+unambiguous endpoint. Missing, malformed, duplicate or scoped-address values
+are omitted without changing authentication or connection cleanup. Peer
+information supplied through IV_/UV_ variables, browser headers and SAML
+attributes cannot populate these fields. Pending, unauthenticated disconnects
+omit them, as they omit `username`.
+
+Each connection retains its last valid endpoint observation. Establishment,
+successful reauthentication and disconnect notifications can update it. A
+disconnect inferred from a complete status snapshot uses the cached endpoint;
+status reconciliation still retains only CIDs. This is not continuous address
+tracking. A CID reused by a later connection cannot inherit an old endpoint.
+The authenticated SAML identity remains separate from this network metadata.
+
+With NAT/CGNAT or a client-side proxy, this is the address and port visible to
+OpenVPN, not necessarily a device's public or LAN address. Several users can
+share one IP, and one user can change addresses. Never use it as an identity
+or authorization input.
+
+For an AWS Network Load Balancer forwarding directly to supported targets:
+
+| Target group | Default endpoint observed by OpenVPN |
+| --- | --- |
+| UDP or TCP_UDP, instance/IP targets | Client source IP; preservation is mandatory |
+| TCP, instance targets | Client source IP; preservation is enabled by default |
+| TCP, IP targets | NLB source IP; enable `preserve_client_ip.enabled` to retain the client IP |
+
+IP preservation requires a supported network path and address family. In
+particular, IPv6-to-IPv4 translation and PrivateLink can replace the source
+address, and Transit Gateway paths do not support preservation. The log reports
+what OpenVPN actually observes; it cannot reconstruct an address removed upstream.
+Do not enable PROXY protocol v2 on a target group without a receiver that parses
+it; the current direct OpenVPN integration does not add such a receiver.
+See [AWS client IP preservation and PROXY protocol requirements](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/edit-target-group-attributes.html).
+Local native tests cover daemon endpoint delivery over TCP and UDP; they do not
+constitute an AWS NLB deployment test.
 
 ## Flow correlation and future tracing
 
@@ -261,8 +308,8 @@ Verified tunnel events include the exact decoded SAML NameID as `username`.
 Unverified/pre-authorization events omit it. JSON escapes controls, quotes,
 line separators and bidirectional controls. Log viewers must display strings
 as data; decoding JSON must not turn embedded controls into new log entries.
-Usernames, group names and VPN addresses are personal/access metadata: restrict
-read access and apply retention at every copy.
+Usernames, group names, VPN addresses and peer endpoints are personal/access
+metadata: restrict read access and apply retention at every copy.
 
 Version v0.2.0 introduced JSON logs and the VM default file destination. When
 upgrading from an earlier version:
