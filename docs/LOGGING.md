@@ -150,7 +150,9 @@ version is independent of the database schema and release version.
 
 Optional fields depend on the event: `trace_id`, `cid`, `kid`, `node_id`, `generation`,
 `username`, `group_name`, `address`, `peer_ip`, `peer_port`, `purpose`, `outcome`, `reason`,
-`operation`, `status`, `phase`, `action`, `operator_request_id`.
+`operation`, `status`, `phase`, `action`, `operator_request_id`, `client_version`,
+`client_platform`, `establishment_ms`, `duration_seconds`, `bytes_received`,
+`bytes_sent`, `disconnect_source`, `disconnect_reason`.
 Lambda records additionally use the platform invocation's `request_id` when
 available. Client headers cannot set it. Invocation context is reset between
 requests. A flow's `trace_id` is shared across components; `request_id` still
@@ -233,6 +235,70 @@ it; the current direct OpenVPN integration does not add such a receiver.
 See [AWS client IP preservation and PROXY protocol requirements](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/edit-target-group-attributes.html).
 Local native tests cover daemon endpoint delivery over TCP and UDP; they do not
 constitute an AWS NLB deployment test.
+
+### Establishment diagnostics and disconnect summaries
+
+Starting with v0.4.5, `vpn.tunnel_established` can include:
+
+| Field | Meaning |
+| --- | --- |
+| `client_version` | Initial CONNECT's `IV_VER`, a bounded printable ASCII label |
+| `client_platform` | Initial CONNECT's `IV_PLAT`, a bounded platform identifier |
+| `establishment_ms` | Agent-observed elapsed milliseconds from handling CONNECT to the first ESTABLISHED |
+
+Client version/platform are self-reported diagnostics, not verified device
+identity or proof of a secure client. They are optional and can be absent or
+incorrect. Rekey events cannot replace the initial labels or reset the timer.
+The establishment interval includes browser/SAML login and agent processing;
+it is not network RTT. A missing start or backwards test/system clock omits the
+interval. Fields are restricted to authorized establishment events.
+
+`vpn.disconnected` includes `disconnect_source=management_event` for a daemon
+DISCONNECT or `disconnect_source=status_snapshot` when a complete ordered status
+snapshot confirms that the CID is gone. For example:
+
+```json
+{"event":"vpn.disconnected","cid":12,"disconnect_source":"management_event","disconnect_reason":"operator_requested","duration_seconds":7200,"bytes_received":125000,"bytes_sent":250000}
+```
+
+This abbreviated example omits the common envelope and identity fields.
+Authorized DISCONNECT summaries can contain `duration_seconds` from OpenVPN's
+`time_duration`, `bytes_received` from the client, and `bytes_sent` to the
+client. These are OpenVPN's session/link counters, not application payload or
+cloud billing totals. The daemon duration starts at client-instance creation,
+so it can include authentication. Zero is a valid observation. Missing,
+malformed, negative, overflowing or duplicate values are omitted individually.
+They are unsigned 64-bit integers; consumers needing exact large counts must
+avoid lossy floating-point parsing. No credential or complete environment block
+is retained. See [OpenVPN environment variables](https://build.openvpn.net/man/openvpn-2.6/openvpn.8.html)
+and [management notifications](https://openvpn.net/community-docs/management-interface.html).
+
+If DISCONNECT is lost, status cleanup cannot recover its final duration or
+byte totals; these fields remain absent. No zero, stale snapshot or local
+estimate substitutes for a final daemon observation. Pending unauthenticated
+disconnects omit these metrics, as they omit the verified identity. A removed
+or reused CID cannot inherit earlier diagnostics, metrics or reasons.
+
+`disconnect_reason` records the first known SupiVPN decision when present:
+
+| Value | SupiVPN decision |
+| --- | --- |
+| `operator_requested` | An exact-user operator drop requested termination |
+| `session_expired` | An authorized session's deadline expired |
+| `pending_auth_expired` | A pending authentication deadline expired |
+| `reauthentication_refused` | Rekey was refused for an ineligible tracked connection |
+| `connection_limit` | Local authorization exceeded the user's connection limit |
+| `invalid_groups_claim`, `no_vpn_group`, `pool_full` | Authorization or allocation was refused |
+| `controller_refused` | The remote-controller path refused a pending login |
+
+This is the agent's termination/refusal decision, not proof of the underlying
+network cause. It survives status-based cleanup. Without such a decision the
+reason is omitted; a network failure, a client clicking Disconnect and a lost
+connection are not reliably distinguishable from DISCONNECT alone. No client
+environment field can supply the reason or confirmation source.
+
+All fields are additive within JSON schema version 1. Existing collectors must
+tolerate their absence. They add no SQL/API fields or authorization policy.
 
 ## Flow correlation and future tracing
 

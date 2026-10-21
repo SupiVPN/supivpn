@@ -441,6 +441,10 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				}
 				a.handleEvent(established)
 				assertPeerAudit(t, audit, "vpn.tunnel_established", e.cid, established.peer.Addr().String(), established.peer.Port())
+				row := auditRow(t, audit, "vpn.tunnel_established", e.cid)
+				if row["client_version"] != e.client.version || row["client_platform"] != "linux" || row["establishment_ms"] == nil {
+					t.Fatal("native establishment audit missing client diagnostics or timing")
+				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("tunnel establishment unconfirmed")
 			}

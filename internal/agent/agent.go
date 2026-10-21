@@ -37,6 +37,9 @@ type connection struct {
 	groupName   string
 	address     netip.Addr
 	peer        netip.AddrPort
+	client      clientInfo
+	requestedAt, establishedAt time.Time
+	disconnectReason string
 }
 
 type agent struct {
@@ -120,8 +123,9 @@ func (a *agent) denyLocked(e clientEvent) {
 
 // A successful kill command is not proof of disconnection. Keep the IP/slot
 // until DISCONNECT or a complete status snapshot confirms absence.
-func (a *agent) closeClientLocked(c *connection) {
+func (a *agent) closeClientLocked(c *connection, reason string) {
     if !c.closeBy.IsZero() { return }
+    if c.disconnectReason == "" { c.disconnectReason = reason }
     c.closing = true
     c.closeBy = a.now().Add(30*time.Second)
     delete(a.tickets, c.ticket)
@@ -167,7 +171,8 @@ func (a *agent) handleEvent(e clientEvent) {
 		}
 		a.nextRevision++
 		c := &connection{cid: e.cid, kid: e.kid, revision: a.nextRevision, ticket: token,
-			expires: a.now().Add(time.Duration(a.config.PendingSeconds) * time.Second), peer: e.peer}
+			expires: a.now().Add(time.Duration(a.config.PendingSeconds) * time.Second), peer: e.peer,
+			client: e.client, requestedAt: a.now()}
 		a.connections[e.cid], a.tickets[token] = c, c
 		a.logEvent("vpn.connection_requested", c)
 		if a.remote != nil {
@@ -187,14 +192,14 @@ func (a *agent) handleEvent(e clientEvent) {
 		if c != nil && c.active && (c.closing || !c.sessionValid(a.now())) {
             // Normal expiry requests RESTART, not AUTH_FAILED: Connect must be
             // allowed to reconnect and perform a fresh browser authentication.
-            a.closeClientLocked(c)
+            a.closeClientLocked(c, "session_expired")
             return
         }
 		if c == nil || c.closing || !c.active || !c.sessionValid(a.now()) {
 			a.denyLocked(e)
 			// client-deny alone may leave the old TLS key alive until it expires.
 			if c != nil {
-				a.closeClientLocked(c)
+				a.closeClientLocked(c, "reauthentication_refused")
 			} else if a.commandLocked(fmt.Sprintf("client-kill %d", e.cid)) != nil {
 				a.management.close()
 			}
@@ -213,13 +218,14 @@ func (a *agent) handleEvent(e clientEvent) {
 			if e.peer.IsValid() {
 				c.peer = e.peer
 			}
-			a.logTunnelEvent("vpn.disconnected", c)
+			a.logDisconnect(c, "management_event", e.metrics)
 			a.removeLocked(c)
 		} else {
-			a.logEvent("vpn.disconnected", nil, slog.Uint64("cid", e.cid))
+			a.logEvent("vpn.disconnected", nil, slog.Uint64("cid", e.cid), slog.String("disconnect_source", "management_event"))
 		}
 	case "ESTABLISHED":
 		if c := a.connections[e.cid]; c != nil && c.active && !c.closing {
+			if c.establishedAt.IsZero() { c.establishedAt = a.now() }
 			if e.peer.IsValid() {
 				c.peer = e.peer
 			}
@@ -232,7 +238,7 @@ func (a *agent) handleEvent(e clientEvent) {
 			if _, exists := e.clients[cid]; !exists {
 				// The daemon no longer owns this CID, even if it never emitted
 				// DISCONNECT for the abandoned handshake. Use normal cancellation.
-				a.logTunnelEvent("vpn.disconnected", c)
+				a.logDisconnect(c, "status_snapshot", disconnectMetrics{})
 				a.removeLocked(c)
 			}
 		}
@@ -246,8 +252,14 @@ func (a *agent) logEvent(event string, c *connection, attrs ...slog.Attr) {
 	if c != nil { ctx = tracecontext.WithID(ctx, tracecontext.ForLogin(c.ticket)) }
 	logging.Emit(ctx, event, attrs...)
 }
-func (a *agent) logTunnelEvent(event string, c *connection) {
-	var attrs []slog.Attr
+func (a *agent) logTunnelEvent(event string, c *connection, attrs ...slog.Attr) {
+	if event == "vpn.tunnel_established" && c.active {
+		if c.client.version != "" { attrs = append(attrs, slog.String("client_version", c.client.version)) }
+		if c.client.platform != "" { attrs = append(attrs, slog.String("client_platform", c.client.platform)) }
+		if !c.requestedAt.IsZero() && !c.establishedAt.IsZero() && !c.establishedAt.Before(c.requestedAt) {
+			attrs = append(attrs, slog.Int64("establishment_ms", c.establishedAt.Sub(c.requestedAt).Milliseconds()))
+		}
+	}
 	if c.active { attrs = append(attrs, slog.String("username", c.username)) }
 	if c.active && c.peer.IsValid() {
 		attrs = append(attrs, slog.String("peer_ip", c.peer.Addr().String()), slog.Uint64("peer_port", uint64(c.peer.Port())))
@@ -277,7 +289,9 @@ func (a *agent) expire() {
 		}
 		// Keep the lease reserved until the daemon confirms the old client is gone.
 		// Kill both an abandoned pending handshake and an expired active session.
-        a.closeClientLocked(c)
+        reason := "pending_auth_expired"
+        if c.active { reason = "session_expired" }
+        a.closeClientLocked(c, reason)
 		if !a.readyLocked() { return }
 		a.logEvent("vpn.session_expired", c)
 	}

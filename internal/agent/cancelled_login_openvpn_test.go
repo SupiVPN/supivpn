@@ -161,6 +161,9 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 						if !event.peer.IsValid() || !event.peer.Addr().IsLoopback() || event.peer.Port() == 0 {
 							t.Fatal("native TCP/UDP CONNECT did not retain the observed peer endpoint")
 						}
+						if event.client.version == "" || event.client.platform != "linux" {
+							t.Fatal("native CONNECT did not retain client diagnostics")
+						}
 						return a.connections[event.cid]
 					case <-deadline:
 						t.Fatal("client did not request login")
@@ -253,6 +256,17 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 				// The authenticated endpoint must remain available even when the
 				// daemon's DISCONNECT is omitted and a status snapshot removes it.
 				assertPeerAudit(t, audit, "vpn.disconnected", old.cid, old.peer.Addr().String(), old.peer.Port())
+				row := auditRow(t, audit, "vpn.disconnected", old.cid)
+				if tc.dropDisconnect {
+					if row["disconnect_source"] != "status_snapshot" {
+						t.Fatal("missing DISCONNECT evidence incorrectly attributed")
+					}
+					for _, key := range []string{"duration_seconds", "bytes_received", "bytes_sent"} {
+						if _, ok := row[key]; ok {
+							t.Fatal("status cleanup fabricated final counters")
+						}
+					}
+				}
 			}
 			// Return to synchronous event handling for the fresh connection.
 			stopEvents()
@@ -260,13 +274,59 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 			if forwarded != nil {
 				<-forwarded
 			}
-			freshLog, _, pauseClient := startClient()
+			freshLog, stopFresh, pauseClient := startClient()
 			fresh := connect()
 			waitProtocol(t, freshLog, "WEB_AUTH:external:")
 			if err := complete(fresh); err != nil {
 				t.Fatal("retry could not reuse released user slot", err)
 			}
 			waitProtocol(t, freshLog, "Initialization Sequence Completed")
+			if tc.name != "udp/cancel-before-saml" {
+				select {
+				case e := <-m.events:
+					if e.kind != "ESTABLISHED" || e.cid != fresh.cid {
+						t.Fatal("fresh tunnel not established")
+					}
+					a.handleEvent(e)
+				case <-time.After(5 * time.Second):
+					t.Fatal("establishment notification missing")
+				}
+				// Abrupt TCP close / UDP keepalive expiry must provide the daemon's
+				// actual final counters. The existing fixture deadlines are retained.
+				stopFresh()
+				deadline := time.After(12 * time.Second)
+			finalDisconnect:
+				for {
+					select {
+					case e, ok := <-m.events:
+						if !ok {
+							t.Fatal("management closed before final counters")
+						}
+						a.handleEvent(e)
+						if e.kind != "DISCONNECT" || e.cid != fresh.cid {
+							continue
+						}
+						for _, counter := range []auditCounter{e.metrics.duration, e.metrics.received, e.metrics.sent} {
+							if !counter.seen || counter.invalid {
+								t.Fatal("native final counter missing or invalid")
+							}
+						}
+						if e.metrics.received.value == 0 || e.metrics.sent.value == 0 {
+							t.Fatal("native tunnel had no counted traffic")
+						}
+						row := auditRow(t, audit, "vpn.disconnected", fresh.cid)
+						if row["disconnect_source"] != "management_event" || row["duration_seconds"] != float64(e.metrics.duration.value) || row["bytes_received"] != float64(e.metrics.received.value) || row["bytes_sent"] != float64(e.metrics.sent.value) {
+							t.Fatal("native final counters lost in audit")
+						}
+						if _, ok := row["disconnect_reason"]; ok {
+							t.Fatal("network close acquired an invented SupiVPN reason")
+						}
+						break finalDisconnect
+					case <-deadline:
+						t.Fatal("native final DISCONNECT missing")
+					}
+				}
+			}
 			if tc.name == "udp/cancel-before-saml" {
 				t.Run("short-outage-preserves-tunnel", func(t *testing.T) {
 					t.Cleanup(func() {

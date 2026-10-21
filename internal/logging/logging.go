@@ -38,8 +38,8 @@ var events = map[string]definition{
 	"logging.output_failed":           {slog.LevelError, "Log file unavailable; application logging switched to stderr until restart", ""},
 	"vpn.authentication_refused":      {slog.LevelWarn, "VPN authentication refused", "reason"},
 	"vpn.browser_auth_requested":      {slog.LevelInfo, "VPN browser authentication requested", ""},
-	"vpn.tunnel_established":          {slog.LevelInfo, "VPN tunnel established", "username group_name address peer_ip peer_port"},
-	"vpn.disconnected":                {slog.LevelInfo, "VPN disconnected", "username group_name address peer_ip peer_port"},
+	"vpn.tunnel_established":          {slog.LevelInfo, "VPN tunnel established", "username group_name address peer_ip peer_port client_version client_platform establishment_ms"},
+	"vpn.disconnected":                {slog.LevelInfo, "VPN disconnected", "username group_name address peer_ip peer_port duration_seconds bytes_received bytes_sent disconnect_source disconnect_reason"},
 	"vpn.session_expired":             {slog.LevelInfo, "VPN authentication/session expired", ""},
 	"vpn.authorization_denied":        {slog.LevelWarn, "VPN authorization refused", "reason"},
 	"vpn.authorization_applied":       {slog.LevelInfo, "VPN authorization acknowledged by OpenVPN", ""},
@@ -183,6 +183,19 @@ func identifier(s string, max int) bool {
 	return true
 }
 
+// ValidClientVersion bounds a self-reported diagnostic label, not an identity
+// or a security version assertion. Controls and non-ASCII text are refused.
+func ValidClientVersion(s string) bool {
+	if len(s) == 0 || len(s) > 128 || strings.TrimSpace(s) != s { return false }
+	for _, ch := range s {
+		if ch < 32 || ch > 126 { return false }
+	}
+	return true
+}
+
+// ValidClientPlatform permits bounded platform names, including future clients.
+func ValidClientPlatform(s string) bool { return identifier(s, 32) }
+
 func safe(a slog.Attr) bool {
 	// Never resolve LogValuer/Any values: even String/Error methods can leak data.
 	switch a.Key {
@@ -190,6 +203,8 @@ func safe(a slog.Attr) bool {
 		return a.Value.Kind() == slog.KindUint64 || a.Value.Kind() == slog.KindInt64 && a.Value.Int64() >= 0
 	case "status":
 		return a.Value.Kind() == slog.KindInt64 && a.Value.Int64() >= 0 && a.Value.Int64() <= 599
+	case "duration_seconds", "bytes_received", "bytes_sent", "establishment_ms":
+		return a.Value.Kind() == slog.KindUint64 || a.Value.Kind() == slog.KindInt64 && a.Value.Int64() >= 0
 	case "peer_port":
 		return a.Value.Kind() == slog.KindUint64 && a.Value.Uint64() > 0 && a.Value.Uint64() <= 65535 ||
 			a.Value.Kind() == slog.KindInt64 && a.Value.Int64() > 0 && a.Value.Int64() <= 65535
@@ -211,6 +226,14 @@ func safe(a slog.Attr) bool {
 		return err == nil && ip.Zone() == ""
 	case "operation":
 		return oneOf(s, "register fetch ack cancel heartbeat")
+	case "client_version":
+		return ValidClientVersion(s)
+	case "client_platform":
+		return ValidClientPlatform(s)
+	case "disconnect_source":
+		return oneOf(s, "management_event status_snapshot")
+	case "disconnect_reason":
+		return oneOf(s, "session_expired pending_auth_expired operator_requested reauthentication_refused connection_limit invalid_groups_claim no_vpn_group pool_full controller_refused")
 	case "action":
 		return oneOf(s, "maintenance-begin maintenance-end maintenance-renew maintenance-replace recovery-resume recovery-resolve")
 	case "phase":

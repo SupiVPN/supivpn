@@ -79,7 +79,7 @@ func (a *agent) userSessions(ctx context.Context, issuer string, q userSessionsR
         result.Matched++
         if q.Operation == "drop" && !c.closing {
             // Keep the IP and controller slot until the normal DISCONNECT path.
-            a.closeClientLocked(c)
+            a.closeClientLocked(c, "operator_requested")
             result.Requested++
             a.logEvent("operator.tunnel_drop_requested", c)
         }

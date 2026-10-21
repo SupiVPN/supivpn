@@ -25,6 +25,8 @@ type clientEvent struct {
 	kid     uint64
 	sso     string
 	peer    netip.AddrPort
+	client  clientInfo
+	metrics disconnectMetrics
 	clients map[uint64]struct{}
 }
 
@@ -160,6 +162,7 @@ func (m *management) read() {
 	scanner.Buffer(make([]byte, 4096), 64<<10)
 	var pending *clientEvent
 	var peer peerEnvironment
+	var session sessionEnvironment
 	seenHold := false
 	var status managementStatus
 	for scanner.Scan() {
@@ -223,6 +226,7 @@ func (m *management) read() {
 		case line == ">CLIENT:ENV,END":
 			if pending != nil {
 				pending.peer = peer.endpoint()
+				pending.client, pending.metrics = session.client, session.metrics
 				select {
 				case m.events <- *pending:
 				default:
@@ -236,6 +240,7 @@ func (m *management) read() {
 					pending.sso = strings.TrimPrefix(line, ">CLIENT:ENV,IV_SSO=")
 				}
 				peer.add(pending.kind, strings.TrimPrefix(line, ">CLIENT:ENV,"))
+				session.add(pending.kind, strings.TrimPrefix(line, ">CLIENT:ENV,"))
 			}
 		case strings.HasPrefix(line, ">CLIENT:"):
 			e, err := parseClientHeader(line)
@@ -244,6 +249,7 @@ func (m *management) read() {
 			}
 			pending = &e
 			peer = peerEnvironment{}
+			session = sessionEnvironment{}
 		}
 	}
 }

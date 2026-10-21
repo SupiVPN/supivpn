@@ -99,6 +99,7 @@ func (a *agent) Complete(ctx context.Context, pending controller.Pending, decisi
 		}
 		if count >= decision.MaxConnections {
 			c.closing = true
+			c.disconnectReason = "connection_limit"
 			delete(a.tickets, c.ticket)
 			a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
 			a.logEvent("vpn.authorization_denied", c, slog.String("reason", "connection_limit"))
@@ -133,6 +134,7 @@ func (a *agent) applyAuthorizationLocked(c *connection, decision controller.Auth
 	}
 	if reason != "" {
 		c.closing = true
+		c.disconnectReason = reason
 		delete(a.tickets, c.ticket)
 		a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
 		a.logEvent("vpn.authorization_denied", c, slog.String("reason", reason))
