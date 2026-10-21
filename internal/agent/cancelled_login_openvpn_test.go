@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -103,7 +104,7 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 			}
 			auth := filepath.Join(dir, "test-auth")
 			writeTestFile(t, auth, []byte("unused-test\nunused-test\n"))
-			startClient := func() (*protocolLog, func()) {
+			startClient := func() (*protocolLog, func(), func(bool)) {
 				t.Helper()
 				ctx, cancel := context.WithCancel(context.Background())
 				cmd := exec.CommandContext(ctx, binary, "--config", clientConfig, "--auth-user-pass", auth,
@@ -118,7 +119,17 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 				var once sync.Once
 				stop := func() { once.Do(func() { cancel(); _ = cmd.Wait() }) }
 				t.Cleanup(stop)
-				return log, stop
+				pause := func(paused bool) {
+					t.Helper()
+					signal := syscall.SIGCONT
+					if paused {
+						signal = syscall.SIGSTOP
+					}
+					if err := cmd.Process.Signal(signal); err != nil {
+						t.Fatal("cannot pause/resume isolated client")
+					}
+				}
+				return log, stop, pause
 			}
 			origin, _ := url.Parse("https://vpn.example.test")
 			a := newAgent(groupConfig(), origin)
@@ -157,7 +168,7 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 					NotOnOrAfter: now.Add(time.Minute), SessionExpiresAt: now.Add(10 * time.Minute),
 				})
 			}
-			log, cancel := startClient()
+			log, cancel, _ := startClient()
 			old := connect()
 			waitProtocol(t, log, "WEB_AUTH:external:")
 			cancel()
@@ -165,7 +176,7 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 				if err := complete(old); err != nil {
 					t.Fatal("late synthetic authorization failed", err)
 				}
-				retryLog, stopRetry := startClient()
+				retryLog, stopRetry, _ := startClient()
 				retry := connect()
 				waitProtocol(t, retryLog, "WEB_AUTH:external:")
 				if err := complete(retry); !errors.Is(err, controller.ErrConnectionLimit) {
@@ -232,13 +243,42 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 			if forwarded != nil {
 				<-forwarded
 			}
-			freshLog, _ := startClient()
+			freshLog, _, pauseClient := startClient()
 			fresh := connect()
 			waitProtocol(t, freshLog, "WEB_AUTH:external:")
 			if err := complete(fresh); err != nil {
 				t.Fatal("retry could not reuse released user slot", err)
 			}
 			waitProtocol(t, freshLog, "Initialization Sequence Completed")
+			if tc.name == "udp/cancel-before-saml" {
+				t.Run("short-outage-preserves-tunnel", func(t *testing.T) {
+					select {
+					case e := <-m.events:
+						if e.kind != "ESTABLISHED" || e.cid != fresh.cid {
+							t.Fatal("fresh tunnel not established")
+						}
+						a.handleEvent(e)
+					case <-time.After(5 * time.Second):
+						t.Fatal("established notification missing")
+					}
+					address, expires := fresh.address, fresh.expires
+					// SIGSTOP silences this client, including keepalives, without
+					// closing its socket. No host networking or real client is used.
+					pauseClient(true)
+					t.Cleanup(func() { pauseClient(false) })
+					time.Sleep(2 * time.Second) // Less than the fixture's six-second server timeout.
+					consumeStatus(t, a)
+					if a.connections[fresh.cid] != fresh || !a.readyLocked() {
+						t.Fatal("brief outage released a live tunnel")
+					}
+					pauseClient(false)
+					time.Sleep(8 * time.Second) // Beyond that timeout: resumed keepalives must work.
+					consumeStatus(t, a)
+					if a.connections[fresh.cid] != fresh || fresh.address != address || fresh.expires != expires || !a.readyLocked() {
+						t.Fatal("restored client lost its CID/IP or changed authorization")
+					}
+				})
+			}
 		})
 	}
 }
