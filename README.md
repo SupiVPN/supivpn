@@ -19,6 +19,42 @@ The controller runs as an HTTP service on a VM or behind AWS API Gateway and
 Lambda. Both modes use PostgreSQL 18 and the same authorization logic.
 AWS adapters are isolated from SAML, IP allocation, and profile issuance.
 
+## Architecture at a glance
+
+Work identity answers **who you are**. SupiVPN decides **what you can access**.
+The VPN transport carries **your traffic**. Keeping these responsibilities
+separate is the starting point for adding more integrations over time.
+
+```mermaid
+flowchart TB
+    IdP["Identity provider"] <-->|Sign-in via browser| Control["Access controller<br/>SAML authentication today<br/>Group and session policy"]
+    Control <--> State["State backend<br/>PostgreSQL today"]
+    Control -->|Access decisions via agent API| Node["VPN node<br/>Go agent + OpenVPN today"]
+    Client["VPN client"] <-->|Encrypted tunnel| Node
+    Node <--> Resources["Your resources"]
+```
+
+This is a logical overview: the controller and state backend do not forward
+VPN traffic. The Go agent applies access decisions and manages local IP leases;
+OpenVPN handles the tunnel and traffic forwarding.
+
+| Boundary | Available today | Direction |
+| --- | --- | --- |
+| Identity provider | Standard SAML IdPs; Okta is the documented setup example | More provider setup guides and interoperability coverage |
+| Authentication | SAML verification and signed group membership | Additional authentication protocols behind a common access-policy model |
+| State backend | PostgreSQL for shared login, decision, replay and session state | Additional storage implementations with the same consistency guarantees |
+| VPN transport | A separate OpenVPN process controlled by the Go agent | Keep transport separate from identity and access policy |
+
+Additional authentication protocols and shared storage backends are planned.
+The controller already has an internal `Backend` interface for login state and
+decision transitions, but runtime wiring and parts of the contracts still
+depend on PostgreSQL and SAML. New adapters require implementation and security
+testing before they can be selected in configuration.
+
+See the [detailed architecture](docs/ARCHITECTURE.md) for deployment modes,
+state ownership and trust boundaries, and [IdP configuration](docs/IDENTITY_PROVIDER.md)
+for the current SAML integration requirements.
+
 ## Features
 
 - SP-initiated SAML login from an existing OpenVPN client and browser profile downloads.
