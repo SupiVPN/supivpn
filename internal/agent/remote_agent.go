@@ -73,6 +73,7 @@ func (a *agent) refuseRemoteLocked(c *connection) {
 		return
 	}
 	c.closing = true
+	c.disconnectReason = "controller_refused"
 	delete(a.tickets, c.ticket)
 	a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
 }

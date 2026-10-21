@@ -219,7 +219,7 @@ func TestRejectedKillRequiresConfirmedAbsence(t *testing.T) {
 		a.attach(m)
 		c := &connection{cid: 7, kid: 1, active: true}
 		a.connections[7] = c
-		a.closeClientLocked(c)
+		a.closeClientLocked(c, "")
 		if a.connections[7] == nil {
 			t.Fatal("rejection released the slot without daemon evidence")
 		}
