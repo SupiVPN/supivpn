@@ -11,14 +11,9 @@ import (
 )
 
 const maxSAMLXMLBytes = 1 << 20
-const maxSAMLXMLDepth = 64
-const maxSAMLXMLElements = 512
-const maxSAMLXMLTokens = 4096
-const maxSAMLAttrsPerNode = 64
 
 var errSAMLXML = errors.New("invalid or excessive SAML XML")
 
-func checkSAMLXML(data []byte) error { return saml.CheckXML(data) }
 func parseSAMLResponse(sp *saml.ServiceProvider, encoded, requestID string) (*saml.Assertion, error) {
 	if len(encoded) > base64.StdEncoding.EncodedLen(maxSAMLXMLBytes) {
 		return nil, errSAMLXML

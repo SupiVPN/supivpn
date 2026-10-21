@@ -15,10 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"supivpn/internal/logging"
 	"net/http"
 	"net/url"
 	"strings"
+	"supivpn/internal/logging"
 	"time"
 
 	"supivpn/internal/saml"
@@ -73,7 +73,9 @@ func New(c Config, origin *url.URL, sp *saml.ServiceProvider, backend Backend, n
 			c.Groups[i].SessionSeconds = &seconds
 		}
 	}
-	if c.HasUnlimitedSessions() { logging.Emit(context.Background(), "session.unlimited_configured") }
+	if c.HasUnlimitedSessions() {
+		logging.Emit(context.Background(), "session.unlimited_configured")
+	}
 	u := *origin
 	a := &Controller{config: c, origin: &u, sp: sp, backend: backend, now: now, allowed: make(map[string]bool)}
 	if len(downloads) > 1 {
@@ -285,15 +287,10 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 	decision := a.authorizationBounds(assertion, pending.RequestID, groupName)
 	decision.DenialReason = denialReason
 	decision.MaxConnections = a.config.ConnectionLimit(groupName)
-	if err := backend.Complete(r.Context(), pending, decision); err != nil {
+	err = backend.Complete(r.Context(), pending, decision)
+	awaitingAgent := errors.Is(err, ErrDecisionPending)
+	if err != nil && !awaitingAgent {
 		switch {
-		case errors.Is(err, ErrDecisionPending):
-			logging.Emit(r.Context(), "saml.authorization_decided", slog.String("purpose", loginPurpose(ticket)), slog.String("outcome", "allowed"))
-			http.SetCookie(w, &http.Cookie{Name: cookie.Name, Path: "/", MaxAge: -1,
-				HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode})
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusAccepted)
-			fmt.Fprintln(w, "Sign-in verified. Waiting for the VPN server; check OpenVPN Connect.")
 		case errors.Is(err, ErrLoginExpired):
 			http.Error(w, "Login already used or expired", http.StatusGone)
 		case errors.Is(err, ErrGroupDenied):
@@ -310,6 +307,12 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 	logging.Emit(r.Context(), "saml.authorization_decided", slog.String("purpose", loginPurpose(ticket)), slog.String("outcome", "allowed"))
 	http.SetCookie(w, &http.Cookie{Name: cookie.Name, Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode})
+	if awaitingAgent {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprintln(w, "Sign-in verified. Waiting for the VPN server; check OpenVPN Connect.")
+		return
+	}
 	if isProfile {
 		// The one-use login is consumed before accessing the wrapping key.
 		// An interrupted download requires a new SAML flow, never a replay.
@@ -332,7 +335,9 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 }
 
 func loginPurpose(ticket string) string {
-	if strings.HasPrefix(ticket, "profile_") { return "profile_download" }
+	if strings.HasPrefix(ticket, "profile_") {
+		return "profile_download"
+	}
 	return "vpn_connect"
 }
 
