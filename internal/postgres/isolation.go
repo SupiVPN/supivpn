@@ -76,13 +76,13 @@ func NewIsolated(ctx context.Context, pool *pgxpool.Pool, c Component, f Fencer)
 }
 
 func CheckPrivileges(ctx context.Context, pool *pgxpool.Pool, c Component) error {
-	refused := errors.New("database component privileges invalid; require schema 9 and separate restricted roles")
+	refused := errors.New("database component privileges invalid; require schema 10 and separate restricted roles")
 	policy, ok := componentPrivileges(c)
 	if !ok || pool == nil {
 		return refused
 	}
 	var version int
-	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 9 {
+	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 10 {
 		return refused
 	}
 	var unsafe bool
@@ -117,13 +117,9 @@ func CheckPrivileges(ctx context.Context, pool *pgxpool.Pool, c Component) error
 	}
 	seen := map[string]bool{}
 	seenColumns := map[string]map[string]bool{}
-	for rows.Next() {
-		var table, column, right string
-		var held, grantable bool
-		if rows.Scan(&table, &column, &right, &held, &grantable) != nil {
-			rows.Close()
-			return refused
-		}
+	var table, column, right string
+	var held, grantable bool
+	_, err = pgx.ForEachRow(rows, []any{&table, &column, &right, &held, &grantable}, func() error {
 		seen[table] = true
 		want := slices.Contains(policy.tables[table], right)
 		if column != "" {
@@ -134,12 +130,10 @@ func CheckPrivileges(ctx context.Context, pool *pgxpool.Pool, c Component) error
 			seenColumns[table][column] = true
 		}
 		if held != want || grantable {
-			rows.Close()
 			return refused
 		}
-	}
-	err = rows.Err()
-	rows.Close()
+		return nil
+	})
 	if err != nil {
 		return refused
 	}
@@ -171,21 +165,15 @@ func CheckPrivileges(ctx context.Context, pool *pgxpool.Pool, c Component) error
 		if kind == "sequence" {
 			allowed = policy.sequences
 		}
-		for rows.Next() {
-			var name string
-			var held, extra bool
-			if rows.Scan(&name, &held, &extra) != nil {
-				rows.Close()
-				return refused
-			}
+		var name string
+		var held, extra bool
+		_, err = pgx.ForEachRow(rows, []any{&name, &held, &extra}, func() error {
 			found[name] = true
 			if held != slices.Contains(allowed, name) || extra {
-				rows.Close()
 				return refused
 			}
-		}
-		err = rows.Err()
-		rows.Close()
+			return nil
+		})
 		if err != nil {
 			return refused
 		}
@@ -247,20 +235,15 @@ func GrantRuntimeRoles(ctx context.Context, pool *pgxpool.Pool, roles RuntimeRol
 		return refused
 	}
 	columnRevokes := []string{}
-	for rows.Next() {
-		var schema, table string
-		var columns []string
-		if rows.Scan(&schema, &table, &columns) != nil {
-			rows.Close()
-			return refused
-		}
+	var schema, table string
+	var columns []string
+	_, err = pgx.ForEachRow(rows, []any{&schema, &table, &columns}, func() error {
 		for i, column := range columns {
 			columns[i] = pgx.Identifier{column}.Sanitize()
 		}
 		columnRevokes = append(columnRevokes, "REVOKE ALL ("+strings.Join(columns, ",")+") ON "+pgx.Identifier{schema, table}.Sanitize()+" FROM ")
-	}
-	err = rows.Err()
-	rows.Close()
+		return nil
+	})
 	if err != nil {
 		return refused
 	}
@@ -328,13 +311,20 @@ func (s *Store) pruneIsolated(ctx context.Context, limit int) (int64, error) {
 	if err = tx.QueryRow(ctx, "SELECT supivpn.prune_auth($1)", limit).Scan(&total); err != nil {
 		return 0, publicError(err)
 	}
-	for _, table := range []string{"node_recovery_starts", "node_recovery_stops"} {
-		_, err = tx.Exec(ctx, `WITH expired AS (SELECT node_id,attempted_at FROM supivpn.`+table+`
-            WHERE attempted_at<clock_timestamp()-interval '24 hours' ORDER BY attempted_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-            DELETE FROM supivpn.`+table+` s USING expired e WHERE s.node_id=e.node_id AND s.attempted_at=e.attempted_at`, limit)
-		if err != nil {
-			return 0, publicError(err)
-		}
+	if err = pruneRecoveryAttempts(ctx, tx, limit); err != nil {
+		return 0, publicError(err)
 	}
 	return total, publicError(tx.Commit(ctx))
+}
+
+func pruneRecoveryAttempts(ctx context.Context, tx pgx.Tx, limit int) error {
+	for _, table := range []string{"node_recovery_starts", "node_recovery_stops"} {
+		_, err := tx.Exec(ctx, `WITH expired AS (SELECT node_id,attempted_at FROM supivpn.`+table+`
+            WHERE attempted_at<(SELECT clock_timestamp()-interval '24 hours') ORDER BY attempted_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+            DELETE FROM supivpn.`+table+` s USING expired e WHERE s.node_id=e.node_id AND s.attempted_at=e.attempted_at`, limit)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

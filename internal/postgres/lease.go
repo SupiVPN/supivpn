@@ -7,7 +7,9 @@ package postgres
 import (
 	"context"
 	"time"
+
 	"github.com/jackc/pgx/v5"
+	"supivpn/internal/controller"
 )
 
 // The agent stops its OpenVPN pair 40 seconds after request START; storage
@@ -21,31 +23,36 @@ func (s *Store) HeartbeatStatus(ctx context.Context, a Agent, ready bool) error 
 	if !validAgent(a) {
 		return ErrGeneration
 	}
-	if s.component != "" {
-        var ok bool
-        err := s.pool.QueryRow(ctx, "SELECT supivpn.agent_heartbeat($1,$2,$3)", a.NodeID, a.Generation, ready).Scan(&ok)
-        if err != nil { return publicError(err) }
-        if !ok { return ErrGeneration }
-        return nil
-    }
-	tx, err := s.begin(ctx)
-	if err != nil {
-		return publicError(err)
+	if s == nil || s.pool == nil {
+		return controller.ErrUnavailable
 	}
-	defer tx.Rollback(context.Background())
-	tag, err := tx.Exec(ctx, `UPDATE supivpn.nodes
+	if s.component != "" {
+		var ok bool
+		err := s.pool.QueryRow(ctx, "SELECT supivpn.agent_heartbeat($1,$2,$3)", a.NodeID, a.Generation, ready).Scan(&ok)
+		if err != nil {
+			return publicError(err)
+		}
+		if !ok {
+			return ErrGeneration
+		}
+		return nil
+	}
+	// Lock before evaluating time bounds, including when the previous locker did
+	// not change the row. A single statement commits before reconciliation.
+	tag, err := s.pool.Exec(ctx, `WITH locked AS MATERIALIZED (
+		SELECT node_id,generation,lease_expires_at,fence_state FROM supivpn.nodes
+		WHERE node_id=$1 FOR UPDATE
+	) UPDATE supivpn.nodes n
 		SET lease_expires_at=clock_timestamp()+interval '60 seconds',
-		    healthy_since=CASE WHEN $3 THEN COALESCE(healthy_since,clock_timestamp()) ELSE NULL END
-		WHERE node_id=$1 AND generation=$2 AND lease_expires_at>clock_timestamp() AND fence_state='ready'`,
+		    healthy_since=CASE WHEN $3 THEN COALESCE(n.healthy_since,clock_timestamp()) ELSE NULL END
+		FROM locked l WHERE n.node_id=l.node_id AND l.generation=$2
+		  AND l.lease_expires_at>clock_timestamp() AND l.fence_state='ready'`,
 		a.NodeID, a.Generation, ready)
 	if err != nil {
 		return publicError(err)
 	}
 	if tag.RowsAffected() != 1 {
 		return ErrGeneration
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return publicError(err)
 	}
 	// At most one bounded reconciliation per heartbeat. A fencing-service
 	// outage must not invalidate this healthy node's successfully renewed lease.

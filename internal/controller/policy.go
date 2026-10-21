@@ -36,15 +36,19 @@ func (a *Controller) acceptableAssertion(assertion *saml.Assertion, requestID st
 			return false
 		}
 	}
+	return a.bearerConfirmation(assertion, requestID, now) != nil
+}
+
+func (a *Controller) bearerConfirmation(assertion *saml.Assertion, requestID string, now time.Time) *saml.SubjectConfirmationData {
 	for _, confirmation := range assertion.Subject.SubjectConfirmations {
 		data := confirmation.SubjectConfirmationData
 		if confirmation.Method == "urn:oasis:names:tc:SAML:2.0:cm:bearer" &&
 			data != nil && data.InResponseTo == requestID &&
 			data.Recipient == a.sp.AcsURL.String() && !now.Before(data.NotBefore) && now.Before(data.NotOnOrAfter) {
-			return true
+			return data
 		}
 	}
-	return false
+	return nil
 }
 
 // authorizationBounds preserves the strict time checks at the final commit,
@@ -53,7 +57,7 @@ func (a *Controller) acceptableAssertion(assertion *saml.Assertion, requestID st
 func (a *Controller) authorizationBounds(assertion *saml.Assertion, requestID, groupName string) Authorization {
 	now := a.now()
 	decision := Authorization{
-		SubjectHash:       sha256.Sum256([]byte(assertion.Issuer.Value + "\x00" + assertion.Subject.NameID.Value)),
+		SubjectHash:        sha256.Sum256([]byte(assertion.Issuer.Value + "\x00" + assertion.Subject.NameID.Value)),
 		AssertionHash:      sha256.Sum256([]byte(assertion.Issuer.Value + "\x00" + assertion.ID)),
 		AssertionExpiresAt: assertion.Conditions.NotOnOrAfter,
 		NotBefore:          assertion.Conditions.NotBefore,
@@ -65,11 +69,13 @@ func (a *Controller) authorizationBounds(assertion *saml.Assertion, requestID, g
 	if username := assertion.Subject.NameID.Value; ValidLogUsername(username) {
 		decision.Username = username
 	}
-    if !decision.SessionUnlimited { decision.SessionExpiresAt = now.Add(time.Duration(a.config.SessionLimit(groupName)) * time.Second) }
+	if !decision.SessionUnlimited {
+		decision.SessionExpiresAt = now.Add(time.Duration(a.config.SessionLimit(groupName)) * time.Second)
+	}
 	for _, statement := range assertion.AuthnStatements {
 		if statement.SessionNotOnOrAfter != nil {
 			if decision.SessionUnlimited || statement.SessionNotOnOrAfter.Before(decision.SessionExpiresAt) {
-                decision.SessionUnlimited = false
+				decision.SessionUnlimited = false
 				decision.SessionExpiresAt = *statement.SessionNotOnOrAfter
 			}
 			if statement.SessionNotOnOrAfter.Before(decision.NotOnOrAfter) {
@@ -77,19 +83,14 @@ func (a *Controller) authorizationBounds(assertion *saml.Assertion, requestID, g
 			}
 		}
 	}
-	for _, confirmation := range assertion.Subject.SubjectConfirmations {
-		data := confirmation.SubjectConfirmationData
-		if confirmation.Method == "urn:oasis:names:tc:SAML:2.0:cm:bearer" &&
-			data != nil && data.InResponseTo == requestID &&
-			data.Recipient == a.sp.AcsURL.String() && !now.Before(data.NotBefore) && now.Before(data.NotOnOrAfter) {
-			if data.NotOnOrAfter.Before(decision.NotOnOrAfter) {
-				decision.NotOnOrAfter = data.NotOnOrAfter
-			}
-			if !decision.SessionUnlimited && decision.SessionExpiresAt.Before(decision.NotOnOrAfter) {
-				decision.NotOnOrAfter = decision.SessionExpiresAt
-			}
-			return decision
+	if data := a.bearerConfirmation(assertion, requestID, now); data != nil {
+		if data.NotOnOrAfter.Before(decision.NotOnOrAfter) {
+			decision.NotOnOrAfter = data.NotOnOrAfter
 		}
+		if !decision.SessionUnlimited && decision.SessionExpiresAt.Before(decision.NotOnOrAfter) {
+			decision.NotOnOrAfter = decision.SessionExpiresAt
+		}
+		return decision
 	}
 	// A clock change between validation and extraction must fail closed.
 	decision.NotOnOrAfter = time.Time{}

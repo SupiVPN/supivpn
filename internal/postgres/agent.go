@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"time"
 
-	"supivpn/internal/controller"
 	"github.com/jackc/pgx/v5"
+	"supivpn/internal/controller"
 )
 
 func (s *Store) connectionHash(ctx context.Context, a Agent, c Connection) ([]byte, error) {
@@ -42,9 +42,11 @@ func (s *Store) Fetch(ctx context.Context, a Agent, c Connection) (Decision, err
 }
 
 func (s *Store) fetchRecord(ctx context.Context, a Agent, c Connection, hash []byte) (Decision, error) {
-    var result Decision
+	var result Decision
 	err := s.withLogin(ctx, hash, &a, func(tx pgx.Tx, r record, now time.Time) error {
-		if r.conn != c { return controller.ErrLoginExpired }
+		if r.conn != c {
+			return controller.ErrLoginExpired
+		}
 		if err := liveNode(ctx, tx, a); err != nil {
 			return err
 		}
@@ -59,11 +61,11 @@ func (s *Store) fetchRecord(ctx context.Context, a Agent, c Connection, hash []b
 			expiry = r.sessionExpires
 		}
 		result = Decision{ID: r.decisionID, SessionUnlimited: r.sessionUnlimited, Agent: r.agent, Connection: r.conn,
-			Username: r.username,
+			Username:  r.username,
 			GroupName: r.group, DenialReason: r.denial, ExpiresAt: expiry, SessionExpiresAt: r.sessionExpires}
-        if len(r.subjectHash) == len(result.SubjectHash) {
-            copy(result.SubjectHash[:], r.subjectHash)
-        }
+		if len(r.subjectHash) == len(result.SubjectHash) {
+			copy(result.SubjectHash[:], r.subjectHash)
+		}
 		return nil
 	})
 	if err == nil {
@@ -149,7 +151,9 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 	if limit < 1 || limit > 1000 {
 		return 0, ErrConflict
 	}
-    if s.component != "" { return s.pruneIsolated(ctx, limit) }
+	if s.component != "" {
+		return s.pruneIsolated(ctx, limit)
+	}
 	tx, err := s.begin(ctx)
 	if err != nil {
 		return 0, publicError(err)
@@ -157,7 +161,7 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 	defer tx.Rollback(context.Background())
 	logins, err := tx.Exec(ctx, `WITH expired AS (
         SELECT ticket_hash FROM supivpn.logins
-        WHERE expires_at<clock_timestamp()-interval '24 hours'
+        WHERE expires_at<(SELECT clock_timestamp()-interval '24 hours')
           AND NOT (denial_reason='' AND state IN ('decided','acknowledged')
             AND (ack_result IS NULL OR ack_result='applied')
             AND EXISTS (SELECT 1 FROM supivpn.nodes n WHERE n.node_id=logins.node_id
@@ -169,36 +173,25 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 	}
 	assertions, err := tx.Exec(ctx, `WITH expired AS (
         SELECT assertion_hash FROM supivpn.assertions
-        WHERE expires_at<=clock_timestamp()
+        WHERE expires_at<=(SELECT clock_timestamp())
         ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED
     ) DELETE FROM supivpn.assertions USING expired WHERE assertions.assertion_hash=expired.assertion_hash`, limit)
 	if err != nil {
 		return 0, publicError(err)
 	}
-    profiles, err := tx.Exec(ctx, `WITH expired AS (
+	profiles, err := tx.Exec(ctx, `WITH expired AS (
         SELECT ticket_hash FROM supivpn.profile_logins
-        WHERE expires_at<=clock_timestamp()
+        WHERE expires_at<=(SELECT clock_timestamp())
         ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED
     ) DELETE FROM supivpn.profile_logins USING expired WHERE profile_logins.ticket_hash=expired.ticket_hash`, limit)
-    if err != nil {
-        return 0, publicError(err)
-    }
-    _, err = tx.Exec(ctx, `WITH expired AS (
-        SELECT node_id,attempted_at FROM supivpn.node_recovery_starts
-        WHERE attempted_at<clock_timestamp()-interval '24 hours'
-        ORDER BY attempted_at LIMIT $1 FOR UPDATE SKIP LOCKED
-    ) DELETE FROM supivpn.node_recovery_starts s USING expired e
-      WHERE s.node_id=e.node_id AND s.attempted_at=e.attempted_at`, limit)
-    if err != nil { return 0, publicError(err) }
-    _, err = tx.Exec(ctx, `WITH expired AS (
-        SELECT node_id,attempted_at FROM supivpn.node_recovery_stops
-        WHERE attempted_at<clock_timestamp()-interval '24 hours'
-        ORDER BY attempted_at LIMIT $1 FOR UPDATE SKIP LOCKED
-    ) DELETE FROM supivpn.node_recovery_stops s USING expired e
-      WHERE s.node_id=e.node_id AND s.attempted_at=e.attempted_at`, limit)
-    if err != nil { return 0, publicError(err) }
-    if err = tx.Commit(ctx); err != nil {
-        return 0, publicError(err)
-    }
+	if err != nil {
+		return 0, publicError(err)
+	}
+	if err = pruneRecoveryAttempts(ctx, tx, limit); err != nil {
+		return 0, publicError(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return 0, publicError(err)
+	}
 	return logins.RowsAffected() + assertions.RowsAffected() + profiles.RowsAffected(), nil
 }

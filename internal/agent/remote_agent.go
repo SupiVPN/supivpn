@@ -6,13 +6,14 @@ package agent
 
 import (
 	"context"
-    "encoding/hex"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"math"
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"time"
 
 	"supivpn/internal/agentapi"
@@ -53,7 +54,7 @@ type remoteAgent struct {
 	api                         agentclient.API
 	node, generation, publicURL string
 	jobs                        []*remoteJob
-	leaseUntil, heartbeatDue     time.Time
+	leaseUntil, heartbeatDue    time.Time
 }
 
 const maxRemoteJobs = 2 * maxConnections
@@ -64,24 +65,19 @@ func (r *remoteAgent) canRegister(e clientEvent) bool {
 func (r *remoteAgent) enqueue(c *connection) {
 	r.jobs = append(r.jobs, &remoteJob{conn: c, phase: "register", deadline: c.expires})
 }
-func (a *agent) liveRemoteLocked(c *connection) bool {
-	return a.readyLocked() && a.connections[c.cid] == c && !c.closing &&
-		!c.active && a.now().Before(c.expires)
-}
 func (a *agent) refuseRemoteLocked(c *connection) {
 	if a.connections[c.cid] != c || c.closing || c.active {
 		return
 	}
-	c.closing = true
-	c.disconnectReason = "controller_refused"
-	delete(a.tickets, c.ticket)
-	a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
+	a.denyConnectionLocked(c, "controller_refused")
 }
 
 // The startup generation is established before OpenVPN leaves its hold.
 func (a *agent) startRemote(ctx context.Context) (func(), error) {
 	policy := controller.Config{Policy: controllerPolicy(a.config), SessionSeconds: a.config.SessionSeconds}
-	if policy.HasUnlimitedSessions() { a.logEvent("session.unlimited_configured", nil) }
+	if policy.HasUnlimitedSessions() {
+		a.logEvent("session.unlimited_configured", nil)
+	}
 	cfg := a.config.RemoteController
 	api, err := agentclient.New(cfg.AgentURL, nil, agentclient.EC2Signer(cfg.Region))
 	if err != nil {
@@ -107,8 +103,8 @@ func (a *agent) startRemote(ctx context.Context) (func(), error) {
 		cleanup()
 		return nil, errors.New("controller lease unavailable")
 	}
-	a.remote.leaseUntil = started.Add(40*time.Second)
-	a.remote.heartbeatDue = started.Add(15*time.Second)
+	a.remote.leaseUntil = started.Add(40 * time.Second)
+	a.remote.heartbeatDue = started.Add(15 * time.Second)
 	a.logEvent("controller.ready", nil)
 	return cleanup, nil
 }
@@ -145,16 +141,18 @@ func (a *agent) nextRemoteLocked() *remoteJob {
 				a.logEvent("controller.ack_expired", j.conn)
 			}
 			a.refuseRemoteLocked(j.conn)
-			if !a.readyLocked() { return nil }
-			a.remote.jobs = append(a.remote.jobs[:i], a.remote.jobs[i+1:]...)
+			if !a.readyLocked() {
+				return nil
+			}
+			a.remote.jobs = slices.Delete(a.remote.jobs, i, i+1)
 			continue
 		}
-		if j.phase != "ack" && !a.liveRemoteLocked(j.conn) {
+		if j.phase != "ack" && !a.pendingConnectionLocked(j.conn) {
 			j.phase = "cancel"
 		}
 		if !now.Before(j.due) {
 			// Round robin prevents slow browser logins from starving new connections.
-			a.remote.jobs = append(append(a.remote.jobs[:i], a.remote.jobs[i+1:]...), j)
+			a.remote.jobs = append(slices.Delete(a.remote.jobs, i, i+1), j)
 			return j
 		}
 		i++
@@ -162,11 +160,8 @@ func (a *agent) nextRemoteLocked() *remoteJob {
 	return nil
 }
 func (a *agent) finishRemoteLocked(j *remoteJob) {
-	for i, other := range a.remote.jobs {
-		if other == j {
-			a.remote.jobs = append(a.remote.jobs[:i], a.remote.jobs[i+1:]...)
-			return
-		}
+	if i := slices.Index(a.remote.jobs, j); i >= 0 {
+		a.remote.jobs = slices.Delete(a.remote.jobs, i, i+1)
 	}
 }
 
@@ -183,7 +178,7 @@ func (a *agent) remoteStep(ctx context.Context) {
 	}
 	if !a.now().Before(a.remote.heartbeatDue) {
 		started := a.now()
-		a.remote.heartbeatDue = started.Add(5*time.Second)
+		a.remote.heartbeatDue = started.Add(5 * time.Second)
 		q := agentclient.Request{Generation: a.remote.generation}
 		a.mu.Unlock()
 		ready := a.loadBalancerReady(ctx)
@@ -200,8 +195,8 @@ func (a *agent) remoteStep(ctx context.Context) {
 			return
 		}
 		if err == nil {
-			a.remote.leaseUntil = started.Add(40*time.Second)
-			a.remote.heartbeatDue = started.Add(15*time.Second)
+			a.remote.leaseUntil = started.Add(40 * time.Second)
+			a.remote.heartbeatDue = started.Add(15 * time.Second)
 		} else if !agentclient.Retryable(err) {
 			a.management.close()
 		}
@@ -215,7 +210,11 @@ func (a *agent) remoteStep(ctx context.Context) {
 	c, phase := j.conn, j.phase
 	cid, kid := int64(c.cid), int64(c.kid)
 	q := agentclient.Request{Generation: a.remote.generation}
-	if phase == "fetch" { include := true; q.IncludeSubject = &include; q.IncludeUsername = &include }
+	if phase == "fetch" {
+		include := true
+		q.IncludeSubject = &include
+		q.IncludeUsername = &include
+	}
 	if phase == "ack" {
 		q.DecisionID, q.Outcome = j.decisionID, j.outcome
 	} else {
@@ -273,7 +272,7 @@ func (a *agent) remoteStep(ctx context.Context) {
 		a.finishRemoteLocked(j)
 		return
 	}
-	if !a.liveRemoteLocked(c) {
+	if !a.pendingConnectionLocked(c) {
 		j.phase = "cancel"
 		return
 	}
@@ -304,12 +303,12 @@ func (a *agent) remoteStep(ctx context.Context) {
 			return
 		}
 		outcome := "applied"
-        if d.SubjectHash != "" {
-            hash, _ := hex.DecodeString(d.SubjectHash)
-            copy(c.subjectHash[:], hash)
-        }
+		if d.SubjectHash != "" {
+			hash, _ := hex.DecodeString(d.SubjectHash)
+			copy(c.subjectHash[:], hash)
+		}
 		err = a.applyAuthorizationLocked(c, controller.Authorization{
-			Username: d.Username,
+			Username:  d.Username,
 			GroupName: d.GroupName, DenialReason: d.DenialReason, SessionExpiresAt: d.SessionExpiresAt, SessionUnlimited: d.SessionUnlimited,
 		})
 		if errors.Is(err, controller.ErrGroupDenied) {
@@ -331,10 +330,10 @@ func (a *agent) validRemoteDecision(c *connection, d *agentapi.Decision) bool {
 	now := a.now()
 	policy := controller.Config{Policy: controllerPolicy(a.config), SessionSeconds: a.config.SessionSeconds}
 	if !agentapi.ValidNode(d.ID) || d.NodeID != a.remote.node || d.Generation != a.remote.generation ||
-        (d.SubjectHash != "" && !agentapi.ValidSubjectHash(d.SubjectHash)) ||
+		(d.SubjectHash != "" && !agentapi.ValidSubjectHash(d.SubjectHash)) ||
 		!controller.ValidLogUsername(d.Username) ||
 		d.CID != int64(c.cid) || d.KID != int64(c.kid) || !now.Before(d.ExpiresAt) ||
-        !validSessionDecision(now, d.ExpiresAt, d.SessionExpiresAt, d.SessionUnlimited, policy.SessionLimit(d.GroupName)) {
+		!validSessionDecision(now, d.ExpiresAt, d.SessionExpiresAt, d.SessionUnlimited, policy.SessionLimit(d.GroupName)) {
 		return false
 	}
 	switch d.DenialReason {
@@ -360,7 +359,7 @@ func (a *agent) cancelRemoteLocked(c *connection) {
 		a.management.close()
 		return
 	}
-	a.remote.jobs = append(a.remote.jobs, &remoteJob{conn: c, phase: "cancel", deadline: a.now().Add(30*time.Second)})
+	a.remote.jobs = append(a.remote.jobs, &remoteJob{conn: c, phase: "cancel", deadline: a.now().Add(30 * time.Second)})
 }
 
 // The old node HTTPS listener remains for the NLB health check. SAML routes are

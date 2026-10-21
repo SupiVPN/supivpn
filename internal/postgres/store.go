@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"supivpn/internal/controller"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"supivpn/internal/controller"
 )
 
 var (
@@ -41,9 +41,9 @@ const (
 // The agent deduplicates ID and checks generation, CID/KID and time bounds before
 // applying anything; database commit is not an OpenVPN acknowledgement.
 type Decision struct {
-	Username string
-    SubjectHash [32]byte
-    SessionUnlimited bool
+	Username                    string
+	SubjectHash                 [32]byte
+	SessionUnlimited            bool
 	ID                          string
 	Agent                       Agent
 	Connection                  Connection
@@ -52,8 +52,8 @@ type Decision struct {
 }
 
 type Store struct {
-	pool *pgxpool.Pool
-	fencer Fencer
+	pool      *pgxpool.Pool
+	fencer    Fencer
 	component Component
 }
 
@@ -108,7 +108,7 @@ func (s *Store) Ready(ctx context.Context) bool {
 	}
 	var version int
 	return s.pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) == nil &&
-        ((s.component == "" && (version == 7 || version == 8 || version == 9)) || (s.component != "" && version == 9))
+		((s.component == "" && (version == 7 || version == 8 || version == 9 || version == 10)) || (s.component != "" && version == 10))
 }
 
 // RotateNode is a compare-and-swap performed by the authenticated node bootstrap
@@ -120,12 +120,16 @@ func (s *Store) RotateNode(ctx context.Context, nodeID, previous, next string) e
 		return ErrConflict
 	}
 	if s.component != "" {
-        var ok bool
-        err := s.pool.QueryRow(ctx, "SELECT supivpn.agent_rotate($1,$2,$3)", nodeID, previous, next).Scan(&ok)
-        if err != nil { return publicError(err) }
-        if !ok { return ErrGeneration }
-        return nil
-    }
+		var ok bool
+		err := s.pool.QueryRow(ctx, "SELECT supivpn.agent_rotate($1,$2,$3)", nodeID, previous, next).Scan(&ok)
+		if err != nil {
+			return publicError(err)
+		}
+		if !ok {
+			return ErrGeneration
+		}
+		return nil
+	}
 	tx, err := s.begin(ctx)
 	if err != nil {
 		return publicError(err)
@@ -173,7 +177,9 @@ func (s *Store) RotateNode(ctx context.Context, nodeID, previous, next string) e
 func (s *Store) lockNode(ctx context.Context, tx pgx.Tx, nodeID string) (string, error) {
 	var generation string
 	query := "SELECT generation FROM supivpn.nodes WHERE node_id=$1 FOR SHARE"
-    if s.component != "" { query = "SELECT generation FROM supivpn.lock_node($1) AS generation WHERE generation IS NOT NULL" }
+	if s.component != "" {
+		query = "SELECT generation FROM supivpn.lock_node($1) AS generation WHERE generation IS NOT NULL"
+	}
 	err := tx.QueryRow(ctx, query, nodeID).Scan(&generation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrGeneration
@@ -238,9 +244,9 @@ func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket stri
 }
 
 type record struct {
-	username string
-    subjectHash []byte
-    sessionUnlimited bool
+	username                              string
+	subjectHash                           []byte
+	sessionUnlimited                      bool
 	agent                                 Agent
 	conn                                  Connection
 	revision                              int64
@@ -276,7 +282,7 @@ func dbNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 }
 func loadRecord(ctx context.Context, tx pgx.Tx, hash []byte) (record, error) {
 	var r record
-    var sessionExpires *time.Time
+	var sessionExpires *time.Time
 	err := tx.QueryRow(ctx, `
         SELECT node_id,generation,cid,kid,revision,expires_at,
                coalesce(request_id,''),coalesce(browser_hash,''::bytea),state,
@@ -288,7 +294,9 @@ func loadRecord(ctx context.Context, tx pgx.Tx, hash []byte) (record, error) {
     `, hash).Scan(&r.agent.NodeID, &r.agent.Generation, &r.conn.CID, &r.conn.KID, &r.revision,
 		&r.expires, &r.requestID, &r.browserHash, &r.state, &r.decisionID, &r.group, &r.denial,
 		&r.ack, &r.notBefore, &r.notAfter, &sessionExpires, &r.sessionUnlimited, &r.subjectHash, &r.username)
-    if sessionExpires != nil { r.sessionExpires = *sessionExpires }
+	if sessionExpires != nil {
+		r.sessionExpires = *sessionExpires
+	}
 	return r, err
 }
 
@@ -302,14 +310,17 @@ func (s *Store) withLogin(ctx context.Context, hash []byte, actor *Agent,
 	}
 	defer tx.Rollback(context.Background())
 	var nodeID string
-	if err = tx.QueryRow(ctx, "SELECT node_id FROM supivpn.logins WHERE ticket_hash=$1", hash).Scan(&nodeID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return controller.ErrLoginExpired
+	if actor != nil {
+		// Agent operations already have an authenticated node identity. The
+		// locked record below must still match that identity and generation.
+		nodeID = actor.NodeID
+	} else {
+		if err = tx.QueryRow(ctx, "SELECT node_id FROM supivpn.logins WHERE ticket_hash=$1", hash).Scan(&nodeID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return controller.ErrLoginExpired
+			}
+			return publicError(err)
 		}
-		return publicError(err)
-	}
-	if actor != nil && actor.NodeID != nodeID {
-		return controller.ErrLoginExpired
 	}
 	generation, err := s.lockNode(ctx, tx, nodeID)
 	if err != nil {
@@ -409,6 +420,20 @@ func validDecision(d controller.Authorization, now time.Time) bool {
 	}
 }
 
+// Both login purposes consume assertions in their existing decision transaction.
+// A conflict is a replay, and a failed decision rolls this insert back too.
+func consumeAssertion(ctx context.Context, tx pgx.Tx, d controller.Authorization) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO supivpn.assertions(assertion_hash,expires_at)
+        VALUES ($1,$2) ON CONFLICT DO NOTHING`, d.AssertionHash[:], d.AssertionExpiresAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return controller.ErrLoginExpired
+	}
+	return nil
+}
+
 func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller.Authorization) error {
 	if !validTicket(p.Ticket) || p.Revision > math.MaxInt64 {
 		return controller.ErrLoginExpired
@@ -423,19 +448,14 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 			return err
 		}
 		// The replay entry and immutable decision are committed together.
-		tag, err := tx.Exec(ctx, `INSERT INTO supivpn.assertions(assertion_hash,expires_at) VALUES ($1,$2)
-            ON CONFLICT DO NOTHING`, d.AssertionHash[:], d.AssertionExpiresAt)
-		if err != nil {
+		if err := consumeAssertion(ctx, tx, d); err != nil {
 			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return controller.ErrLoginExpired
 		}
 		if d.DenialReason == "" {
 			// Version-2 grants have no subject identity. Until their node is
 			// drained/restarted or fenced, admitting anyone could bypass a limit.
 			var legacy bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS (
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (
 				SELECT 1 FROM supivpn.logins l JOIN supivpn.nodes n
 				  ON n.node_id=l.node_id AND n.generation=l.generation
 				WHERE l.subject_hash IS NULL AND l.denial_reason=''
@@ -444,15 +464,17 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 				  AND n.fence_state<>'stopped')`).Scan(&legacy); err != nil {
 				return err
 			}
-			if legacy { return controller.ErrUnavailable }
+			if legacy {
+				return controller.ErrUnavailable
+			}
 			// Serialize admission across controller replicas and ALL nodes/groups.
 			// A 64-bit hash collision only serializes unrelated users.
-			if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)",
+			if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)",
 				int64(binary.BigEndian.Uint64(d.SubjectHash[:8]))); err != nil {
 				return err
 			}
 			var count int
-			if err = tx.QueryRow(ctx, `SELECT count(*) FROM supivpn.logins l
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM supivpn.logins l
 				JOIN supivpn.nodes n ON n.node_id=l.node_id AND n.generation=l.generation
 				WHERE l.subject_hash=$1 AND l.denial_reason=''
 				  AND l.state IN ('decided','acknowledged')
@@ -465,9 +487,11 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 			}
 		}
 		id := rand.Text()
-        var sessionExpires any
-        if !d.SessionUnlimited { sessionExpires = d.SessionExpiresAt }
-		tag, err = tx.Exec(ctx, `UPDATE supivpn.logins
+		var sessionExpires any
+		if !d.SessionUnlimited {
+			sessionExpires = d.SessionExpiresAt
+		}
+		tag, err := tx.Exec(ctx, `UPDATE supivpn.logins
             SET state='decided',decision_id=$2,group_name=$3,denial_reason=$4,
                 not_before=$5,not_after=$6,session_expires_at=$7,subject_hash=$8,session_unlimited=$9
             WHERE ticket_hash=$1 AND expires_at>clock_timestamp()
@@ -485,7 +509,7 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err = tx.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version); err != nil {
 			return err
 		}
-		if version != 7 && version != 8 && version != 9 {
+		if version != 7 && version != 8 && version != 9 && version != 10 {
 			return controller.ErrUnavailable
 		}
 		if version >= 8 {

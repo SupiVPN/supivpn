@@ -207,6 +207,14 @@ class ReleaseTests(unittest.TestCase):
             writes.clear()
             release.publish(V, output)
             self.assertEqual(writes, [])
+            original = list(page["assets"])
+            for records in (original + [original[0]], original + [{"name": "unexpected"}]):
+                with self.subTest(records=len(records)):
+                    page["assets"] = records
+                    with self.assertRaisesRegex(a.ValidationError, "Unexpected published assets"):
+                        release.publish(V, output)
+                    self.assertEqual(writes, [])
+            page["assets"] = original
             page["assets"][0]["digest"] = "sha256:" + "0" * 64
             with self.assertRaises(a.ValidationError):
                 release.publish(V, output)

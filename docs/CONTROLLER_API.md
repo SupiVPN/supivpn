@@ -40,7 +40,7 @@ a URL with the `/supivpn` prefix; Entity ID and ACS are derived from it.
   The same block is supported in migration JSON. See [TLS configuration and
   precedence](POSTGRES.md#configurable-database-tls).
 - Run migrations separately as described in [POSTGRES.md](POSTGRES.md).
-  Startup does not perform DDL. Isolated Lambdas first require schema-9 privilege
+  Startup does not perform DDL. Isolated Lambdas first require schema-10 privilege
   validation; VM processes can start without database access,
   but readiness/new logins fail until connectivity recovers.
 - One process/warm Lambda shares a pool of at most 4 connections.

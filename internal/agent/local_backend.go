@@ -31,8 +31,7 @@ func (a *agent) Start(ctx context.Context, ticket, requestID string, browserHash
 		return controller.ErrUnavailable
 	}
 	c := a.tickets[ticket]
-	if c == nil || c.active || c.closing || !a.readyLocked() ||
-		!a.now().Before(c.expires) || a.connections[c.cid] != c {
+	if !a.pendingConnectionLocked(c) {
 		return controller.ErrLoginExpired
 	}
 	if c.requestID != "" {
@@ -47,9 +46,8 @@ func (a *agent) Start(ctx context.Context, ticket, requestID string, browserHash
 
 func (a *agent) pendingLocked(ticket string, hash [32]byte) (*connection, error) {
 	c := a.tickets[ticket]
-	if c == nil || c.active || c.closing || c.requestID == "" ||
-		!a.now().Before(c.expires) || a.connections[c.cid] != c ||
-		subtle.ConstantTimeCompare(hash[:], c.browserHash[:]) != 1 || !a.readyLocked() {
+	if !a.pendingConnectionLocked(c) || c.requestID == "" ||
+		subtle.ConstantTimeCompare(hash[:], c.browserHash[:]) != 1 {
 		return nil, controller.ErrLoginExpired
 	}
 	return c, nil
@@ -98,10 +96,7 @@ func (a *agent) Complete(ctx context.Context, pending controller.Pending, decisi
 			}
 		}
 		if count >= decision.MaxConnections {
-			c.closing = true
-			c.disconnectReason = "connection_limit"
-			delete(a.tickets, c.ticket)
-			a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
+			a.denyConnectionLocked(c, "connection_limit")
 			a.logEvent("vpn.authorization_denied", c, slog.String("reason", "connection_limit"))
 			return controller.ErrConnectionLimit
 		}
@@ -114,29 +109,26 @@ func (a *agent) Complete(ctx context.Context, pending controller.Pending, decisi
 func (a *agent) applyAuthorizationLocked(c *connection, decision controller.Authorization) error {
 	var err error
 	reason := decision.DenialReason
-	if a.config.SAMLGroupsAttribute != "" {
-		if reason == "" {
-			if a.pools == nil {
-				reason = "invalid_groups_claim"
-			} else {
-				c.address, err = a.pools.acquire(c.cid, decision.GroupName)
-				if err == nil {
-					c.groupName = decision.GroupName
-				} else if errors.Is(err, errPoolFull) {
-					reason = "pool_full"
-				} else {
-					reason = "no_vpn_group"
-				}
-			}
-		}
-	} else if decision.GroupName != "" {
+	if a.config.SAMLGroupsAttribute == "" && decision.GroupName != "" {
 		return controller.ErrUnavailable
 	}
+	if a.config.SAMLGroupsAttribute != "" && reason == "" {
+		if a.pools == nil {
+			reason = "invalid_groups_claim"
+		} else {
+			c.address, err = a.pools.acquire(c.cid, decision.GroupName)
+			switch {
+			case err == nil:
+				c.groupName = decision.GroupName
+			case errors.Is(err, errPoolFull):
+				reason = "pool_full"
+			default:
+				reason = "no_vpn_group"
+			}
+		}
+	}
 	if reason != "" {
-		c.closing = true
-		c.disconnectReason = reason
-		delete(a.tickets, c.ticket)
-		a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
+		a.denyConnectionLocked(c, reason)
 		a.logEvent("vpn.authorization_denied", c, slog.String("reason", reason))
 		return controller.ErrGroupDenied
 	}
@@ -144,7 +136,7 @@ func (a *agent) applyAuthorizationLocked(c *connection, decision controller.Auth
 	c.active = true
 	c.username = decision.Username
 	c.expires = decision.SessionExpiresAt
-    c.sessionUnlimited = decision.SessionUnlimited
+	c.sessionUnlimited = decision.SessionUnlimited
 	if a.pools != nil {
 		err = a.management.authorizeIPv4(c.cid, c.kid, c.address, a.pools.netmask())
 	} else {

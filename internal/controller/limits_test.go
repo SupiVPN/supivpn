@@ -8,9 +8,17 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"supivpn/internal/saml"
 )
 
 func TestSAMLXMLComplexityLimits(t *testing.T) {
+	const (
+		maxSAMLXMLDepth     = 64
+		maxSAMLXMLElements  = 512
+		maxSAMLXMLTokens    = 4096
+		maxSAMLAttrsPerNode = 64
+	)
 	attrs := func(count int) string {
 		var b strings.Builder
 		for i := 0; i < count; i++ {
@@ -43,7 +51,7 @@ func TestSAMLXMLComplexityLimits(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if valid := checkSAMLXML([]byte(tc.xml)) == nil; valid != tc.valid {
+			if valid := saml.CheckXML([]byte(tc.xml)) == nil; valid != tc.valid {
 				t.Fatalf("XML accepted = %v, want %v", valid, tc.valid)
 			}
 		})
