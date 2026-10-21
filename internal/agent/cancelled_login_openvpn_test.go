@@ -281,16 +281,25 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 				t.Fatal("retry could not reuse released user slot", err)
 			}
 			waitProtocol(t, freshLog, "Initialization Sequence Completed")
-			if tc.name != "udp/cancel-before-saml" {
+			// Earlier cancelled CIDs can still deliver their ordered DISCONNECT.
+			// Handle every event until this connection's ESTABLISHED arrives.
+			establishedDeadline := time.After(5 * time.Second)
+		awaitEstablished:
+			for {
 				select {
-				case e := <-m.events:
-					if e.kind != "ESTABLISHED" || e.cid != fresh.cid {
-						t.Fatal("fresh tunnel not established")
+				case e, ok := <-m.events:
+					if !ok {
+						t.Fatal("management closed before establishment")
 					}
 					a.handleEvent(e)
-				case <-time.After(5 * time.Second):
+					if e.kind == "ESTABLISHED" && e.cid == fresh.cid {
+						break awaitEstablished
+					}
+				case <-establishedDeadline:
 					t.Fatal("establishment notification missing")
 				}
+			}
+			if tc.name != "udp/cancel-before-saml" {
 				// Abrupt TCP close / UDP keepalive expiry must provide the daemon's
 				// actual final counters. The existing fixture deadlines are retained.
 				stopFresh()
@@ -334,15 +343,6 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 							t.Log("client protocol categories:", freshLog.categories())
 						}
 					})
-					select {
-					case e := <-m.events:
-						if e.kind != "ESTABLISHED" || e.cid != fresh.cid {
-							t.Fatal("fresh tunnel not established")
-						}
-						a.handleEvent(e)
-					case <-time.After(5 * time.Second):
-						t.Fatal("established notification missing")
-					}
 					address, expires := fresh.address, fresh.expires
 					// SIGSTOP silences this client, including keepalives, without
 					// closing its socket. No host networking or real client is used.
