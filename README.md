@@ -1,5 +1,8 @@
 # SupiVPN
 
+**Go Supi!**<br>
+Your team. Your tunnel. Your rules.
+
 [![Checks](https://img.shields.io/github/actions/workflow/status/SupiVPN/supivpn/checks.yml?branch=main&event=push&style=flat-square&logo=github&label=checks)](https://github.com/SupiVPN/supivpn/actions/workflows/checks.yml)
 [![Latest release](https://img.shields.io/github/v/release/SupiVPN/supivpn?style=flat-square&color=16a34a&label=release)](https://github.com/SupiVPN/supivpn/releases/latest)
 [![Go version](https://img.shields.io/github/go-mod/go-version/SupiVPN/supivpn?style=flat-square&logo=go&logoColor=white)](go.mod)
