@@ -358,6 +358,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				t.Fatal("missing webauth CONNECT")
 			}
 			a, _ := testApp(t, metadata)
+			audit := captureAudit(t, a.agent)
 			a.management.close() // Replace the mock socket with the real daemon.
 			enableTestGroups(a)
 			if tc.name == "expanded-core" {
@@ -435,7 +436,11 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				if established.kind != "ESTABLISHED" || established.cid != e.cid {
 					t.Fatal("unexpected established event")
 				}
+				if !established.peer.IsValid() || !established.peer.Addr().IsLoopback() || established.peer.Port() == 0 {
+					t.Fatal("native ESTABLISHED did not retain the observed peer endpoint")
+				}
 				a.handleEvent(established)
+				assertPeerAudit(t, audit, "vpn.tunnel_established", e.cid, established.peer.Addr().String(), established.peer.Port())
 			case <-time.After(5 * time.Second):
 				t.Fatal("tunnel establishment unconfirmed")
 			}

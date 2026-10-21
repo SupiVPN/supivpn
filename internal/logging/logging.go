@@ -38,8 +38,8 @@ var events = map[string]definition{
 	"logging.output_failed":           {slog.LevelError, "Log file unavailable; application logging switched to stderr until restart", ""},
 	"vpn.authentication_refused":      {slog.LevelWarn, "VPN authentication refused", "reason"},
 	"vpn.browser_auth_requested":      {slog.LevelInfo, "VPN browser authentication requested", ""},
-	"vpn.tunnel_established":          {slog.LevelInfo, "VPN tunnel established", "username group_name address"},
-	"vpn.disconnected":                {slog.LevelInfo, "VPN disconnected", "username group_name address"},
+	"vpn.tunnel_established":          {slog.LevelInfo, "VPN tunnel established", "username group_name address peer_ip peer_port"},
+	"vpn.disconnected":                {slog.LevelInfo, "VPN disconnected", "username group_name address peer_ip peer_port"},
 	"vpn.session_expired":             {slog.LevelInfo, "VPN authentication/session expired", ""},
 	"vpn.authorization_denied":        {slog.LevelWarn, "VPN authorization refused", "reason"},
 	"vpn.authorization_applied":       {slog.LevelInfo, "VPN authorization acknowledged by OpenVPN", ""},
@@ -190,6 +190,9 @@ func safe(a slog.Attr) bool {
 		return a.Value.Kind() == slog.KindUint64 || a.Value.Kind() == slog.KindInt64 && a.Value.Int64() >= 0
 	case "status":
 		return a.Value.Kind() == slog.KindInt64 && a.Value.Int64() >= 0 && a.Value.Int64() <= 599
+	case "peer_port":
+		return a.Value.Kind() == slog.KindUint64 && a.Value.Uint64() > 0 && a.Value.Uint64() <= 65535 ||
+			a.Value.Kind() == slog.KindInt64 && a.Value.Int64() > 0 && a.Value.Int64() <= 65535
 	}
 	if a.Value.Kind() != slog.KindString {
 		return false
@@ -203,6 +206,9 @@ func safe(a slog.Attr) bool {
 	case "address":
 		_, err := netip.ParseAddr(s)
 		return err == nil
+	case "peer_ip":
+		ip, err := netip.ParseAddr(s)
+		return err == nil && ip.Zone() == ""
 	case "operation":
 		return oneOf(s, "register fetch ack cancel heartbeat")
 	case "action":

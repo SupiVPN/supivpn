@@ -24,6 +24,7 @@ type clientEvent struct {
 	cid     uint64
 	kid     uint64
 	sso     string
+	peer    netip.AddrPort
 	clients map[uint64]struct{}
 }
 
@@ -158,6 +159,7 @@ func (m *management) read() {
 	scanner := bufio.NewScanner(m.conn)
 	scanner.Buffer(make([]byte, 4096), 64<<10)
 	var pending *clientEvent
+	var peer peerEnvironment
 	seenHold := false
 	var status managementStatus
 	for scanner.Scan() {
@@ -220,6 +222,7 @@ func (m *management) read() {
 			}
 		case line == ">CLIENT:ENV,END":
 			if pending != nil {
+				pending.peer = peer.endpoint()
 				select {
 				case m.events <- *pending:
 				default:
@@ -228,9 +231,11 @@ func (m *management) read() {
 			}
 			pending = nil
 		case strings.HasPrefix(line, ">CLIENT:ENV,"):
-			// Deliberately discard all other values, including credentials.
-			if pending != nil && strings.HasPrefix(line, ">CLIENT:ENV,IV_SSO=") {
-				pending.sso = strings.TrimPrefix(line, ">CLIENT:ENV,IV_SSO=")
+			if pending != nil {
+				if strings.HasPrefix(line, ">CLIENT:ENV,IV_SSO=") {
+					pending.sso = strings.TrimPrefix(line, ">CLIENT:ENV,IV_SSO=")
+				}
+				peer.add(pending.kind, strings.TrimPrefix(line, ">CLIENT:ENV,"))
 			}
 		case strings.HasPrefix(line, ">CLIENT:"):
 			e, err := parseClientHeader(line)
@@ -238,6 +243,7 @@ func (m *management) read() {
 				return
 			}
 			pending = &e
+			peer = peerEnvironment{}
 		}
 	}
 }

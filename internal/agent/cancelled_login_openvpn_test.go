@@ -141,6 +141,7 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 			}
 			origin, _ := url.Parse("https://vpn.example.test")
 			a := newAgent(groupConfig(), origin)
+			audit := captureAudit(t, a)
 			a.config.PendingSeconds = 5 // Shorten only the isolated fixture's handshake deadline.
 			a.pools = newPoolAllocator(a.config)
 			a.attach(m)
@@ -156,6 +157,9 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 						a.handleEvent(event)
 						if event.kind != "CONNECT" {
 							continue
+						}
+						if !event.peer.IsValid() || !event.peer.Addr().IsLoopback() || event.peer.Port() == 0 {
+							t.Fatal("native TCP/UDP CONNECT did not retain the observed peer endpoint")
 						}
 						return a.connections[event.cid]
 					case <-deadline:
@@ -244,6 +248,11 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 					t.Fatal("cancelled handshake retained a stale connection and user slot")
 				}
 				time.Sleep(20 * time.Millisecond)
+			}
+			if tc.lateDecision {
+				// The authenticated endpoint must remain available even when the
+				// daemon's DISCONNECT is omitted and a status snapshot removes it.
+				assertPeerAudit(t, audit, "vpn.disconnected", old.cid, old.peer.Addr().String(), old.peer.Port())
 			}
 			// Return to synchronous event handling for the fresh connection.
 			stopEvents()
