@@ -60,6 +60,12 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { listener.Close() })
+			keepalive := "keepalive 1 3"
+			if tc.name == "udp/cancel-before-saml" {
+				// The outage check needs headroom below BOTH peer deadlines,
+				// including time spent requesting status while the client is paused.
+				keepalive = "keepalive 1 10" // Client: 10 seconds; server: 20 seconds.
+			}
 			config := strings.NewReplacer(
 				"/etc/supivpn/tls/crt.pem", filepath.Join(dir, "crt.pem"),
 				"extra-certs /etc/supivpn/tls/chain.pem", "# ephemeral test CA",
@@ -69,7 +75,7 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 				"/run/supivpn/management.sock", socket,
 				"/opt/supivpn/supivpn", hook,
 				"hand-window 180", "hand-window 8",
-				"keepalive 10 60", "keepalive 1 3",
+				"keepalive 10 60", keepalive,
 				"verb 2", "verb 3",
 			).Replace(openVPNServerTemplate)
 			if tc.tcp {
@@ -107,8 +113,10 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 			startClient := func() (*protocolLog, func(), func(bool)) {
 				t.Helper()
 				ctx, cancel := context.WithCancel(context.Background())
+				// Configure this isolated client's TUN. Leaving it down with
+				// ifconfig-noexec causes ping-restart even without a network outage.
 				cmd := exec.CommandContext(ctx, binary, "--config", clientConfig, "--auth-user-pass", auth,
-					"--dev", "supivpnc", "--dev-type", "tun", "--disable-dco", "--ifconfig-noexec", "--route-noexec",
+					"--dev", "supivpnc", "--dev-type", "tun", "--disable-dco", "--route-noexec",
 					"--setenv", "IV_SSO", "webauth", "--verb", "3")
 				log := &protocolLog{}
 				cmd.Stdout, cmd.Stderr = log, log
@@ -252,6 +260,11 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 			waitProtocol(t, freshLog, "Initialization Sequence Completed")
 			if tc.name == "udp/cancel-before-saml" {
 				t.Run("short-outage-preserves-tunnel", func(t *testing.T) {
+					t.Cleanup(func() {
+						if t.Failed() {
+							t.Log("client protocol categories:", freshLog.categories())
+						}
+					})
 					select {
 					case e := <-m.events:
 						if e.kind != "ESTABLISHED" || e.cid != fresh.cid {
@@ -266,13 +279,16 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 					// closing its socket. No host networking or real client is used.
 					pauseClient(true)
 					t.Cleanup(func() { pauseClient(false) })
-					time.Sleep(2 * time.Second) // Less than the fixture's six-second server timeout.
+					time.Sleep(2 * time.Second) // Below the client's 10- and server's 20-second deadlines.
 					consumeStatus(t, a)
 					if a.connections[fresh.cid] != fresh || !a.readyLocked() {
 						t.Fatal("brief outage released a live tunnel")
 					}
 					pauseClient(false)
-					time.Sleep(8 * time.Second) // Beyond that timeout: resumed keepalives must work.
+					time.Sleep(22 * time.Second) // Beyond both deadlines: resumed keepalives must work.
+					if freshLog.contains("SIGUSR1") || freshLog.contains("process restarting") {
+						t.Fatal("brief outage restarted the client instead of preserving its tunnel")
+					}
 					consumeStatus(t, a)
 					if a.connections[fresh.cid] != fresh || fresh.address != address || fresh.expires != expires || !a.readyLocked() {
 						t.Fatal("restored client lost its CID/IP or changed authorization")
