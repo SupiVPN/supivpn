@@ -42,6 +42,12 @@ Cluster agents use a shared remote controller; local in-memory mode is intended
 for isolated tests. Transport is IAM/SigV4 to API Gateway or a Unix socket to a
 VM controller. See [configuration and API](CONTROLLER_API.md).
 
+For a controller on the same host, start from
+[agent.vm.example.json](../examples/agent.vm.example.json). It selects the private
+Unix transport explicitly; configure the controller UID and a persistent agent
+state directory as described in [local authentication](CONTROLLER_API.md#vm).
+Keep the management socket path identical in agent and OpenVPN configuration.
+
 All nodes use consistent group names and priorities. Each node receives its own
 `group_pools[].cidrs`, disjoint from other nodes' pools. `vpn_network` covers the
 local pools and matches OpenVPN's TUN configuration. OpenVPN does not allocate

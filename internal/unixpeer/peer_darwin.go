@@ -2,22 +2,17 @@
 // Licensed under AGPL-3.0-only. See LICENSE and COPYRIGHT.md.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//go:build linux
+//go:build darwin
 
-package vm
+package unixpeer
 
 import (
-	"golang.org/x/sys/unix"
 	"net"
-	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
-func ownedByCurrentUser(info os.FileInfo) bool {
-	st, ok := info.Sys().(*syscall.Stat_t)
-	return ok && st.Uid == uint32(os.Geteuid())
-}
-func peerUID(conn *net.UnixConn) (uint32, error) {
+func UID(conn *net.UnixConn) (uint32, error) {
 	raw, err := conn.SyscallConn()
 	if err != nil {
 		return 0, err
@@ -25,8 +20,8 @@ func peerUID(conn *net.UnixConn) (uint32, error) {
 	var uid uint32
 	var inner error
 	err = raw.Control(func(fd uintptr) {
-		var cred *unix.Ucred
-		cred, inner = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+		var cred *unix.Xucred
+		cred, inner = unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
 		if inner == nil {
 			uid = cred.Uid
 		}

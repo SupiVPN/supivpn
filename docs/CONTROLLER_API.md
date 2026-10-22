@@ -80,6 +80,54 @@ Node ID is set in local controller configuration. Headers/JSON cannot override i
 The HTTPS listener does not expose the agent API. The separate controller process
 neither owns the OpenVPN management socket nor manages OpenVPN's lifecycle.
 
+For an agent on the **same host**, use [agent.vm.example.json](../examples/agent.vm.example.json)
+with [controller.vm.example.json](../examples/controller.vm.example.json):
+
+```json
+"remote_controller": {
+  "transport": "unix",
+  "agent_socket": "/run/supivpn-controller/agent.sock",
+  "controller_uid": 1001,
+  "public_url": "https://login.example.test",
+  "node_id": "node-a",
+  "state_directory": "/var/lib/supivpn-node"
+}
+```
+
+Replace the illustrative `1001` with the actual numeric UID of the controller
+service account. This is the controller's UID, whereas `vm.agent_uid` is the
+agent's UID. The agent verifies the owner and modes of the socket and its parent,
+then authenticates the controller's kernel peer UID before sending a request.
+Symlinks at either of those paths are rejected. Every new connection repeats
+these checks, including after a controller restart. A root agent can reach a
+dedicated unprivileged controller; a different unprivileged UID cannot.
+
+`agent_socket` must be a canonical absolute path; `controller_uid` is mandatory
+(explicit `0` is allowed). Omit `agent_url` and `region` in Unix mode. The local
+transport uses neither DNS/TCP nor proxy/AWS credentials and never falls back to
+another transport. Omitting `transport`, or setting it to `aws`, retains the
+existing HTTPS/SigV4 behavior and requires `agent_url` and `region` instead.
+The browser still uses the controller's HTTPS `remote_controller.public_url`.
+The agent's top-level listener serves health/readiness only in remote mode.
+Match node ID, groups, limits and session policy between the two examples.
+
+Keep the agent's generation journal in its persistent **0700** state directory,
+separate from both runtime/socket directories. The journal is bound to node ID,
+socket path and controller UID, and locked against concurrent agent processes.
+A restart recovers an interrupted generation change and then rotates again.
+The previous agent/OpenVPN pair must be fully stopped before starting a new pair;
+the future systemd units must enforce that ordering. Do not delete the journal
+or reset database state to bypass an identity mismatch or startup failure.
+
+A controller restart reconnects to the same socket and retains pending logins
+in PostgreSQL. An outage prevents new approvals; lease expiry or a stale
+generation closes the agent's management connection. Unix mode does not invoke
+EC2 recovery. Restoring service requires the controller plus an orderly restart
+of a stopped pair when its lease has expired. A stopped pair can establish a
+fresh generation through the private API without direct database cleanup.
+These transport checks do not establish systemd shutdown/fencing behavior;
+package installation and real-tunnel recovery checks remain separate work.
+
 Server certificate/key/chain are read at startup. After TLS updates, deployment
 must restart the controller service to load the new files.
 
