@@ -23,6 +23,7 @@ PG = Path("/etc/postgresql/18/supivpn")
 PORT = 55433
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"}
 EXAMPLES = Path("/usr/share/supivpn/examples")
+PSQL = "/usr/lib/postgresql/18/bin/psql"
 
 
 class SetupError(Exception):
@@ -62,10 +63,21 @@ def unique_object(pairs):
     return result
 
 
+def valid_hostname(value):
+    return isinstance(value, str) and len(value) <= 253 and all(
+        re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+        for label in value.split("."))
+
+
+def absolute_path(value):
+    return isinstance(value, str) and value.startswith("/") and not any(
+        ord(char) < 32 for char in value) and ".." not in Path(value).parts
+
+
 def configuration(path):
     c = json.loads(read(path, 16384), object_pairs_hook=unique_object)
     allowed = {"hostname", "login_hostname", "certificate_directory", "idp_metadata_file",
-               "groups", "vpn_network", "admin_cidr", "ssh_port", "database_name"}
+               "groups", "vpn_network", "admin_cidr", "ssh_port", "database_name", "database"}
     if not isinstance(c, dict) or set(c) - allowed:
         raise SetupError("Unknown setup fields; see the packaged setup example")
     c.setdefault("login_hostname", c.get("hostname"))
@@ -74,14 +86,11 @@ def configuration(path):
     c.setdefault("database_name", "supivpn")
     for key in ("hostname", "login_hostname"):
         value = c.get(key)
-        if not isinstance(value, str) or len(value) > 253 or not all(
-                re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
-                for label in value.split(".")):
+        if not valid_hostname(value):
             raise SetupError("Hostnames must be lowercase DNS names, without a port or URL")
     for key in ("certificate_directory", "idp_metadata_file"):
         value = c.get(key)
-        if not isinstance(value, str) or not value.startswith("/") or any(
-                ord(char) < 32 for char in value) or ".." in Path(value).parts:
+        if not absolute_path(value):
             raise SetupError("Certificate directory and metadata file must be absolute paths")
     groups = c.get("groups")
     if not isinstance(groups, list) or not 1 <= len(groups) <= 16 or any(
@@ -106,6 +115,16 @@ def configuration(path):
         raise SetupError("Invalid database name")
     if c["database_name"] in {"postgres", "template0", "template1"}:
         raise SetupError("Database name is reserved")
+    if "database" in c:
+        db = c["database"]
+        required = {"host", "ca_file", "runtime_password_file", "migration_password_file"}
+        if not isinstance(db, dict) or not required <= db.keys() or db.keys() - required - {"port"}:
+            raise SetupError("Remote database requires host, ca_file and separate password files")
+        db.setdefault("port", 5432)
+        if not valid_hostname(db["host"]) or type(db["port"]) is not int or not 1 <= db["port"] <= 65535:
+            raise SetupError("Use a database hostname and a TCP port from 1 to 65535")
+        if any(not absolute_path(db[key]) for key in required - {"host"}):
+            raise SetupError("Remote database input files must use absolute paths")
     c["vpn_network"], c["admin_cidr"] = str(network), str(admin)
     return c
 
@@ -119,7 +138,10 @@ def configs(c, uid):
     controller["groups"] = groups
     controller["public_url"] = "https://" + c["login_hostname"] + ":8443"
     controller["profile"]["endpoint"] = c["hostname"]
-    controller["database_tls"]["server_name"] = "127.0.0.1"
+    controller["database_tls"] = {
+        "mode": "verify-full", "ca_file": str(ROOT / "controller/database-ca.pem"),
+        "server_name": c["database"]["host"] if "database" in c else "127.0.0.1",
+    }
     agent["public_url"] = "https://" + c["hostname"] + ":9443"
     agent["vpn_network"] = str(network)
     agent["group_pools"] = [{"group_name": g["name"], "priority": g["priority"], "cidr": str(pool)}
@@ -225,12 +247,16 @@ def install_certificates(values, gid, replace=False):
         write(ROOT / "controller" / name, content, 0o640, gid=gid, replace=replace)
 
 
-def preflight():
+def preflight(c=None):
+    remote = c is not None and "database" in c
     if os.geteuid() != 0 or not sys.platform.startswith("linux"):
         raise SetupError("Run setup as root on Debian 13")
     if not read("/etc/debian_version", 128).startswith(b"13.") or read("/proc/1/comm", 128).strip() != b"systemd":
         raise SetupError("Debian 13 with systemd as PID 1 is required")
-    for path in (ROOT, PG, Path("/var/lib/postgresql/18/supivpn"), Path("/var/lib/supivpn-node")):
+    paths = [ROOT, Path("/var/lib/supivpn-node")]
+    if not remote:
+        paths += [PG, Path("/var/lib/postgresql/18/supivpn")]
+    for path in paths:
         if path.exists() or path.is_symlink():
             raise SetupError("Existing SupiVPN configuration, database or state found; init never overwrites it")
     versions = run(["dpkg-query", "-W", "-f=${Status} ${Version}\n", "supivpn", "supivpn-node", "supivpn-controller"]).decode().splitlines()
@@ -238,11 +264,17 @@ def preflight():
         raise SetupError("Install matching versions of all three SupiVPN packages")
     if not run(["/usr/sbin/openvpn", "--version"]).startswith(b"OpenVPN 2.7.8 "):
         raise SetupError("OpenVPN 2.7.8 is required by this package version")
-    if not Path("/usr/lib/postgresql/18/bin/initdb").is_file():
+    if remote:
+        if not Path(PSQL).is_file():
+            raise SetupError("Install postgresql-client-18 for remote database setup")
+    elif not Path("/usr/lib/postgresql/18/bin/initdb").is_file():
         raise SetupError("Install postgresql-18 before setup")
     if not stat.S_ISCHR(Path("/dev/net/tun").stat().st_mode):
         raise SetupError("The VM must provide /dev/net/tun")
-    for address, port in (("0.0.0.0", 8443), ("127.0.0.1", 9443), ("127.0.0.1", PORT)):
+    ports = [("0.0.0.0", 8443), ("127.0.0.1", 9443)]
+    if not remote:
+        ports.append(("127.0.0.1", PORT))
+    for address, port in ports:
         with socket.socket() as sock:
             try:
                 sock.bind((address, port))
@@ -257,6 +289,101 @@ def preflight():
     if not 0 < user.pw_uid < 1000 or user.pw_dir != "/nonexistent" or user.pw_shell != "/usr/sbin/nologin":
         raise SetupError("Invalid controller service account")
     return user
+
+
+def password_input(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        # init has already required root. Never follow links or consume an input
+        # writable/readable by another user, a device, or a potentially blocking FIFO.
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise SetupError("Database password files must be private regular files owned by root")
+        value = stream.read(4098)
+    if value.endswith(b"\n"):
+        value = value[:-1]
+    if not 1 <= len(value) <= 4096 or any(byte < 32 or byte > 126 for byte in value):
+        raise SetupError("Database passwords must be one nonempty line of printable ASCII")
+    return value.decode("ascii")
+
+
+def remote_inputs(c):
+    db = c["database"]
+    result = {"ca": read(db["ca_file"]),
+              "runtime": password_input(db["runtime_password_file"]),
+              "migrator": password_input(db["migration_password_file"])}
+    if b"PRIVATE KEY" in result["ca"]:
+        raise SetupError("The database CA file must contain public certificates only")
+    if result["runtime"] == result["migrator"]:
+        raise SetupError("Use different runtime and migration passwords")
+    return result
+
+
+def remote_query(c, credentials, role, query, ca_file=None):
+    db = c["database"]
+    return run([PSQL, "-X", "-w", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", query], env={
+        "PGHOST": db["host"], "PGPORT": str(db["port"]), "PGDATABASE": c["database_name"],
+        "PGUSER": "supivpn_" + role, "PGPASSWORD": credentials[role],
+        "PGSSLMODE": "verify-full", "PGSSLROOTCERT": str(ca_file or db["ca_file"]),
+        "PGCONNECT_TIMEOUT": "5", "PGOPTIONS": "-c statement_timeout=5000 -c lock_timeout=2000",
+    }).strip()
+
+
+def verify_remote_database(c, credentials):
+    # Read-only probes before any host writes or migrations. A remote init is
+    # only for a dedicated, pre-provisioned empty database, not an existing cluster.
+    common = """SELECT current_setting('server_version_num')::int BETWEEN 180000 AND 189999
+AND NOT pg_is_in_recovery() AND current_setting('transaction_read_only') = 'off'
+AND NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
+"""
+    runtime = common + """AND NOT pg_has_role(current_user, 'supivpn_owner', 'MEMBER')
+AND NOT has_database_privilege(current_user, current_database(), 'CREATE')
+AND NOT has_database_privilege(current_user, current_database(), 'TEMP')
+AND has_schema_privilege(current_user, 'supivpn', 'USAGE')
+AND NOT has_schema_privilege(current_user, 'supivpn', 'CREATE')
+AND NOT has_schema_privilege(current_user, 'public', 'CREATE')
+FROM pg_roles WHERE rolname = current_user"""
+    migrator = common + """AND pg_has_role(current_user, 'supivpn_owner', 'SET')
+AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supivpn_owner'
+            AND NOT (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls))
+AND EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'supivpn' AND nspowner = 'supivpn_owner'::regrole)
+AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname IN ('supivpn', 'public'))
+AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname IN ('supivpn', 'public'))
+FROM pg_roles WHERE rolname = current_user"""
+    for role, query in (("runtime", runtime), ("migrator", migrator)):
+        if remote_query(c, credentials, role, query) != b"t":
+            raise SetupError("Remote database must be an empty PostgreSQL 18 writer with the documented restricted roles")
+
+
+def connection_string(c, role, password, *, tls=False):
+    values = {"host": c["database"]["host"], "port": str(c["database"]["port"]),
+              "dbname": c["database_name"], "user": "supivpn_" + role, "password": password}
+    if tls:
+        values |= {"sslmode": "verify-full", "sslrootcert": str(ROOT / "controller/database-ca.pem")}
+    # libpq/pgx keyword syntax, then separately quote the EnvironmentFile value.
+    return " ".join(key + "='" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+                    for key, value in values.items())
+
+
+def remote_database(c, gid, credentials):
+    ca = ROOT / "controller/database-ca.pem"
+    write(ca, credentials["ca"], 0o640, gid=gid)
+    runtime = connection_string(c, "runtime", credentials["runtime"])
+    migrator = connection_string(c, "migrator", credentials["migrator"], tls=True)
+    for name, dsn in (("database.env", runtime), ("migration.env", migrator)):
+        write(ROOT / "controller" / name, "SUPIVPN_DATABASE_URL=" + json.dumps(dsn) + "\n")
+    run(["/usr/sbin/supivpn-migrate"], env={"SUPIVPN_DATABASE_URL": migrator})
+    # Check actual grants after DDL, not just defaults on an empty schema.
+    query = """SELECT has_table_privilege(current_user, 'public.supivpn_schema_migrations', 'SELECT')
+AND NOT EXISTS (
+ SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS p(privilege)
+ WHERE n.nspname = 'supivpn' AND c.relkind IN ('r','p')
+ AND NOT has_table_privilege(current_user, c.oid, p.privilege))"""
+    if remote_query(c, credentials, "runtime", query, ca) != b"t":
+        raise SetupError("Remote runtime grants are incomplete after migration; inspect the preserved setup")
 
 
 def database(c, gid):
@@ -316,7 +443,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE supivpn_owner IN SCHEMA public GRANT SELECT ON
 
 
 def initialize(c):
-    user = preflight()
+    user = preflight(c)
     values, template = certificate_inputs(c)
     metadata = read(c["idp_metadata_file"])
     # Parse only public metadata, without external entity expansion/downloads.
@@ -325,6 +452,9 @@ def initialize(c):
     document = ET.fromstring(metadata)
     if document.tag != "{urn:oasis:names:tc:SAML:2.0:metadata}EntityDescriptor" or not document.get("entityID"):
         raise SetupError("Expected one SAML EntityDescriptor from the IdP")
+    remote = remote_inputs(c) if "database" in c else None
+    if remote is not None:
+        verify_remote_database(c, remote)
     agent, controller, server = configs(c, user.pw_uid)
     os.umask(0o077)
     directory(ROOT, 0o755)
@@ -347,21 +477,30 @@ def initialize(c):
     os.chown(ROOT / "keys", 0, user.pw_gid)
     (ROOT / "keys").chmod(0o750)
     run(["/usr/sbin/supivpn", "-config", str(ROOT / "node/agent.json"), "-check-config"])
-    print("Creating dedicated PostgreSQL 18/supivpn and applying migrations", flush=True)
-    database(c, user.pw_gid)
+    if remote is not None:
+        print("Configuring the remote PostgreSQL writer and applying migrations", flush=True)
+        remote_database(c, user.pw_gid, remote)
+    else:
+        print("Creating dedicated PostgreSQL 18/supivpn and applying migrations", flush=True)
+        database(c, user.pw_gid)
     run(["systemd-analyze", "verify", "supivpn-controller.service", "supivpn-node.service", "supivpn-openvpn.service"])
     write(ROOT / "setup-complete", "Setup completed; services remain stopped.\n")
     print("Setup complete. Review /etc/supivpn/firewall.nft, then follow DEPLOYMENT.md to start and check services.")
 
 
 def check(c):
-    for unit in ("postgresql@18-supivpn", "supivpn-controller", "supivpn-node", "supivpn-openvpn"):
+    units = ["supivpn-controller", "supivpn-node", "supivpn-openvpn"]
+    if "database" not in c:
+        units.insert(0, "postgresql@18-supivpn")
+    for unit in units:
         run(["systemctl", "is-active", "--quiet", unit])
         print(unit + ": active")
     for hostname, port, endpoint in ((c["login_hostname"], 8443, "healthz"), (c["hostname"], 9443, "readyz")):
         run(["curl", "--fail", "--silent", "--show-error", "--noproxy", "*", "--connect-timeout", "5", "--max-time", "10",
              "--resolve", f"{hostname}:{port}:127.0.0.1", f"https://{hostname}:{port}/{endpoint}"])
         print(endpoint + ": ready (TLS verified)")
+    if "database" in c:
+        print("Remote PostgreSQL: controller database readiness passed")
     print("Next: verify a real IdP login, client tunnel and denied access; health alone is not VPN acceptance.")
 
 
@@ -374,9 +513,15 @@ def main():
         c = configuration(args.config)
         if args.action == "plan":
             print("Create /etc/supivpn; configure one controller and node; generate wrapping key.")
-            print(f"Create PostgreSQL 18/supivpn on 127.0.0.1:{PORT}; restricted roles, TLS, migrations.")
+            if "database" in c:
+                print("Use the pre-provisioned remote PostgreSQL 18 writer; verify TLS and restricted roles, apply migrations.")
+                print("No local database cluster will be created, started or checked.")
+            else:
+                print(f"Create PostgreSQL 18/supivpn on 127.0.0.1:{PORT}; restricted roles, TLS, migrations.")
             print("Existing SupiVPN state is refused. Firewall is written for review, never applied.")
-            print("No downloads, APT changes, service enablement or VPN start. Init starts only the new database.")
+            print("No downloads, APT changes, service enablement or VPN start.")
+            if "database" not in c:
+                print("Init starts only its new local database.")
             print("ACS: https://" + c["login_hostname"] + ":8443/saml/acs")
             print("Entity ID: https://" + c["login_hostname"] + ":8443/saml/metadata")
             print("Groups (priority order): " + ", ".join(c["groups"]))

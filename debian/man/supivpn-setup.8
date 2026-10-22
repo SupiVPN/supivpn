@@ -10,7 +10,8 @@ supivpn-setup \- configure a combined SupiVPN Debian host
 .IR file ]
 .SH DESCRIPTION
 Explicit first-time setup on Debian 13 with systemd. Install matching SupiVPN
-packages and PostgreSQL 18 first. Supply trusted IdP metadata and a valid
+packages and PostgreSQL 18 first (postgresql-client-18 for a remote database).
+Supply trusted IdP metadata and a valid
 server certificate. The example is in
 .IR /usr/share/supivpn/examples/setup.example.json .
 .PP
@@ -22,6 +23,12 @@ and runs the installed migrations. It starts only that database cluster.
 It does not alter existing clusters, install packages, apply firewall rules,
 enable services or start the VPN.
 .PP
+With the optional database object, init instead uses a pre-provisioned empty
+remote PostgreSQL 18 writer. It verifies TLS and restricted login roles before
+writing configuration, copies the public CA, saves separate runtime/migration
+credentials and applies migrations. It does not create, start, enable or check
+a local database cluster. It never transfers an existing database.
+.PP
 The check action verifies service state and HTTPS readiness using certificate
 validation. It does not establish a client tunnel or test the real IdP.
 The certificates action validates and refreshes certificate copies from the
@@ -32,6 +39,14 @@ hostname, certificate_directory, idp_metadata_file, groups and admin_cidr are
 required. Groups are exact case-sensitive IdP names in priority order.
 Optional login_hostname defaults to hostname; vpn_network defaults to
 10.203.0.0/24; ssh_port to 22; database_name to supivpn.
+.PP
+The optional database object requires host, ca_file, runtime_password_file and
+migration_password_file; port defaults to 5432. Paths must be absolute.
+Password inputs must be root-owned regular files, without group/other access
+or symlinks, containing distinct single-line printable ASCII passwords.
+Use supivpn_runtime and supivpn_migrator logins with the documented grants.
+The plan action does not read these files or contact the database.
+.PP
 Equal subnet pools are allocated to the groups. Internet routing and DNS
 remain unchanged. The generated firewall permits only the gateway ping
 from VPN clients; review it before applying on a fresh dedicated host.
@@ -41,7 +56,8 @@ from VPN clients; review it before applying on a fresh dedicated host.
 Saved setup inputs; the default configuration for maintenance actions.
 .TP
 .I /etc/supivpn/controller/database.env
-Root-only runtime credentials. Never print or source for diagnostics.
+Root-only runtime credentials in systemd EnvironmentFile syntax. Never print
+or source as shell code.
 .TP
 .I /etc/supivpn/controller/migration.env
 Separate root-only migration credentials for future explicit upgrades.

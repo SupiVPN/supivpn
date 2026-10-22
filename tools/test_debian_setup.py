@@ -7,7 +7,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import stat
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -143,6 +145,185 @@ class SetupTests(unittest.TestCase):
                 setup.initialize(self.load())
         mkdir.assert_not_called()
         db.assert_not_called()
+
+    def remote(self, **changes):
+        return self.load(database={
+            "host": "db.example.test", "ca_file": str(self.root / "ca.pem"),
+            "runtime_password_file": str(self.root / "runtime"),
+            "migration_password_file": str(self.root / "migrator"),
+        } | changes)
+
+    def test_remote_configuration_rejects_unknown_fields_and_unsafe_endpoints(self):
+        for change in ({"host": "db.test sslmode=disable"}, {"host": "/tmp/socket"},
+                       {"host": "https://db.test"}, {"port": True}, {"port": 0},
+                       {"port": 65536}, {"sslmode": "disable"},
+                       {"runtime_password_file": "relative"},
+                       {"ca_file": "/root/../ca.pem"}):
+            with self.subTest(change=change), self.assertRaises(setup.SetupError):
+                self.remote(**change)
+        for value in (None, {}, "db.test"):
+            with self.subTest(value=value), self.assertRaises(setup.SetupError):
+                self.load(database=value)
+        c = self.remote()
+        self.assertEqual(c["database"]["port"], 5432)
+        with patch.object(setup, "EXAMPLES", REPO / "debian/examples"):
+            _, controller, _ = setup.configs(c, 987)
+        self.assertEqual(controller["database_tls"]["mode"], "verify-full")
+        self.assertEqual(controller["database_tls"]["server_name"], "db.example.test")
+
+    def test_remote_plan_does_not_open_credentials_or_connect(self):
+        self.remote()
+        with patch.object(setup, "remote_inputs") as inputs, patch.object(setup, "run") as run, \
+                patch("sys.argv", ["supivpn-setup", "plan", "--config", str(self.config)]), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(setup.main(), 0)
+        inputs.assert_not_called()
+        run.assert_not_called()
+        self.assertIn("No local database cluster", output.getvalue())
+
+    def test_remote_preflight_leaves_existing_local_database_and_port_alone(self):
+        c = self.remote()
+        local_config = self.load()
+        def read(path, limit):
+            return b"13.1" if str(path) == "/etc/debian_version" else b"systemd\n"
+        def command(args):
+            if args[0] == "dpkg-query":
+                return b"install ok installed 0.6.0\n" * 3
+            return b"OpenVPN 2.7.8 test"
+        user = SimpleNamespace(pw_uid=987, pw_dir="/nonexistent", pw_shell="/usr/sbin/nologin")
+        with patch.object(setup, "read", side_effect=read), patch.object(setup, "run", side_effect=command), \
+                patch("os.geteuid", return_value=0), patch("sys.platform", "linux"), \
+                patch.object(Path, "exists", autospec=True, side_effect=lambda path: path == setup.PG), \
+                patch.object(Path, "is_symlink", return_value=False), \
+                patch.object(Path, "is_file", autospec=True, side_effect=lambda path: str(path) == setup.PSQL), \
+                patch.object(Path, "stat", return_value=SimpleNamespace(st_mode=stat.S_IFCHR)), \
+                patch.object(setup.pwd, "getpwnam", return_value=user), \
+                patch.object(setup.socket, "socket") as socket:
+            self.assertEqual(setup.preflight(c), user)
+            binds = socket.return_value.__enter__.return_value.bind.call_args_list
+            self.assertNotIn((("127.0.0.1", setup.PORT),), [call.args for call in binds])
+            with self.assertRaisesRegex(setup.SetupError, "Existing"):
+                setup.preflight(local_config)
+
+    def test_remote_init_selects_only_remote_database(self):
+        c = self.remote()
+        host = self.root / "installed"
+        metadata = b'<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="test"/>'
+        c["idp_metadata_file"] = str(self.root / "idp.xml")
+        Path(c["idp_metadata_file"]).write_bytes(metadata)
+        user = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        def command(args, **kwargs):
+            if args[0] == "/usr/sbin/supivpn-profile":
+                Path(args[-1]).write_text("synthetic wrapping-key sentinel")
+            return b""
+        with patch.object(setup, "ROOT", host), patch.object(setup, "EXAMPLES", REPO / "debian/examples"), \
+                patch.object(setup, "preflight", return_value=user), \
+                patch.object(setup, "certificate_inputs", return_value=({}, b"template")), \
+                patch.object(setup, "remote_inputs", return_value={"synthetic": True}), \
+                patch.object(setup, "verify_remote_database"), patch.object(setup, "run", side_effect=command), \
+                patch.object(setup, "remote_database") as remote, patch.object(setup, "database") as local, \
+                patch("os.chown"), patch("os.fchown"), patch("os.umask"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            setup.initialize(c)
+        remote.assert_called_once_with(c, user.pw_gid, {"synthetic": True})
+        local.assert_not_called()
+        self.assertTrue((host / "setup-complete").is_file())
+        installed = json.loads((host / "controller/controller.json").read_text())
+        self.assertEqual(installed["database_tls"]["server_name"], "db.example.test")
+
+    def test_password_input_requires_private_regular_owned_file(self):
+        path = self.root / "password"
+        path.write_bytes(b"synthetic pass'\\word\"$\n")
+        path.chmod(0o600)
+        self.assertEqual(setup.password_input(path), "synthetic pass'\\word\"$")
+        path.chmod(0o640)
+        with self.assertRaises(setup.SetupError):
+            setup.password_input(path)
+        path.chmod(0o600)
+        with patch("os.geteuid", return_value=path.stat().st_uid + 1), self.assertRaises(setup.SetupError):
+            setup.password_input(path)
+        link = self.root / "password-link"
+        link.symlink_to(path)
+        with self.assertRaises(OSError):
+            setup.password_input(link)
+        fifo = self.root / "fifo"
+        os.mkfifo(fifo, 0o600)
+        with self.assertRaises(setup.SetupError):
+            setup.password_input(fifo)
+        for value in (b"", b"\n", b"a\nb", b"a\r\n", b"\xff", b"a" * 4097):
+            path.write_bytes(value)
+            with self.assertRaises(setup.SetupError):
+                setup.password_input(path)
+
+    def test_remote_inputs_reject_private_key_or_shared_password(self):
+        c = self.remote()
+        with patch.object(setup, "read", return_value=b"synthetic PRIVATE KEY marker"), \
+                patch.object(setup, "password_input", side_effect=["one", "two"]), \
+                self.assertRaisesRegex(setup.SetupError, "public certificates"):
+            setup.remote_inputs(c)
+        with patch.object(setup, "read", return_value=b"public CA"), \
+                patch.object(setup, "password_input", return_value="same"), \
+                self.assertRaisesRegex(setup.SetupError, "different"):
+            setup.remote_inputs(c)
+
+    def test_remote_failure_precedes_all_host_writes(self):
+        c = self.remote()
+        metadata = b'<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="test"/>'
+        with patch.object(setup, "preflight"), \
+                patch.object(setup, "certificate_inputs", return_value=({}, b"")), \
+                patch.object(setup, "read", return_value=metadata), \
+                patch.object(setup, "remote_inputs", return_value={}), \
+                patch.object(setup, "verify_remote_database", side_effect=setup.SetupError("rejected")), \
+                patch.object(setup, "directory") as mkdir, patch.object(setup, "write") as write, \
+                patch.object(setup, "run") as run:
+            with self.assertRaisesRegex(setup.SetupError, "rejected"):
+                setup.initialize(c)
+        mkdir.assert_not_called()
+        write.assert_not_called()
+        run.assert_not_called()
+
+    def test_remote_queries_use_verified_tls_and_private_environment(self):
+        c = self.remote()
+        with patch.object(setup, "run", return_value=b"t\n") as run:
+            setup.verify_remote_database(c, {"runtime": "synthetic-one", "migrator": "synthetic-two"})
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            self.assertNotIn("synthetic", " ".join(call.args[0]))
+            env = call.kwargs["env"]
+            self.assertEqual(env["PGSSLMODE"], "verify-full")
+            self.assertEqual(env["PGHOST"], "db.example.test")
+            self.assertEqual(env["PGCONNECT_TIMEOUT"], "5")
+        for result in (b"f", b"", b"t\nf"):
+            with patch.object(setup, "remote_query", return_value=result), self.assertRaises(setup.SetupError):
+                setup.verify_remote_database(c, {})
+
+    def test_remote_credentials_are_quoted_and_private(self):
+        host = self.root / "installed"
+        (host / "controller").mkdir(parents=True)
+        c = self.remote()
+        credentials = {"ca": b"public synthetic CA", "runtime": "test ' \\ \" $ value", "migrator": "different"}
+        with patch.object(setup, "ROOT", host), patch("os.fchown"), \
+                patch.object(setup, "run") as run, patch.object(setup, "remote_query", return_value=b"t"):
+            setup.remote_database(c, os.getgid(), credentials)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0], ["/usr/sbin/supivpn-migrate"])
+        for filename in ("database.env", "migration.env"):
+            path = host / "controller" / filename
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            dsn = json.loads(path.read_text().split("=", 1)[1])
+            self.assertIn("host='db.example.test'", dsn)
+        self.assertIn("sslmode='verify-full'", run.call_args.kwargs["env"]["SUPIVPN_DATABASE_URL"])
+        self.assertEqual((host / "controller/database-ca.pem").stat().st_mode & 0o777, 0o640)
+
+    def test_remote_readiness_does_not_require_local_postgres_or_input_passwords(self):
+        with patch.object(setup, "run") as run, patch.object(setup, "remote_inputs") as inputs, \
+                contextlib.redirect_stdout(io.StringIO()):
+            setup.check(self.remote())
+        inputs.assert_not_called()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual([c[-1] for c in commands if c[0] == "systemctl"],
+                         ["supivpn-controller", "supivpn-node", "supivpn-openvpn"])
+        self.assertEqual(len([c for c in commands if c[0] == "curl"]), 2)
 
 
 if __name__ == "__main__":

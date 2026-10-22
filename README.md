@@ -153,6 +153,10 @@ start systemd services, download a profile and verify a tunnel. The guide includ
 denial checks, reboot acceptance and maintenance; the
 [manual reference](docs/DEPLOYMENT_MANUAL.md) covers individual setup steps and
 private-network routing.
+To move PostgreSQL off the VPN VM, use the
+[external database guide](docs/REMOTE_DATABASE.md): private networking, verified
+TLS and a controlled data cutover. It also documents the remote setup-helper
+extension planned for the next release.
 
 Before choosing the defaults, review the guide's
 [configuration options](DEPLOYMENT.md#choose-your-access-policy): explicit group

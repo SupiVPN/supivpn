@@ -6,6 +6,10 @@ See [LICENSE](LICENSE) for copyright ownership and licensing terms.
 One Debian 13 VM, three `.deb` packages, one setup file. The `supivpn` package
 installs both components and provides `supivpn-setup` to configure the controller,
 node and local PostgreSQL 18 database. Services run directly under systemd.
+To keep PostgreSQL on another host, see the
+[external database walkthrough](docs/REMOTE_DATABASE.md), including a controlled
+move of an existing database. Remote setup-helper support is prepared for the
+next release; the published v0.6.0 helper still configures only a local database.
 
 This is the **minimal deployment on a single VM**, intended for evaluation and
 initial validation. Production deployment documentation and infrastructure as
@@ -36,7 +40,8 @@ opening access to private resources:
 | Let different groups reach different private services | Client routes plus firewall/ACL rules based on the assigned group CIDRs. [Worked routed-network example](docs/DEPLOYMENT_MANUAL.md#10-add-access-to-a-private-network). A route alone does not grant access. |
 | Send Internet traffic or DNS through the VPN | Configure OpenVPN, forwarding/SNAT and a DNS forwarder separately. [Full tunnel](docs/HOST.md#full-tunnel) and [client DNS](docs/HOST.md#client-dns-through-the-local-node). The helper configures neither. |
 | Use your SAML IdP and a convenient profile download entry | Set the groups claim and metadata; optionally add an IdP dashboard tile. [IdP requirements](docs/IDENTITY_PROVIDER.md#groups-claim) and [profile downloads](docs/PROFILES.md). Okta is the documented example, not the only SAML provider. |
-| Customize storage, logging or grow beyond one VM | [Database TLS and migrations](docs/POSTGRES.md#configurable-database-tls), [logging](docs/LOGGING.md#destinations-and-defaults), and [active-active architecture](docs/HA.md). The one-host helper does not provision an HA deployment. |
+| Put PostgreSQL on a separate host | [Private endpoint, verified TLS, setup and existing-data cutover](docs/REMOTE_DATABASE.md). The controller supports this now; the helper extension is pending release. |
+| Customize logging or grow beyond one VM | [Logging](docs/LOGGING.md#destinations-and-defaults) and [active-active architecture](docs/HA.md). The one-host helper does not provision an HA deployment. |
 
 For the Debian file paths and a safe point to customize them, see
 [configuration after setup](#customize-the-generated-configuration).
@@ -164,6 +169,10 @@ apt-cache policy supivpn supivpn-node supivpn-controller
 apt-get install supivpn
 ```
 
+For remote PostgreSQL, install `postgresql-client-18` in place of `postgresql-18`
+and complete the [database preparation](docs/REMOTE_DATABASE.md#1-prepare-a-private-database-endpoint).
+Use a release containing the helper extension, or the manual path on v0.6.0.
+
 The current agent requires upstream OpenVPN **2.7.8**. If the Debian revision above is superseded,
 select the available revision of that same upstream version after review;
 never force dependencies or install the CI test fixture. See the
@@ -226,6 +235,8 @@ client LANs or destination networks. Optional setup fields: `vpn_network`, `ssh_
 (default 22), `login_hostname` (defaults to `hostname`), and `database_name`
 (default `supivpn`). A separate login hostname needs DNS and certificate coverage.
 Do not put passwords or private-key contents in this file.
+The optional [`database` block](docs/REMOTE_DATABASE.md#3-configure-a-fresh-vpn-vm)
+selects a pre-provisioned remote writer in helper versions supporting that mode.
 
 ## 3. Run setup
 
@@ -246,8 +257,12 @@ random credentials and applied migrations. Existing PostgreSQL clusters are
 untouched. Credentials stay in root-only files under `/etc/supivpn/controller/`;
 do not print them. The generated database certificate expires after one year.
 
-Setup starts only its new database. It does not apply firewall rules, start the
-VPN or enable services at boot. Existing SupiVPN configuration, keys, node state
+With the optional remote database block, setup instead verifies the external
+writer and restricted identities, copies the public CA, and applies migrations
+to the pre-provisioned empty database. It creates no local PostgreSQL cluster.
+
+Local setup starts only its new database. Neither mode applies firewall rules,
+starts the VPN or enables services at boot. Existing SupiVPN configuration, keys, node state
 or its database cluster cause a refusal. After a partial failure, inspect the
 reported step locally using the [manual reference](docs/DEPLOYMENT_MANUAL.md);
 do not delete state or rerun setup blindly. `init` is not an upgrade command.
@@ -301,10 +316,12 @@ systemctl start supivpn-node
 supivpn-setup check
 ```
 
-Verify a **new SSH connection** before closing the old one. All four services
+Verify a **new SSH connection** before closing the old one. All four local-mode services
 must be active; controller `/healthz` and node `/readyz` must pass with TLS
 verification. If the node is still starting, wait a few seconds and run `check`
 again. The OpenVPN service follows the node; do not start or enable it separately.
+Remote mode checks the three SupiVPN units and the controller's database readiness;
+the external database has its own service management.
 
 ## 5. Connect and finish acceptance
 
@@ -327,6 +344,9 @@ After acceptance, enable the dedicated database and SupiVPN at boot:
 systemctl enable postgresql@18-supivpn supivpn-controller supivpn-node
 ```
 
+For remote PostgreSQL, omit `postgresql@18-supivpn`; enable only the two SupiVPN
+units on this VM and manage database startup on the database host.
+
 Schedule a reboot with console access, then repeat `supivpn-setup check` and a
 client connection. For useful private application access, follow the
 [routed-network example](docs/DEPLOYMENT_MANUAL.md#10-add-access-to-a-private-network):
@@ -346,7 +366,8 @@ Do not post credentials, profiles, cookies or complete SAML assertions in suppor
 logs. For symptoms and recovery, see the
 [manual diagnostics](docs/DEPLOYMENT_MANUAL.md#operations-and-troubleshooting).
 Use PostgreSQL unit `postgresql@18-supivpn` and port **55433** for helper installs;
-the manual procedure uses `18/main:5432` instead.
+the manual local procedure uses `18/main:5432` instead. In remote mode, omit the
+local PostgreSQL unit from `systemctl status`; see [remote database maintenance](docs/REMOTE_DATABASE.md).
 
 **Certificate renewal:** Certbot maintains its source directory, while services
 use restricted copies. After a successful renewal, in a maintenance window:
@@ -361,7 +382,8 @@ supivpn-setup check
 This disconnects clients. The command validates the renewed chain and hostnames
 before replacing any service copies; it does not change the wrapping key or DB
 certificate. Track DB certificate expiry separately and update its trust copy as
-described in the manual database section, using the helper's cluster paths.
+described in the manual database section, using the helper's cluster paths for
+local PostgreSQL or your remote database provider's CA rotation procedure.
 
 **Upgrades:** keep encrypted backups of the database, configuration, wrapping key
 and node generation state. Install matching packages, follow the release's schema
