@@ -7,10 +7,27 @@ import unittest
 from unittest.mock import patch
 
 import debian_packages
+import debian_release
 import repository_audit
 
 
 class DebianSourceTests(unittest.TestCase):
+    def test_release_changelog_and_source_times_are_deterministic_without_editing_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            (root / "debian").mkdir(parents=True)
+            original = b"supivpn (0.5.0+packaging1) UNRELEASED; urgency=medium\n"
+            (root / "debian/changelog").write_bytes(original)
+            for name in ("one", "two"):
+                work = Path(directory) / name
+                work.mkdir()
+                with patch.object(debian_packages, "run"):
+                    source = debian_packages.prepare(root, work, "go", version="v0.6.0-rc.1", epoch=1792684800)
+                self.assertEqual((source / "debian/changelog").read_bytes(),
+                                 debian_release.changelog(original, "v0.6.0-rc.1", 1792684800))
+                self.assertEqual((source / "debian/changelog").stat().st_mtime, 1792684800)
+            self.assertEqual((root / "debian/changelog").read_bytes(), original)
+
     def test_copies_only_audited_source_and_never_local_material(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "repo"

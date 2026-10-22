@@ -7,10 +7,9 @@ One Debian 13 VM, three `.deb` packages, one setup file. The `supivpn` package
 installs both components and provides `supivpn-setup` to configure the controller,
 node and local PostgreSQL 18 database. Services run directly under systemd.
 
-**Evaluation status:** `.deb` files are still unsigned local development builds,
-not published release assets or an APT repository. The shipped VPN client
-template verifies the certificate chain but does not yet enforce the server DNS
-name. [DNS SAN verification](docs/TLS_CRYPT_V2.md#planned-dns-san-verification)
+**Evaluation status:** the shipped VPN client template verifies the certificate
+chain but does not yet enforce the server DNS name.
+[DNS SAN verification](docs/TLS_CRYPT_V2.md#planned-dns-san-verification)
 remains a production blocker. The helper does not remove that limitation.
 
 The short path below establishes a split tunnel and a ping to the VPN gateway.
@@ -31,13 +30,12 @@ Use a fresh, dedicated **Debian 13 amd64 or arm64** VM with systemd 257+,
   Do not expose the database or node health port. Do not publish an AAAA record
   without configuring IPv6 reachability.
 
-Obtain the three matching `.deb` files first. Until signed packages are
-published, build a reviewed commit on a workstation using the
-[package build instructions](docs/DEBIAN_PACKAGING.md#build-and-check):
-`make setup`, then `make deb-test ARCH=amd64` (or `arm64`). Transfer the three
-packages over authenticated SSH to `/root/supivpn-packages/` and compare their
-SHA-256 hashes on both hosts. Keep the matching vendored source/build record.
-GitHub's existing release tarballs are not Debian packages.
+Use a [GitHub Release](https://github.com/SupiVPN/supivpn/releases) containing
+Debian packages. **v0.5.0 and earlier do not contain `.deb` assets.** Until the first
+release with packages is published, use the
+[local build fallback](docs/DEBIAN_PACKAGING.md#build-and-check).
+The release path below needs no Go SDK, Docker, source checkout or GitHub account
+on the VM. There is no SupiVPN APT repository yet.
 
 On the VM, enter a root Bash shell and install the prerequisites:
 
@@ -46,10 +44,57 @@ sudo -i
 umask 077
 apt-get update
 apt-get upgrade
-apt-get install ca-certificates curl openssl python3 nftables certbot iproute2 iputils-ping
+apt-get install ca-certificates curl gnupg openssl python3 nftables certbot iproute2 iputils-ping
 test -c /dev/net/tun
 timedatectl status
 ```
+
+### Download and verify SupiVPN
+
+Replace `vX.Y.Z` with the chosen release containing `.deb` assets. Run this block
+in Bash; it stops on download, signature or checksum failure. It creates a new
+version/architecture directory, refusing to mix with earlier downloads:
+
+```bash
+set -euo pipefail
+VERSION=vX.Y.Z
+ARCH=$(dpkg --print-architecture)
+case "$ARCH" in amd64|arm64) ;; *) exit 1 ;; esac
+DEB_VERSION=${VERSION#v}
+DEB_VERSION=${DEB_VERSION/-/\~}
+BASE="https://github.com/SupiVPN/supivpn/releases/download/$VERSION"
+install -d -m 0700 /root/supivpn-packages
+mkdir "/root/supivpn-packages/$VERSION-$ARCH"
+cd "/root/supivpn-packages/$VERSION-$ARCH"
+PACKAGES=("supivpn-node_${DEB_VERSION}_${ARCH}.deb"
+          "supivpn-controller_${DEB_VERSION}_${ARCH}.deb" "supivpn_${DEB_VERSION}_all.deb")
+for FILE in "${PACKAGES[@]}" SHA256SUMS SHA256SUMS.asc; do
+  curl --fail --show-error --location --proto '=https' --proto-redir '=https' -o "$FILE" "$BASE/$FILE"
+done
+PRIMARY=A43155B36661034A4FA89E373681E6DFB83B35E2
+SIGNER=867CC295DFBEE8E0888F7AFF113339EEAC58A9C5
+mkdir -m 0700 verification-keyring
+gpg --homedir ./verification-keyring --batch --keyserver hkps://keys.openpgp.org --recv-keys "$PRIMARY"
+gpg --homedir ./verification-keyring --batch --status-fd 1 \
+  --verify SHA256SUMS.asc SHA256SUMS > signature.status
+awk -v primary="$PRIMARY" -v signer="$SIGNER" '
+  $1 == "[GNUPG:]" && $2 == "VALIDSIG" && $3 == signer && $NF == primary { valid=1 }
+  $1 == "[GNUPG:]" && $2 ~ /^(BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG|KEYEXPIRED|KEYREVOKED|NO_PUBKEY)$/ { bad=1 }
+  END { exit !(valid && !bad) }
+' signature.status
+for FILE in "${PACKAGES[@]}"; do
+  awk -v name="$FILE" '$2 == name { print; found++ } END { exit (found != 1) }' SHA256SUMS > selected.sha256
+  sha256sum --check --strict selected.sha256
+done
+```
+
+The pinned fingerprints come from the [release-key policy](DEVELOPERS.md#release-signing).
+Do not bypass verification on failure. Release preparation also verifies GitHub
+build provenance for every package; [independent provenance verification](docs/RELEASES.md#verify-build-provenance)
+is available with `gh` on a workstation. Keep the signed checksum files with the
+packages for later inspection.
+
+### Install dependencies and packages
 
 Enable the signed [Debian backports](https://backports.debian.org/Instructions/)
 and [PostgreSQL APT](https://www.postgresql.org/download/linux/debian/)
@@ -80,7 +125,7 @@ chmod 0644 /etc/apt/sources.list.d/debian-backports.sources \
 apt-get update
 apt-cache madison openvpn
 apt-get install postgresql-18 openvpn=2.7.8-1~bpo13+1
-cd /root/supivpn-packages
+cd "/root/supivpn-packages/$VERSION-$ARCH"
 apt-get install ./supivpn-node_*.deb ./supivpn-controller_*.deb ./supivpn_*_all.deb
 ```
 
@@ -250,5 +295,5 @@ or run `init` again. See [database migrations](docs/POSTGRES.md#reconnect-and-mi
 The package/VM suite checks setup with synthetic certificates and IdP, real
 systemd, restricted database roles, tunnel traffic, recovery and reboot. Public
 ACME issuance, Debian backports, provider networking and your real IdP/Connect
-client still require the acceptance above. Signed `.deb` delivery remains a
-separate step; [packaging details](docs/DEBIAN_PACKAGING.md) cover local builds.
+client still require the acceptance above. [Packaging details](docs/DEBIAN_PACKAGING.md)
+cover local builds and release delivery.

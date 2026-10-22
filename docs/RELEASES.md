@@ -21,8 +21,9 @@ signed tag and prints the explicit push command; it never pushes.
 
 Pushing the tag starts **Checks** for that tag's exact commit. Native ARM64 and
 AMD64 tests and builds run in parallel with source audit, security checks and
-fuzzing. A separate job attests the exact binary archives and Corresponding
-Source downloaded from that same tag run. Wait for the entire tag workflow,
+fuzzing. A separate job attests the exact binary archives, Debian packages,
+Debian source and Corresponding Source downloaded from that same tag run.
+Wait for the entire tag workflow,
 including attestations and `Required checks`, to
 succeed. Then start publication from the protected main branch:
 
@@ -42,14 +43,16 @@ when no source change is needed.
 
 Review and approve the `release` environment after preparation succeeds.
 The signing job creates a detached OpenPGP signature over `SHA256SUMS`, covering
-both binary bundles, Corresponding Source and release notes. The publication job
+both binary bundles, Debian packages and source, Corresponding Source and release
+notes. The publication job
 independently verifies the signature using the pinned primary and artifact subkey.
 The workflow uses exact successful tag candidates retained for seven days.
 It verifies the signed tag object and version, source commit, run/attempt,
 archive digest, schema and architecture. Publication does not rebuild or
 repackage the archives and cannot fall back to main or another tag.
 Before preparation can reach the GPG signing job, `gh attestation verify`
-cryptographically verifies each archive against the canonical repository,
+cryptographically verifies each archive, Debian package and source descriptor
+against the canonical repository,
 Checks workflow, signed tag ref and commit, and GitHub-hosted runner identity.
 The verified certificate must also identify that exact run and attempt and a
 push event. Workflow-supplied predicate text is not trusted for these bindings.
@@ -114,6 +117,23 @@ the pinned primary fingerprint and an authorized artifact-signing subkey. Reject
 bad, revoked, expired or unknown signatures and missing checksum entries.
 Do not continue to checksum verification after a failed signature check.
 
+## Debian downloads
+
+Releases built with Debian delivery include `supivpn-node_<version>_<arch>.deb`,
+`supivpn-controller_<version>_<arch>.deb` and `supivpn_<version>_all.deb`, where
+`<arch>` is `amd64` or `arm64`. Debian versions omit the leading `v`; prereleases
+use `~rc.N`, `~beta.N` or `~alpha.N`. The matching native source is supplied as
+`supivpn_<version>.dsc` and `supivpn_<version>.tar.xz`. These files are all covered
+by `SHA256SUMS.asc` and GitHub attestations. Individual `.deb`/`.dsc` files do not
+carry embedded OpenPGP signatures; verify the signed checksum manifest first.
+
+Follow the complete [Debian download and verification commands](../DEPLOYMENT.md#download-and-verify-supivpn),
+then install with APT to resolve dependencies. No source build or GitHub login is
+needed on the VM. No SupiVPN APT repository is provided yet. **v0.5.0 and earlier
+have no `.deb` assets**; use a new release containing this workflow. Preparation
+refuses missing packages, a mismatching version/architecture, modified source,
+missing provenance or different shared assets across architecture builds.
+
 ## Verify build provenance
 
 For releases built after provenance was introduced, verify the downloaded
@@ -132,7 +152,8 @@ gh attestation verify "supivpn-$VERSION-linux-arm64.tar.gz" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-Use the AMD64 filename or `supivpn-source-$COMMIT.tar.gz` to verify those archives.
+Use the AMD64 filename, `supivpn-source-$COMMIT.tar.gz`, or any downloaded `.deb`,
+`.dsc` or Debian `.tar.xz` filename to verify that asset.
 Stop on verification failure. The CLI retrieves evidence from GitHub and verifies
 its Sigstore signatures, subject digest and certificate policy. Release
 preparation additionally binds the certificate's run/attempt to its selected

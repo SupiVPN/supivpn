@@ -155,8 +155,9 @@ denial checks, reboot acceptance and maintenance; the
 private-network routing.
 
 This first path runs all components on one host with a private Unix socket.
-The `.deb` files are currently unsigned local development builds; signed package
-delivery is still pending. VPN client DNS SAN verification is also unfinished;
+Choose a GitHub Release with `.deb` assets and verify its signed checksums;
+v0.5.0 and earlier have no Debian packages. The guide includes a local build
+fallback until the first package release. VPN client DNS SAN verification is unfinished;
 read the guide's evaluation scope and the [limitations below](#current-limitations).
 
 [Debian packaging](docs/DEBIAN_PACKAGING.md) describes build internals and

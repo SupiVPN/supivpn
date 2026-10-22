@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from unittest.mock import patch
 import unittest
 
@@ -29,6 +30,24 @@ def module(name):
 
 
 class CandidateContextTests(unittest.TestCase):
+    def test_debian_candidates_refuse_untrusted_context_and_extra_build_outputs(self):
+        with patch.dict(sys.modules, github_candidate=module("github_candidate")):
+            candidate = module("github_debian")
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request"}, clear=True), \
+                patch.object(candidate.debian_packages, "build") as build, self.assertRaises(a.ValidationError):
+            candidate.main()
+        build.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            for name in candidate.deb.filenames("v0.6.0", "arm64"):
+                (work / name).write_bytes(b"synthetic candidate")
+            (work / "openvpn-test.deb").write_bytes(b"must stay local")
+            output = work / "output"
+            with self.assertRaises(a.ValidationError):
+                candidate.retain(work, output, "arm64", "a" * 40, "v0.6.0", "b" * 40,
+                                 {"GITHUB_RUN_ID": "42", "GITHUB_RUN_ATTEMPT": "1"})
+            self.assertFalse(output.exists())
+
     def test_only_canonical_tag_push_with_complete_identity_can_package(self):
         candidate = module("github_candidate")
         valid = {"GITHUB_REPOSITORY": "SupiVPN/supivpn", "GITHUB_REF": "refs/tags/v0.4.0",
@@ -97,11 +116,11 @@ class WorkflowTests(unittest.TestCase):
         job = self.workflow("checks.yml")["jobs"]["attest"]
         self.assertEqual(job["if"], "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')"
                          " && github.repository == 'SupiVPN/supivpn'")
-        self.assertEqual(set(job["needs"]), {"scope", "build"})
+        self.assertEqual(set(job["needs"]), {"scope", "build", "debian"})
         self.assertEqual(job["permissions"], {"contents": "read", "id-token": "write", "attestations": "write"})
         self.assertEqual(job["strategy"]["matrix"]["arch"], ["arm64", "amd64"])
         # No checkout, shell, cache restore, cross-run download or private signing key.
-        download, attest = job["steps"]
+        download, attest, deb_download, deb_attest = job["steps"]
         self.assertEqual(set(download), {"uses", "with"})
         self.assertTrue(download["uses"].startswith("actions/download-artifact@"))
         self.assertEqual(download["with"], {"name": "candidate-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}",
@@ -109,6 +128,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(set(attest), {"uses", "with"})
         self.assertTrue(attest["uses"].startswith("actions/attest@"))
         self.assertEqual(attest["with"], {"subject-path": "candidate/*.tar.gz", "create-storage-record": "false"})
+        self.assertEqual(set(deb_download), {"uses", "with"})
+        self.assertEqual(deb_download["uses"], download["uses"])
+        self.assertEqual(deb_download["with"], {"name": "debian-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}",
+                                                "path": "debian-candidate"})
+        self.assertEqual(set(deb_attest), {"uses", "with"})
+        self.assertEqual(deb_attest["uses"], attest["uses"])
+        self.assertEqual(deb_attest["with"], {"subject-path": "debian-candidate/*.deb\ndebian-candidate/*.dsc\ndebian-candidate/*.tar.xz\n",
+                                              "create-storage-record": "false"})
+        builder = self.workflow("checks.yml")["jobs"]["debian"]
+        self.assertEqual(builder["env"]["SUPIVPN_TAG_OID"], "${{ needs.scope.outputs.tag_oid }}")
+        for step in builder["steps"]:
+            if step.get("run") == "python3 -B ci/github_debian.py" or "upload-artifact@" in step.get("uses", ""):
+                self.assertEqual(step["if"], job["if"])
+
 
     def test_independent_checks_run_in_parallel_with_a_complete_final_gate(self):
         jobs = self.workflow("checks.yml")["jobs"]

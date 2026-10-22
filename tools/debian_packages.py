@@ -12,13 +12,14 @@ import subprocess
 import tempfile
 
 import repository_audit
+import debian_release
 
 
 def run(args, **kwargs):
     subprocess.run(args, check=True, **kwargs)
 
 
-def prepare(root, work, go):
+def prepare(root, work, go, *, version=None, epoch=None):
     candidates, _, issues = repository_audit.audit(root)
     if issues:
         raise ValueError("Source audit failed; run make audit before packaging")
@@ -35,8 +36,41 @@ def prepare(root, work, go):
                GOTOOLCHAIN="local", GOWORK="off")
     run([go, "mod", "verify"], cwd=root, env=env)
     run([go, "mod", "vendor", "-o", str(source / "vendor")], cwd=root, env=env)
+    if version is not None:
+        changelog = source / "debian/changelog"
+        changelog.write_bytes(debian_release.changelog(changelog.read_bytes(), version, epoch))
+        # Shared source and Architecture: all outputs must match across runners.
+        for path in sorted(source.rglob("*"), reverse=True) + [source]:
+            if path.is_symlink():
+                raise ValueError("Source symlinks are not allowed")
+            os.utime(path, (epoch, epoch))
     (work / "input-sha256.json").write_text(json.dumps(digests, sort_keys=True, indent=2) + "\n")
     return source
+
+
+def build(root, arch, go, docker, *, test=False, vm=False, version=None, epoch=None):
+    output = root / "local/debian" / arch
+    output.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="build-", dir=output))
+    prepare(root, work, go, version=version, epoch=epoch)
+    image = "supivpn-debian-test:trixie-" + arch
+    run([docker, "build", "--platform", "linux/" + arch,
+         "-t", image, str(root / "ci/debian")])
+    run([docker, "run", "--rm", "--platform", "linux/" + arch,
+         "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+         "--user", f"{os.getuid()}:{os.getgid()}",
+         "--mount", f"type=bind,source={work},target=/work", "--workdir", "/work/source",
+         image, "dpkg-buildpackage", "--no-sign", "-F"])
+    if test or vm:
+        run([docker, "run", "--rm", "--platform", "linux/" + arch,
+             "--network", "none", "--security-opt", "no-new-privileges",
+             "--mount", f"type=bind,source={work},target=/packages,readonly",
+             image, "python3", "/packages/source/ci/debian/check_packages.py", "/packages"])
+    if vm:
+        from debian_vm import run_vm
+        run_vm(root, work, arch, docker, go)
+    print("Debian build and matching source: " + str(work))
+    return work
 
 
 def main():
@@ -46,29 +80,12 @@ def main():
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--vm", action="store_true")
+    parser.add_argument("--version", help="Local release-format build; does not sign or publish")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    output = root / "local/debian" / args.arch
-    output.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix="build-", dir=output))
-    prepare(root, work, args.go)
-    image = "supivpn-debian-test:trixie-" + args.arch
-    run([args.docker, "build", "--platform", "linux/" + args.arch,
-         "-t", image, str(root / "ci/debian")])
-    run([args.docker, "run", "--rm", "--platform", "linux/" + args.arch,
-         "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-         "--user", f"{os.getuid()}:{os.getgid()}",
-         "--mount", f"type=bind,source={work},target=/work", "--workdir", "/work/source",
-         image, "dpkg-buildpackage", "--no-sign", "-F"])
-    if args.test or args.vm:
-        run([args.docker, "run", "--rm", "--platform", "linux/" + args.arch,
-             "--network", "none", "--security-opt", "no-new-privileges",
-             "--mount", f"type=bind,source={work},target=/packages,readonly",
-             image, "python3", "/packages/source/ci/debian/check_packages.py", "/packages"])
-    if args.vm:
-        from debian_vm import run_vm
-        run_vm(root, work, args.arch, args.docker, args.go)
-    print("Debian build and matching source: " + str(work))
+    epoch = debian_release.commit_epoch(root, "HEAD") if args.version else None
+    build(root, args.arch, args.go, args.docker, test=args.test, vm=args.vm,
+          version=args.version, epoch=epoch)
 
 
 if __name__ == "__main__":

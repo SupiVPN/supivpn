@@ -3,9 +3,10 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 Licensed under AGPL-3.0-only. See [LICENSE](../LICENSE) and [COPYRIGHT.md](../COPYRIGHT.md).
 
-These local development packages target Debian 13 with systemd 257 or later,
-on `amd64` and `arm64`. They are not yet published release assets or an APT
-repository. Container images below are disposable build/test environments;
+These packages target Debian 13 with systemd 257 or later, on `amd64` and `arm64`.
+The release workflow delivers `.deb` assets through GitHub Releases with signed
+checksums and build provenance. There is no SupiVPN APT repository.
+Container images below are disposable build/test environments;
 container deployment is outside the plan.
 
 For the operator walkthrough, start with [DEPLOYMENT.md](../DEPLOYMENT.md):
@@ -33,6 +34,28 @@ provide this version; provision a separately verified OpenVPN package first.
 The OpenVPN package built in `ci/debian` is only a test fixture, not a supported
 distribution channel. See [OpenVPN requirements](OPENVPN_UPGRADE.md).
 
+## Release packages
+
+The authenticated tag workflow runs the same build and lifecycle checks on native
+ARM64 and AMD64 runners. Package versions derive from the tag: `v1.2.3` becomes
+`1.2.3`, and `v1.2.3-rc.1` becomes `1.2.3~rc.1`, sorting before the stable version.
+A deterministic changelog entry uses the tagged commit timestamp. The repository's
+`UNRELEASED` changelog remains the default for local development builds.
+
+The public set contains five `.deb` files: node/controller for each architecture
+and one `supivpn_<version>_all.deb`; plus `supivpn_<version>.dsc` and
+`supivpn_<version>.tar.xz` with the matching vendored source. The source descriptor,
+source archive and metapackage must match byte for byte across the two runners.
+The OpenVPN test fixture, build caches, VM images and local configuration are
+never release assets. All packages and both source files have GitHub provenance
+and are covered by the release's signed `SHA256SUMS`.
+
+Publication requires a new reviewed signed tag containing this workflow, successful
+complete tag CI and the existing protected release signing step. It neither
+rebuilds packages nor adds assets to old published releases. **v0.5.0 and earlier
+have no Debian packages.** See [release delivery](RELEASES.md) and
+[download/verification](../DEPLOYMENT.md#download-and-verify-supivpn).
+
 ## Build and check
 
 From the project checkout with the Go version in [BUILD.md](../BUILD.md) and Docker:
@@ -49,7 +72,7 @@ metadata enters the builder. Outputs are kept in a new `local/debian/<arch>/buil
 directory on every run: three `.deb` files, the native source archive with vendored
 dependencies, `.dsc`, `.changes`, `.buildinfo` and an input SHA-256 inventory.
 These development outputs are unsigned. Distribute matching source with binaries;
-release signing/provenance and publishing remain a separate implementation step.
+the release workflow described above supplies signing/provenance for official assets.
 
 The source package uses debhelper 13. Its build environment must supply Go 1.27.3
 and `vendor/`; `debian/rules` verifies the SDK and never downloads dependencies.
