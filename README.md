@@ -156,8 +156,9 @@ private-network routing.
 
 This first path runs all components on one host with a private Unix socket.
 The guide adds the signed `apt.supivpn.com` source and installs with
-`apt install supivpn`. First APT publication is pending; v0.5.0 and earlier
-have no Debian packages. A local build and verified GitHub Release downloads
+`apt install supivpn`. Signed Debian delivery starts with
+[v0.6.0](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.0).
+A local build and verified GitHub Release downloads
 remain available as alternatives. VPN client DNS SAN verification is unfinished;
 read the guide's evaluation scope and the [limitations below](#current-limitations).
 

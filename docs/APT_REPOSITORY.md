@@ -8,10 +8,11 @@ component `main`, architectures `amd64` and `arm64`, plus native Debian source.
 The `supivpn` metapackage installs `supivpn-node` and `supivpn-controller` at
 matching versions. See [the installation guide](../DEPLOYMENT.md).
 
-**Launch status:** tooling is prepared; Pages, the custom domain and the first
-package release must be published before this endpoint can be used. Existing
-v0.5.0 and earlier releases have no Debian assets. No production deployment or
-DNS change is performed by local tests.
+**Launch status:** [v0.6.0](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.0)
+is published on GitHub Releases and the signed APT repository over HTTPS.
+Live acceptance verified both architectures, source, dependency downloads and
+equality with the signed release assets. v0.5.0 and earlier have no Debian assets.
+No VPN service was deployed by these download-only checks.
 
 ## Delivery
 
