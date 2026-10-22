@@ -3,6 +3,11 @@
 **Go Supi!**<br>
 Your team. Your tunnel. Your rules.
 
+Open-source SAML single sign-on and access control for OpenVPN Community.
+
+[Website](https://supivpn.com/) · [Architecture](docs/ARCHITECTURE.md) ·
+[Releases](https://github.com/SupiVPN/supivpn/releases) · [Contributing](CONTRIBUTING.md)
+
 [![Checks](https://img.shields.io/github/actions/workflow/status/SupiVPN/supivpn/checks.yml?branch=main&event=push&style=flat-square&logo=github&label=checks)](https://github.com/SupiVPN/supivpn/actions/workflows/checks.yml)
 [![Latest release](https://img.shields.io/github/v/release/SupiVPN/supivpn?style=flat-square&color=16a34a&label=release)](https://github.com/SupiVPN/supivpn/releases/latest)
 [![Go version](https://img.shields.io/github/go-mod/go-version/SupiVPN/supivpn?style=flat-square&logo=go&logoColor=white)](go.mod)
@@ -110,6 +115,13 @@ Build components with Make or download a versioned release. See
 [release delivery](docs/RELEASES.md) for artifact verification.
 
 ## Contributing
+
+SupiVPN is being built in the open. The complete deployment guide is still in
+progress; read the [current limitations](#current-limitations) when evaluating
+the project. To follow development, use GitHub's **Watch > Custom > Releases**.
+Share your team's access workflow or a feature idea in an
+[issue](https://github.com/SupiVPN/supivpn/issues), or help improve the docs and tests.
+Report suspected vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). Code contributions need Go, Python,
 Git, Make and a C compiler; `make setup` prepares local tools and `make test`
