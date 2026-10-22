@@ -20,7 +20,15 @@ Components: main
 Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
 EOF
 apt-get update -qq
-apt-get install -y --no-install-recommends postgresql-18
+case "${1:-local}" in
+    local) apt-get install -y --no-install-recommends postgresql-18 ;;
+    remote)
+        apt-get install -y --no-install-recommends postgresql-client-18
+        test ! -e /usr/lib/postgresql/18/bin/postgres
+        printf '\n10.0.2.2 db.supivpn.test\n' >> /etc/hosts
+        ;;
+    *) echo 'FAIL: unknown database mode'; exit 1 ;;
+esac
 dpkg -i /opt/supivpn-test/openvpn-test.deb /opt/supivpn-test/supivpn*.deb
 for service in supivpn-controller supivpn-node supivpn-openvpn; do
     if systemctl is-active --quiet "$service"; then

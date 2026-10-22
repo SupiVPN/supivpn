@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import debian_vm
 
@@ -44,6 +45,36 @@ class ImageIntegrityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                     debian_vm.image(cache, "amd64")
             self.assertFalse(list(cache.glob("*.qcow2")))
+
+
+class RemoteDatabaseTests(unittest.TestCase):
+    def test_unknown_mode_never_downloads_or_runs_a_vm(self):
+        with patch.object(debian_vm, "run") as run, patch.object(debian_vm, "image") as image:
+            with self.assertRaisesRegex(ValueError, "database mode"):
+                debian_vm.run_vm(Path("unused"), Path("unused"), "arm64", "docker", "go", database="unknown")
+            run.assert_not_called()
+            image.assert_not_called()
+
+    def test_database_timeout_stops_only_its_container_and_keeps_passwords_out_of_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, work = root / "source", root / "work"
+            (source / "ci/debian/vm").mkdir(parents=True)
+            (source / "ci/debian/vm/database.py").write_text("# synthetic fixture\n")
+            work.mkdir()
+            with patch.object(debian_vm, "run", return_value=SimpleNamespace(stdout="owned-db-id\n")) as run, \
+                 patch.object(debian_vm.time, "monotonic", side_effect=[0, 91]):
+                with self.assertRaises(TimeoutError):
+                    debian_vm.external_database(source, work, "docker", "owned-vm-id", "arm64")
+            calls = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(calls[-1], ["docker", "stop", "--time", "10", "owned-db-id"])
+            database_run = calls[1]
+            self.assertEqual(database_run[database_run.index("--network") + 1], "container:owned-vm-id")
+            self.assertNotIn("--publish", database_run)
+            for filename in ("runtime.password", "migration.password"):
+                path = work / "database" / filename
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertNotIn(path.read_text(), repr(calls))
 
 
 if __name__ == "__main__":
