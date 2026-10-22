@@ -155,9 +155,10 @@ denial checks, reboot acceptance and maintenance; the
 private-network routing.
 
 This first path runs all components on one host with a private Unix socket.
-Choose a GitHub Release with `.deb` assets and verify its signed checksums;
-v0.5.0 and earlier have no Debian packages. The guide includes a local build
-fallback until the first package release. VPN client DNS SAN verification is unfinished;
+The guide adds the signed `apt.supivpn.com` source and installs with
+`apt install supivpn`. First APT publication is pending; v0.5.0 and earlier
+have no Debian packages. A local build and verified GitHub Release downloads
+remain available as alternatives. VPN client DNS SAN verification is unfinished;
 read the guide's evaluation scope and the [limitations below](#current-limitations).
 
 [Debian packaging](docs/DEBIAN_PACKAGING.md) describes build internals and

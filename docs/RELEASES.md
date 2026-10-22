@@ -70,6 +70,10 @@ Only the canonical tag-only attestation job receives `id-token: write` and
 source checkout, build scripts, caches or release keys. PR/main checks retain
 read-only token permissions. Release preparation receives `attestations: read`;
 GPG signing and publication keep their existing permissions.
+Stable releases additionally generate and sign the APT indexes in that protected
+signing job. After release publication, a separate Pages job receives
+`pages: write` and `id-token: write` to publish the verified repository.
+See [APT operations](APT_REPOSITORY.md) for first-time hosting and recovery.
 
 Publication creates a draft, uploads all checked assets and publishes it.
 Retry a failed **publish job only** to reuse its already signed assets (retained
@@ -127,12 +131,58 @@ use `~rc.N`, `~beta.N` or `~alpha.N`. The matching native source is supplied as
 by `SHA256SUMS.asc` and GitHub attestations. Individual `.deb`/`.dsc` files do not
 carry embedded OpenPGP signatures; verify the signed checksum manifest first.
 
-Follow the complete [Debian download and verification commands](../DEPLOYMENT.md#download-and-verify-supivpn),
-then install with APT to resolve dependencies. No source build or GitHub login is
-needed on the VM. No SupiVPN APT repository is provided yet. **v0.5.0 and earlier
-have no `.deb` assets**; use a new release containing this workflow. Preparation
-refuses missing packages, a mismatching version/architecture, modified source,
-missing provenance or different shared assets across architecture builds.
+Stable releases also populate [apt.supivpn.com](https://apt.supivpn.com);
+[DEPLOYMENT.md](../DEPLOYMENT.md#add-the-supivpn-repository) uses APT for installation.
+See [APT operations](APT_REPOSITORY.md) for Pages setup, signing, retention and recovery.
+**The first APT deployment is still pending; v0.5.0 and earlier have no `.deb`
+assets.** Preparation refuses missing packages, mismatched version/architecture,
+modified source, missing provenance or different shared assets across builds.
+
+## Download and verify SupiVPN
+
+Replace `vX.Y.Z` with the chosen release containing `.deb` assets. Run this block
+in Bash; it stops on download, signature or checksum failure. It creates a new
+version/architecture directory, refusing to mix with earlier downloads:
+
+```bash
+set -euo pipefail
+VERSION=vX.Y.Z
+ARCH=$(dpkg --print-architecture)
+case "$ARCH" in amd64|arm64) ;; *) exit 1 ;; esac
+DEB_VERSION=${VERSION#v}
+DEB_VERSION=${DEB_VERSION/-/\~}
+BASE="https://github.com/SupiVPN/supivpn/releases/download/$VERSION"
+install -d -m 0700 /root/supivpn-packages
+mkdir "/root/supivpn-packages/$VERSION-$ARCH"
+cd "/root/supivpn-packages/$VERSION-$ARCH"
+PACKAGES=("supivpn-node_${DEB_VERSION}_${ARCH}.deb"
+          "supivpn-controller_${DEB_VERSION}_${ARCH}.deb" "supivpn_${DEB_VERSION}_all.deb")
+for FILE in "${PACKAGES[@]}" SHA256SUMS SHA256SUMS.asc; do
+  curl --fail --show-error --location --proto '=https' --proto-redir '=https' -o "$FILE" "$BASE/$FILE"
+done
+PRIMARY=A43155B36661034A4FA89E373681E6DFB83B35E2
+SIGNER=867CC295DFBEE8E0888F7AFF113339EEAC58A9C5
+mkdir -m 0700 verification-keyring
+gpg --homedir ./verification-keyring --batch --keyserver hkps://keys.openpgp.org --recv-keys "$PRIMARY"
+gpg --homedir ./verification-keyring --batch --status-fd 1 \
+  --verify SHA256SUMS.asc SHA256SUMS > signature.status
+awk -v primary="$PRIMARY" -v signer="$SIGNER" '
+  $1 == "[GNUPG:]" && $2 == "VALIDSIG" && $3 == signer && $NF == primary { valid=1 }
+  $1 == "[GNUPG:]" && $2 ~ /^(BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG|KEYEXPIRED|KEYREVOKED|NO_PUBKEY)$/ { bad=1 }
+  END { exit !(valid && !bad) }
+' signature.status
+for FILE in "${PACKAGES[@]}"; do
+  awk -v name="$FILE" '$2 == name { print; found++ } END { exit (found != 1) }' SHA256SUMS > selected.sha256
+  sha256sum --check --strict selected.sha256
+done
+```
+
+The pinned fingerprints come from the [release-key policy](../DEVELOPERS.md#release-signing).
+Do not bypass verification on failure. Release preparation also verifies GitHub
+build provenance for every package; [independent provenance verification](#verify-build-provenance)
+is available with `gh` on a workstation. Keep the signed checksum files with the
+packages for later inspection. After installing the dependencies in DEPLOYMENT.md,
+install these exact files with `apt-get install "${PACKAGES[@]/#/./}"`.
 
 ## Verify build provenance
 

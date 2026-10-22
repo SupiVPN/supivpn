@@ -5,7 +5,8 @@ Licensed under AGPL-3.0-only. See [LICENSE](../LICENSE) and [COPYRIGHT.md](../CO
 
 These packages target Debian 13 with systemd 257 or later, on `amd64` and `arm64`.
 The release workflow delivers `.deb` assets through GitHub Releases with signed
-checksums and build provenance. There is no SupiVPN APT repository.
+checksums and build provenance. The stable [APT repository](APT_REPOSITORY.md) is prepared for GitHub Pages;
+its first publication is pending.
 Container images below are disposable build/test environments;
 container deployment is outside the plan.
 
@@ -54,7 +55,7 @@ Publication requires a new reviewed signed tag containing this workflow, success
 complete tag CI and the existing protected release signing step. It neither
 rebuilds packages nor adds assets to old published releases. **v0.5.0 and earlier
 have no Debian packages.** See [release delivery](RELEASES.md) and
-[download/verification](../DEPLOYMENT.md#download-and-verify-supivpn).
+[download/verification](RELEASES.md#download-and-verify-supivpn).
 
 ## Build and check
 

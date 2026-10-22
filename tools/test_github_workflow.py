@@ -198,9 +198,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("refs/heads/main", publish["if"])
         for name, job in config["jobs"].items():
             secret_steps = [step for step in job["steps"] if "secrets." in str(step.get("env", {}))]
-            self.assertEqual(len(secret_steps), 1 if name == "sign" else 0)
-            if secret_steps:
-                self.assertNotIn("GH_TOKEN", secret_steps[0].get("env", {}))
+            self.assertEqual(len(secret_steps), 2 if name == "sign" else 0)
+            for step in secret_steps:
+                self.assertNotIn("GH_TOKEN", step.get("env", {}))
+        self.assertEqual({step["run"] for step in signer["steps"] if "secrets." in str(step.get("env", {}))},
+                         {"python3 -B tools/github_release.py sign", "python3 -B tools/apt_repository.py sign"})
+
+    def test_apt_deployment_is_stable_release_only_and_contains_no_signing_keys(self):
+        jobs = self.workflow("release.yml")["jobs"]
+        checked = jobs["pages-artifact"]
+        self.assertEqual(set(checked["needs"]), {"publish", "sign"})
+        self.assertEqual(checked["permissions"], {"contents": "read"})
+        self.assertEqual(checked["steps"][-1]["with"]["path"], "out/apt/site/")
+        pages = jobs["pages"]
+        self.assertEqual(pages["needs"], "pages-artifact")
+        self.assertEqual(pages["permissions"], {"pages": "write", "id-token": "write"})
+        self.assertEqual(pages["environment"]["name"], "github-pages")
+        self.assertEqual(len(pages["steps"]), 1)
+        self.assertTrue(pages["steps"][0]["uses"].startswith("actions/deploy-pages@"))
+        for job in (checked, pages):
+            self.assertIn("refs/heads/main", job["if"])
+            self.assertIn("!contains(inputs.tag, '-')", job["if"])
+            self.assertNotIn("secrets.", str(job))
 
     def test_actions_are_pinned_and_checkouts_do_not_retain_tokens(self):
         for name in ("checks.yml", "release.yml"):

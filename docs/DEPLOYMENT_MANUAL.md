@@ -14,7 +14,8 @@ PostgreSQL 18, the controller and the VPN node share one host. The agent talks
 to the controller over a private Unix socket; no AWS account is needed.
 
 **Evaluation status:** use a release containing Debian assets, or build locally
-until the first such release is published. There is no SupiVPN APT repository.
+until the first such release is published. The [APT repository](APT_REPOSITORY.md)
+is prepared for first publication; the short guide uses APT after that launch.
 The shipped VPN client template validates
 the certificate chain, validity and server purpose, but does **not** verify the
 server DNS name. Required DNS SAN verification in OpenVPN Connect remains
@@ -119,7 +120,7 @@ requires a corresponding SupiVPN compatibility update.
 ### SupiVPN
 
 Prefer the ready-made packages from a GitHub Release containing `.deb` assets.
-Follow [download and signature verification](../DEPLOYMENT.md#download-and-verify-supivpn),
+Follow [download and signature verification](RELEASES.md#download-and-verify-supivpn),
 then install the matching files on the VM. Releases v0.5.0 and earlier have no
 Debian assets. Skip the workstation build below when using verified release
 packages; use their version/architecture download directory in the install block.

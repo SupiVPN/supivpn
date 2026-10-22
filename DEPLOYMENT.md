@@ -30,12 +30,11 @@ Use a fresh, dedicated **Debian 13 amd64 or arm64** VM with systemd 257+,
   Do not expose the database or node health port. Do not publish an AAAA record
   without configuring IPv6 reachability.
 
-Use a [GitHub Release](https://github.com/SupiVPN/supivpn/releases) containing
-Debian packages. **v0.5.0 and earlier do not contain `.deb` assets.** Until the first
-release with packages is published, use the
+The APT path needs no Go SDK, Docker, source checkout or GitHub account on the VM.
+**Publication status:** `apt.supivpn.com` must be enabled and populated by the
+first stable package release before these commands work. v0.5.0 and earlier
+have no `.deb` assets. Until that launch, use the
 [local build fallback](docs/DEBIAN_PACKAGING.md#build-and-check).
-The release path below needs no Go SDK, Docker, source checkout or GitHub account
-on the VM. There is no SupiVPN APT repository yet.
 
 On the VM, enter a root Bash shell and install the prerequisites:
 
@@ -49,50 +48,32 @@ test -c /dev/net/tun
 timedatectl status
 ```
 
-### Download and verify SupiVPN
+### Add the SupiVPN repository
 
-Replace `vX.Y.Z` with the chosen release containing `.deb` assets. Run this block
-in Bash; it stops on download, signature or checksum failure. It creates a new
-version/architecture directory, refusing to mix with earlier downloads:
+Run in Bash. The source pins the release certificate as well as its key file;
+APT then verifies the signed index and each package automatically. Do not use
+`apt-key`, `trusted=yes` or an unauthenticated installation override.
 
 ```bash
 set -euo pipefail
-VERSION=vX.Y.Z
-ARCH=$(dpkg --print-architecture)
-case "$ARCH" in amd64|arm64) ;; *) exit 1 ;; esac
-DEB_VERSION=${VERSION#v}
-DEB_VERSION=${DEB_VERSION/-/\~}
-BASE="https://github.com/SupiVPN/supivpn/releases/download/$VERSION"
-install -d -m 0700 /root/supivpn-packages
-mkdir "/root/supivpn-packages/$VERSION-$ARCH"
-cd "/root/supivpn-packages/$VERSION-$ARCH"
-PACKAGES=("supivpn-node_${DEB_VERSION}_${ARCH}.deb"
-          "supivpn-controller_${DEB_VERSION}_${ARCH}.deb" "supivpn_${DEB_VERSION}_all.deb")
-for FILE in "${PACKAGES[@]}" SHA256SUMS SHA256SUMS.asc; do
-  curl --fail --show-error --location --proto '=https' --proto-redir '=https' -o "$FILE" "$BASE/$FILE"
-done
-PRIMARY=A43155B36661034A4FA89E373681E6DFB83B35E2
-SIGNER=867CC295DFBEE8E0888F7AFF113339EEAC58A9C5
-mkdir -m 0700 verification-keyring
-gpg --homedir ./verification-keyring --batch --keyserver hkps://keys.openpgp.org --recv-keys "$PRIMARY"
-gpg --homedir ./verification-keyring --batch --status-fd 1 \
-  --verify SHA256SUMS.asc SHA256SUMS > signature.status
-awk -v primary="$PRIMARY" -v signer="$SIGNER" '
-  $1 == "[GNUPG:]" && $2 == "VALIDSIG" && $3 == signer && $NF == primary { valid=1 }
-  $1 == "[GNUPG:]" && $2 ~ /^(BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG|KEYEXPIRED|KEYREVOKED|NO_PUBKEY)$/ { bad=1 }
-  END { exit !(valid && !bad) }
-' signature.status
-for FILE in "${PACKAGES[@]}"; do
-  awk -v name="$FILE" '$2 == name { print; found++ } END { exit (found != 1) }' SHA256SUMS > selected.sha256
-  sha256sum --check --strict selected.sha256
-done
+install -d -m 0755 /etc/apt/keyrings
+curl --fail --show-error --location --proto '=https' --proto-redir '=https' \
+  https://apt.supivpn.com/supivpn.asc -o /etc/apt/keyrings/supivpn.asc
+cat > /etc/apt/sources.list.d/supivpn.sources <<'EOF'
+Types: deb
+URIs: https://apt.supivpn.com
+Suites: trixie
+Components: main
+Architectures: amd64 arm64
+Signed-By: /etc/apt/keyrings/supivpn.asc A43155B36661034A4FA89E373681E6DFB83B35E2
+EOF
+chmod 0644 /etc/apt/keyrings/supivpn.asc /etc/apt/sources.list.d/supivpn.sources
 ```
 
-The pinned fingerprints come from the [release-key policy](DEVELOPERS.md#release-signing).
-Do not bypass verification on failure. Release preparation also verifies GitHub
-build provenance for every package; [independent provenance verification](docs/RELEASES.md#verify-build-provenance)
-is available with `gh` on a workstation. Keep the signed checksum files with the
-packages for later inspection.
+The fingerprint is pinned in the [release-key policy](DEVELOPERS.md#release-signing).
+The published public certificate contains only its artifact-signing subkey.
+For offline installation or prereleases, use the
+[GitHub Release download instructions](docs/RELEASES.md#download-and-verify-supivpn).
 
 ### Install dependencies and packages
 
@@ -125,12 +106,11 @@ chmod 0644 /etc/apt/sources.list.d/debian-backports.sources \
 apt-get update
 apt-cache madison openvpn
 apt-get install postgresql-18 openvpn=2.7.8-1~bpo13+1
-cd "/root/supivpn-packages/$VERSION-$ARCH"
-apt-get install ./supivpn-node_*.deb ./supivpn-controller_*.deb ./supivpn_*_all.deb
+apt-cache policy supivpn supivpn-node supivpn-controller
+apt-get install supivpn
 ```
 
-Keep exactly one version of each package in that directory. The current agent
-requires upstream OpenVPN **2.7.8**. If the Debian revision above is superseded,
+The current agent requires upstream OpenVPN **2.7.8**. If the Debian revision above is superseded,
 select the available revision of that same upstream version after review;
 never force dependencies or install the CI test fixture. See the
 [manual package section](docs/DEPLOYMENT_MANUAL.md#2-obtain-and-install-the-packages)
