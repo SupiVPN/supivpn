@@ -27,7 +27,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -262,9 +261,22 @@ func TestDebianVMServices(t *testing.T) {
 	vmWait(t, "manual start", 45*time.Second, func() bool { return vmReady(client, 9443) })
 	vmCommand(t, "systemctl", "enable", "supivpn-controller", "supivpn-node")
 	t.Log("manual stop/start passed; services enabled for the separate cold-boot check")
+	for _, unit := range []string{"supivpn-controller", "postgresql@18-main"} {
+		if !t.Run("outage-"+unit, func(t *testing.T) { vmOutageRecovery(t, client, signer, unit) }) {
+			t.FailNow()
+		}
+	}
+	if !t.Run("session-expiry-reconnect", func(t *testing.T) { vmSessionRecovery(t, client, signer) }) {
+		t.FailNow()
+	}
 }
 
 func vmLogin(t *testing.T, client *http.Client, signer *saml.ServiceProvider, path string, status int) []byte {
+	t.Helper()
+	return vmLoginUntil(t, client, signer, path, status, time.Time{})
+}
+
+func vmLoginUntil(t *testing.T, client *http.Client, signer *saml.ServiceProvider, path string, status int, sessionEnd time.Time) []byte {
 	t.Helper()
 	resp, err := client.Get("https://localhost:8443" + path)
 	if err != nil {
@@ -294,6 +306,9 @@ func vmLogin(t *testing.T, client *http.Client, signer *saml.ServiceProvider, pa
 		sp: &saml.ServiceProvider{EntityID: origin.String() + "/saml/metadata", AcsURL: *origin.JoinPath("saml/acs")}}
 	assertion := groupAssertionFor(fixture, "admins-vpn")
 	assertion.ID = "assertion-" + request.ID
+	if !sessionEnd.IsZero() {
+		assertion.AuthnStatements[0].SessionNotOnOrAfter = &sessionEnd
+	}
 	assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo = request.ID
 	pending := controller.Pending{Ticket: location.Query().Get("RelayState"), RequestID: request.ID}
 	body := profileSAMLBody(t, fixture, signer, pending, assertion, true)
@@ -317,6 +332,16 @@ func vmLogin(t *testing.T, client *http.Client, signer *saml.ServiceProvider, pa
 
 func vmTunnel(t *testing.T, client *http.Client, signer *saml.ServiceProvider) {
 	t.Helper()
+	vpn := vmStartVPN(t, client, signer)
+	path := vpn.challenge(t, "")
+	vpn.login(t, client, signer, path, time.Time{})
+	vpn.traffic(t)
+	vmCommand(t, "ip", "netns", "exec", "supivpn-vm-client", "ping", "-c", "2", "-W", "3", "10.203.0.1")
+	t.Log("signed SAML profile download and VPN login passed; ICMP and TCP crossed the tunnel")
+}
+
+func vmStartVPN(t *testing.T, client *http.Client, signer *saml.ServiceProvider) *vmVPN {
+	t.Helper()
 	dir := t.TempDir()
 	data := vmLogin(t, client, signer, "/profile", http.StatusOK)
 	if !bytes.Contains(data, []byte("<tls-crypt-v2>")) {
@@ -336,26 +361,9 @@ func vmTunnel(t *testing.T, client *http.Client, signer *saml.ServiceProvider) {
 	for _, args := range [][]string{{"link", "set", "lo", "up"}, {"addr", "add", "192.0.2.2/30", "dev", "supi-vm-peer"}, {"link", "set", "supi-vm-peer", "up"}} {
 		vmCommand(t, "ip", append([]string{"-n", "supivpn-vm-client"}, args...)...)
 	}
-	clientLog := startProtocolProcess(t, "ip", "netns", "exec", "supivpn-vm-client", "/usr/sbin/openvpn", "--config", profilePath,
-		"--auth-user-pass", authPath, "--dev", "supivpnc0", "--dev-type", "tun", "--disable-dco", "--setenv", "IV_SSO", "webauth", "--verb", "3")
-	var loginPath string
-	pattern := regexp.MustCompile(`https://localhost:8443/login/[A-Za-z0-9_-]+`)
-	vmWait(t, "real OpenVPN WEB_AUTH challenge", 30*time.Second, func() bool {
-		clientLog.mu.Lock()
-		defer clientLog.mu.Unlock()
-		match := pattern.FindString(clientLog.b.String())
-		loginPath = strings.TrimPrefix(match, "https://localhost:8443")
-		return match != ""
-	})
-	if clientLog.contains("Initialization Sequence Completed") {
-		t.Fatal("VPN connected before verified SAML")
-	}
-	vmLogin(t, client, signer, loginPath, http.StatusAccepted)
-	vmWait(t, "authorized VPN connection", 30*time.Second, func() bool { return clientLog.contains("Initialization Sequence Completed") })
-	if !clientLog.contains("ifconfig 10.203.0.2 255.255.255.0") {
-		t.Fatal("signed group did not receive its expected address pool")
-	}
-	vmCommand(t, "ip", "netns", "exec", "supivpn-vm-client", "ping", "-c", "2", "-W", "3", "10.203.0.1")
+	clientLog := startVMVPN(t, "ip", "netns", "exec", "supivpn-vm-client", "/usr/sbin/openvpn", "--config", profilePath,
+		"--auth-user-pass", authPath, "--dev", "supivpnc0", "--dev-type", "tun", "--disable-dco",
+		"--connect-retry", "1", "2", "--explicit-exit-notify", "1", "--setenv", "IV_SSO", "webauth", "--verb", "3")
 	listener, err := net.Listen("tcp", "10.203.0.1:18080")
 	if err != nil {
 		t.Fatal("cannot listen on the actual VPN interface")
@@ -363,10 +371,7 @@ func vmTunnel(t *testing.T, client *http.Client, signer *saml.ServiceProvider) {
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "supivpn-vm-tunnel-ok") }), ReadHeaderTimeout: 3 * time.Second}
 	t.Cleanup(func() { server.Close() })
 	go func() { _ = server.Serve(listener) }()
-	if vmCommand(t, "ip", "netns", "exec", "supivpn-vm-client", "curl", "--fail", "--silent", "--max-time", "10", "--interface", "supivpnc0", "http://10.203.0.1:18080") != "supivpn-vm-tunnel-ok" {
-		t.Fatal("TCP payload did not traverse the real tunnel")
-	}
-	t.Log("signed SAML profile download and VPN login passed; ICMP and TCP crossed the tunnel")
+	return &vmVPN{log: clientLog}
 }
 
 func vmDatabase(t *testing.T) {
