@@ -6,6 +6,7 @@ Your team. Your tunnel. Your rules.
 Open-source SAML single sign-on and access control for OpenVPN Community.
 
 [Website](https://supivpn.com/) · [Architecture](docs/ARCHITECTURE.md) ·
+[Deployment](DEPLOYMENT.md) ·
 [Releases](https://github.com/SupiVPN/supivpn/releases) · [Contributing](CONTRIBUTING.md)
 
 [![Checks](https://img.shields.io/github/actions/workflow/status/SupiVPN/supivpn/checks.yml?branch=main&event=push&style=flat-square&logo=github&label=checks)](https://github.com/SupiVPN/supivpn/actions/workflows/checks.yml)
@@ -97,6 +98,7 @@ Run Go and Make commands from the repository root.
 | `ci/`, `tools/` | CI configuration and repository/release tooling |
 | `local/`, `out/` | Caches, build and CI outputs |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [BUILD.md](BUILD.md) | Contributor setup and build/test commands |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Debian installation through packages, systemd, SAML and a working tunnel |
 | [DEVELOPERS.md](DEVELOPERS.md) | Maintainer and release-signing guide |
 
 Start with [architecture](docs/ARCHITECTURE.md), [runtime commands](docs/RUNTIME.md),
@@ -116,8 +118,8 @@ Build components with Make or download a versioned release. See
 
 ## Contributing
 
-SupiVPN is being built in the open. The complete deployment guide is still in
-progress; read the [current limitations](#current-limitations) when evaluating
+SupiVPN is being built in the open. Start evaluating it with the
+[Debian deployment guide](DEPLOYMENT.md) and read the [current limitations](#current-limitations) of
 the project. To follow development, use GitHub's **Watch > Custom > Releases**.
 Share your team's access workflow or a feature idea in an
 [issue](https://github.com/SupiVPN/supivpn/issues), or help improve the docs and tests.
@@ -142,27 +144,21 @@ or exclusive features.
 
 ## Deploying SupiVPN
 
-For the Debian 13 package layout, local `.deb` builds and service lifecycle, see
-[Debian packages and systemd services](docs/DEBIAN_PACKAGING.md). Packages are
-currently development builds. `make deb-vm-test` checks the installed services,
-SAML login, VPN traffic, reboot and upgrades in an isolated Debian VM. Complete
-deployment guidance and signed package delivery are still pending.
+Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** for a fresh Debian 13 server:
+install `supivpn-node`, `supivpn-controller` and the `supivpn` metapackage,
+prepare PostgreSQL 18 and TLS, configure your SAML IdP, start systemd services,
+download a profile and verify an actual tunnel. The guide includes complete
+configuration examples, a minimal firewall, optional private-network routing,
+denial checks, reboot acceptance and troubleshooting.
 
-1. Run `make build` or build a single component as described in [BUILD.md](BUILD.md).
-2. Prepare PostgreSQL and the owner/runtime/migrator roles; apply migrations
-   before starting the controller.
-3. Define public VPN/HTTPS endpoints, TLS certificates, nodes, groups,
-   non-overlapping IP pools, routes, and DNS.
-4. Deploy the controller and agents with consistent group policies.
-   For a cluster, deliver the same wrapping key to every node and the profile service.
-5. Configure the [SAML IdP](docs/IDENTITY_PROVIDER.md) and its
-   [profile download tile](docs/PROFILES.md), then test successful and rejected logins.
-   A direct `<public_url>/profile` link also works; a Bookmark App is optional.
-6. Run the [cluster checks](docs/HA.md#checks) in your environment.
+This first path runs all components on one host with a private Unix socket.
+The `.deb` files are currently unsigned local development builds; signed package
+delivery is still pending. VPN client DNS SAN verification is also unfinished;
+read the guide's evaluation scope and the [limitations below](#current-limitations).
 
-`example.test`, group names, and addresses in the documentation are examples.
-Replace them with your own values and check for network overlaps before deployment.
-[Architecture](docs/ARCHITECTURE.md) describes both deployment modes.
+[Debian packaging](docs/DEBIAN_PACKAGING.md) describes build internals and
+automated VM acceptance. [Architecture](docs/ARCHITECTURE.md) covers the wider
+design; [HA](docs/HA.md#checks) describes additional cluster checks.
 
 ## Current limitations
 

@@ -8,6 +8,11 @@ on `amd64` and `arm64`. They are not yet published release assets or an APT
 repository. Container images below are disposable build/test environments;
 container deployment is outside the plan.
 
+For the operator walkthrough, start with [DEPLOYMENT.md](../DEPLOYMENT.md):
+fresh Debian, dependency installation, database/TLS/SAML configuration, service
+activation, profile download and tunnel checks. This document covers packaging
+implementation and automated acceptance.
+
 ## Package split
 
 | Package | Contents | Runtime requirements |
@@ -231,8 +236,9 @@ not simulate every stalled connection or network partition. Existing unit and
 integration coverage of these components does not establish their complete
 behavior under the installed systemd services.
 Also verify group routes, return routes, metadata isolation, DNS and IPv6 behavior
-for the intended network, and real IdP/client interoperability. A complete
-operator deployment guide and signed package delivery remain separate steps.
+for the intended network, and real IdP/client interoperability.
+[DEPLOYMENT.md](../DEPLOYMENT.md) provides the first single-host operator guide;
+signed package delivery remains a separate step.
 See [HOST.md](HOST.md), [SECURITY_MODEL.md](SECURITY_MODEL.md) and
 [systemd dependency semantics](https://manpages.debian.org/trixie/systemd/systemd.unit.5.en.html).
 The package lifecycle policy uses
