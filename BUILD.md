@@ -78,6 +78,10 @@ compatibility review and integration tests. Follow the
 Debian 13 builder. `make deb-test` additionally checks package contents, unit
 syntax and the package installation/removal lifecycle. Outputs stay under
 `local/debian/<arch>/`; nothing is installed on the development host.
+`make deb-vm-test ARCH=arm64` (or `amd64`) additionally boots an isolated Debian
+VM and checks real systemd lifecycle, signed SAML login, VPN traffic, reboot and
+live package upgrades. It uses software CPU emulation and needs Internet access
+for guest prerequisites; VM disks and evidence stay in `local/debian-vm/`.
 See [Debian packaging](docs/DEBIAN_PACKAGING.md) for prerequisites and the
 distinction between container checks and clean-VM acceptance.
 

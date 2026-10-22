@@ -61,6 +61,49 @@ They run without a systemd PID 1 and
 therefore do not establish running-service upgrade, boot, crash recovery,
 sandbox enforcement or real tunnel acceptance. Those require a clean Debian VM.
 
+### Disposable VM checks
+
+```sh
+make deb-vm-test ARCH=arm64
+make deb-vm-test ARCH=amd64
+```
+
+This includes `deb-test`, then boots the pinned official Debian 13 generic image
+with its own kernel and systemd PID 1. The host needs Docker, Go, Python 3.11 or
+later, curl and OpenSSH. QEMU runs without extra container capabilities or host
+devices, using software CPU emulation: each guest has two virtual CPUs, 2 GiB RAM
+and a sparse 12 GiB disk. Cross-architecture runs can take several minutes.
+No hypervisor or packages are installed on the development host.
+
+The runner verifies the image's SHA-512, creates fresh test SSH identities and
+pins the guest host key. Only a randomly allocated `127.0.0.1` SSH port is
+published. The guest installs PostgreSQL 18 from its signed upstream APT
+repository and the existing OpenVPN test fixture; setup requires Internet access.
+TLS certificates, IdP signing material, database passwords and VPN keys are
+generated solely for the disposable guest. No host credentials or working
+configuration are mounted. Logs, disks and evidence stay under
+`local/debian-vm/`; treat these as private test artifacts, not release assets.
+The runner removes its own VM container on success or failure.
+
+The VM suite verifies:
+
+- Fresh installation leaves services stopped and not enabled.
+- The installed examples work with explicit migration, a restricted database
+  runtime identity, verified PostgreSQL TLS and authenticated Unix transport.
+- Signed SAML profile download and VPN login assign the expected group address;
+  ICMP and TCP traffic cross a real TUN device from a separate guest namespace.
+- Both crash orders recover the agent/OpenVPN pair; manual stop stays stopped.
+- The actual processes have the configured capability bounds and
+  `NoNewPrivileges`; the agent's private `/dev` does not expose TUN.
+- A changed boot ID proves reboot, after which both enabled services become ready.
+- Reinstall, reconfigure and an upgrade to a higher test version preserve process
+  identities, enablement and operator files. Remove/purge stop only the owned
+  services and retain configuration, keys, state and the controller account.
+
+The VM suite is opt-in; ordinary CI's Debian job still runs the faster container
+package checks. A successful `result.json` is written only after all VM phases
+pass. It records image and package digests and both boot IDs.
+
 ## Files and identities
 
 Executables are installed in `/usr/sbin`, manuals in `/usr/share/man/man8`,
@@ -119,7 +162,7 @@ After prerequisites are configured, the service sequence is:
 
 ```sh
 sudo systemctl start supivpn-controller.service
-# Verify controller /readyz over trusted TLS and its database-backed readiness.
+# Verify controller /healthz over trusted TLS and its database-backed readiness.
 sudo systemctl start supivpn-node.service
 # Verify node /readyz over trusted TLS, then complete login and tunnel checks.
 sudo systemctl enable supivpn-controller.service supivpn-node.service
@@ -167,14 +210,16 @@ only its own unit. Purge unregisters package units but retains operator-created
 configuration, secrets, persistent state and the controller account. Deliberate
 decommissioning and key disposal are separate operator actions.
 
-## Remaining host acceptance
+## Remaining deployment acceptance
 
-Before claiming a working clean-host deployment, test both architectures in
-Debian 13 VMs: activation, cold boot, both process-crash orders, repeated failure
-rate limiting, manual stop/restart, upgrades while running, remove/purge,
-controller/database outages, unauthorized Unix peers, sandbox access, signed
-SAML login, expiry/reconnect and real client traffic. Verify group routes, return
-routes, metadata isolation, DNS and IPv6 behavior for the selected network.
+VM coverage above is not a complete deployment certification. Extend the
+running-service suite for repeated-failure rate limiting, prolonged controller
+and database outages, unauthorized Unix peers, broader sandbox access and session
+expiry/reconnect. Existing unit and integration coverage of these components does
+not establish their complete behavior under the installed systemd services.
+Also verify group routes, return routes, metadata isolation, DNS and IPv6 behavior
+for the intended network, and real IdP/client interoperability. A complete
+operator deployment guide and signed package delivery remain separate steps.
 See [HOST.md](HOST.md), [SECURITY_MODEL.md](SECURITY_MODEL.md) and
 [systemd dependency semantics](https://manpages.debian.org/trixie/systemd/systemd.unit.5.en.html).
 The package lifecycle policy uses

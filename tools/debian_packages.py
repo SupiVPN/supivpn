@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--go", default="go")
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--test", action="store_true")
+    parser.add_argument("--vm", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     output = root / "local/debian" / args.arch
@@ -59,11 +60,14 @@ def main():
          "--user", f"{os.getuid()}:{os.getgid()}",
          "--mount", f"type=bind,source={work},target=/work", "--workdir", "/work/source",
          image, "dpkg-buildpackage", "--no-sign", "-F"])
-    if args.test:
+    if args.test or args.vm:
         run([args.docker, "run", "--rm", "--platform", "linux/" + args.arch,
              "--network", "none", "--security-opt", "no-new-privileges",
              "--mount", f"type=bind,source={work},target=/packages,readonly",
              image, "python3", "/packages/source/ci/debian/check_packages.py", "/packages"])
+    if args.vm:
+        from debian_vm import run_vm
+        run_vm(root, work, args.arch, args.docker, args.go)
     print("Debian build and matching source: " + str(work))
 
 
