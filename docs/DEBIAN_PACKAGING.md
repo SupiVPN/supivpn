@@ -93,6 +93,18 @@ The VM suite verifies:
 - Signed SAML profile download and VPN login assign the expected group address;
   ICMP and TCP traffic cross a real TUN device from a separate guest namespace.
 - Both crash orders recover the agent/OpenVPN pair; manual stop stays stopped.
+- Short controller or PostgreSQL stops preserve the current tunnel, node
+  generation and service processes while new profile logins are unavailable.
+  Stops lasting at least 65 seconds exceed both the agent's 40-second deadline
+  and the database's 60-second lease: the old tunnel closes and cannot carry
+  traffic. Restoring the dependency automatically recovers the pair with a new
+  generation; the same client must complete a fresh SAML login. PostgreSQL
+  recovery does not require restarting the controller. Independent outage
+  scenarios begin with healthy services and reset systemd start counters left
+  by earlier crash tests; no counters are reset during an outage or recovery.
+- Two successive signed IdP session deadlines close only that client's tunnel.
+  The same client reconnects and authenticates again, while the node stays ready
+  with unchanged processes/generation and released connection slots.
 - The actual processes have the configured capability bounds and
   `NoNewPrivileges`; the agent's private `/dev` does not expose TUN.
 - A changed boot ID proves reboot, after which both enabled services become ready.
@@ -213,10 +225,11 @@ decommissioning and key disposal are separate operator actions.
 ## Remaining deployment acceptance
 
 VM coverage above is not a complete deployment certification. Extend the
-running-service suite for repeated-failure rate limiting, prolonged controller
-and database outages, unauthorized Unix peers, broader sandbox access and session
-expiry/reconnect. Existing unit and integration coverage of these components does
-not establish their complete behavior under the installed systemd services.
+running-service suite for repeated-failure rate limiting, unauthorized Unix
+peers and broader sandbox access. The outage checks stop local services; they do
+not simulate every stalled connection or network partition. Existing unit and
+integration coverage of these components does not establish their complete
+behavior under the installed systemd services.
 Also verify group routes, return routes, metadata isolation, DNS and IPv6 behavior
 for the intended network, and real IdP/client interoperability. A complete
 operator deployment guide and signed package delivery remain separate steps.
