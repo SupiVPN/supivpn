@@ -1,0 +1,7 @@
+{
+  "hostname": "vpn.example.test",
+  "certificate_directory": "/etc/letsencrypt/live/supivpn",
+  "idp_metadata_file": "/root/idp-metadata.xml",
+  "groups": ["admins-vpn", "engineers-production-vpn"],
+  "admin_cidr": "198.51.100.10/32"
+}

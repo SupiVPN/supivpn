@@ -19,7 +19,7 @@ jobs:
   prepare:
     if: github.ref == 'refs/heads/main' && github.repository == 'SupiVPN/supivpn'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: read
       actions: read
@@ -35,6 +35,28 @@ jobs:
           SUPIVPN_TAG_VERSION: ${{ inputs.tag }}
           SUPIVPN_GPG_PUBLIC_KEY: ${{ vars.SUPIVPN_GPG_PUBLIC_KEY }}
         run: python3 -B tools/github_release.py prepare
+      - name: Install repository index tooling
+        if: "!contains(inputs.tag, '-')"
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends reprepro
+      - name: Prepare stable APT repository from verified release packages
+        if: "!contains(inputs.tag, '-')"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPIVPN_TAG_VERSION: ${{ inputs.tag }}
+          SUPIVPN_GPG_PUBLIC_KEY: ${{ vars.SUPIVPN_GPG_PUBLIC_KEY }}
+        run: python3 -B tools/apt_repository.py prepare
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: "!contains(inputs.tag, '-')"
+        with:
+          name: apt-${{ github.run_id }}
+          path: |
+            out/apt/site/
+            out/apt/prepared.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ github.run_id }}
@@ -66,6 +88,30 @@ jobs:
           SUPIVPN_ARTIFACT_SIGNING_KEY: ${{ secrets.SUPIVPN_ARTIFACT_SIGNING_KEY }}
           SUPIVPN_ARTIFACT_SIGNING_PASSPHRASE: ${{ secrets.SUPIVPN_ARTIFACT_SIGNING_PASSPHRASE }}
         run: python3 -B tools/github_release.py sign
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: "!contains(inputs.tag, '-')"
+        with:
+          name: apt-${{ github.run_id }}
+          path: out/apt/
+      - name: Sign and verify APT Release and InRelease
+        if: "!contains(inputs.tag, '-')"
+        env:
+          SUPIVPN_TAG_VERSION: ${{ inputs.tag }}
+          SUPIVPN_ARTIFACT_SIGNING_KEY: ${{ secrets.SUPIVPN_ARTIFACT_SIGNING_KEY }}
+          SUPIVPN_ARTIFACT_SIGNING_PASSPHRASE: ${{ secrets.SUPIVPN_ARTIFACT_SIGNING_PASSPHRASE }}
+        run: python3 -B tools/apt_repository.py sign
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: "!contains(inputs.tag, '-')"
+        with:
+          name: signed-apt-${{ github.run_id }}
+          path: |
+            out/apt/site/
+            out/apt/prepared.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-release-${{ github.run_id }}
@@ -98,3 +144,45 @@ jobs:
           SUPIVPN_RELEASE_PUBLISH: '1'
           SUPIVPN_GPG_PUBLIC_KEY: ${{ vars.SUPIVPN_GPG_PUBLIC_KEY }}
         run: python3 -B tools/github_release.py publish
+
+  pages-artifact:
+    needs: [publish, sign]
+    if: github.ref == 'refs/heads/main' && github.repository == 'SupiVPN/supivpn' && !contains(inputs.tag, '-')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-apt-${{ github.run_id }}
+          path: out/apt/
+      - name: Verify signed APT tree before deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPIVPN_TAG_VERSION: ${{ inputs.tag }}
+          SUPIVPN_GPG_PUBLIC_KEY: ${{ vars.SUPIVPN_GPG_PUBLIC_KEY }}
+        run: python3 -B tools/apt_repository.py verify
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: out/apt/site/
+          retention-days: 1
+
+  pages:
+    needs: pages-artifact
+    if: github.ref == 'refs/heads/main' && github.repository == 'SupiVPN/supivpn' && !contains(inputs.tag, '-')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Publish signed APT repository
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

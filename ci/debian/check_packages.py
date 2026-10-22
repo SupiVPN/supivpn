@@ -37,6 +37,11 @@ def check(packages):
             assert not (root / "var").exists(), "runtime state in package"
             for binary in (root / "usr/sbin").glob("*"):
                 header = binary.read_bytes()[:20]
+                if name == "supivpn" and binary.name == "supivpn-setup":
+                    assert header.startswith(b"#!/usr/bin/python3\n")
+                    assert binary.stat().st_mode & 0o777 == 0o755
+                    run("python3", str(binary), "--help")
+                    continue
                 assert header[:4] == b"\x7fELF"
                 assert int.from_bytes(header[18:20], "little") == {"arm64": 183, "amd64": 62}[arch]
                 assert binary.stat().st_mode & 0o777 == 0o755
@@ -92,6 +97,8 @@ def check(packages):
     assert not list(Path("/etc/systemd/system").glob("*.wants/supivpn*.service"))
     run("dpkg", "-i", "/opt/openvpn-test.deb", str(files["supivpn-node"]), str(files["supivpn"]))
     no_lifecycle_requests()
+    run("supivpn-setup", "plan", "--config", "/usr/share/supivpn/examples/setup.example.json")
+    assert not Path("/etc/supivpn").exists(), "plan changed the host"
     run("systemd-analyze", "verify", "supivpn-node.service", "supivpn-openvpn.service", "supivpn-controller.service")
     # Operator files are synthetic sentinels, never credentials.
     sentinels = [Path("/etc/supivpn/node/operator-sentinel"),

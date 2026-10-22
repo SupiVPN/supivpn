@@ -16,6 +16,7 @@ import zipfile
 
 import artifacts as a
 import artifact_signing
+import debian_release as deb
 import release_identity
 import github_api as gh
 import release_notes
@@ -113,10 +114,10 @@ def candidate_zip(data, arch, commit, version, oid, run):
     return files, record
 
 
-def fetch_candidate(run, commit, version, oid, arch):
+def fetch_candidate(run, commit, version, oid, arch, *, debian=False):
     records = gh.api("actions/runs/" + str(run["id"]) + "/artifacts?per_page=100")
     matches = [item for item in records.get("artifacts", [])
-               if item.get("name") == "candidate-" + version + "-" + arch + "-" + commit]
+               if item.get("name") == ("debian-" if debian else "candidate-") + version + "-" + arch + "-" + commit]
     a.require(len(matches) == 1, "Missing or ambiguous tag candidate artifact")
     item = matches[0]
     a.require(item.get("expired") is False and type(item.get("id")) is int and item["id"] > 0
@@ -130,7 +131,32 @@ def fetch_candidate(run, commit, version, oid, arch):
     status, data = gh.request(gh.API + "actions/artifacts/" + str(item["id"]) + "/zip", limit=2 * a.MAX_BUNDLE)
     a.require(status == 200 and len(data) == item["size_in_bytes"] and a.sha(data) == digest[7:],
               "Tag artifact digest/size mismatch")
-    return candidate_zip(data, arch, commit, version, oid, run)
+    parser = debian_zip if debian else candidate_zip
+    return parser(data, arch, commit, version, oid, run)
+
+
+def debian_zip(data, arch, commit, version, oid, run):
+    names = deb.filenames(version, arch)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        entries = archive.infolist()
+        a.require(len(entries) == len(names) + 1
+                  and {e.filename for e in entries} == names | {"candidate.json"},
+                  "Unexpected Debian candidate files")
+        a.require(sum(e.file_size for e in entries) <= 2 * a.MAX_BUNDLE, "Debian candidate too large")
+        files = {}
+        for entry in entries:
+            a.require(not entry.flag_bits & 1 and 0 <= entry.file_size <= a.MAX_BUNDLE
+                      and stat.S_IFMT(entry.external_attr >> 16) in {0, stat.S_IFREG},
+                      "Unsafe Debian ZIP member")
+            a.require(entry.filename != "candidate.json" or entry.file_size <= 4096,
+                      "Debian candidate metadata too large")
+            files[entry.filename] = archive.read(entry)
+    record = a.json_object(files.pop("candidate.json"))
+    expected = {"format": 1, "repository": gh.REPOSITORY, "commit": commit, "version": version,
+                "tag": oid, "arch": arch, "run_id": run["id"], "run_attempt": run["run_attempt"],
+                "assets": {name: a.sha(raw) for name, raw in files.items()}}
+    a.require(record == expected, "Debian candidate provenance mismatch")
+    return files, record
 
 
 def verify_provenance(path, commit, version, run):
@@ -179,6 +205,7 @@ def prepare(version, output):
     output.mkdir(parents=True)
     assets = {}
     compatibility = None
+    epoch = deb.commit_epoch(ROOT, commit)
     (ROOT / "local").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=ROOT / "local") as directory:
         for arch in a.ARCHITECTURES:
@@ -205,13 +232,31 @@ def prepare(version, output):
                 source_archive.verify(files[source["filename"]], source["sha256"], commit, expected_source)
                 (output / source["filename"]).write_bytes(files[source["filename"]])
                 assets[source["filename"]] = source["sha256"]
+        for arch in a.ARCHITECTURES:
+            files, record = fetch_candidate(run, commit, version, oid, arch, debian=True)
+            for name, raw in files.items():
+                path = Path(directory) / name
+                path.write_bytes(raw)
+                verify_provenance(path, commit, version, run)
+                if name.endswith(".deb"):
+                    deb.verify_package(path, version, arch)
+                # Shared source and the all-architecture metapackage must be identical.
+                a.require(name not in assets or assets[name] == record["assets"][name],
+                          "Cross-architecture Debian asset mismatch")
+            deb.verify_source(files[f"supivpn_{deb.version(version)}.tar.xz"],
+                              files[f"supivpn_{deb.version(version)}.dsc"], version, expected_source, epoch)
+            for name, raw in files.items():
+                (output / name).write_bytes(raw)
+                assets[name] = record["assets"][name]
     raw = tag.git(["cat-file", "tag", oid], "signed release notes").stdout
     _, notes = release_notes.tag_message(raw, version, commit)
     notes = release_notes.validate(version, notes, allow_commit_subjects=True)
     notes += "\n## Packages\n\nCommit: `" + commit + "`. License: AGPL-3.0-only.\n\n"
     notes += "Verified native ARM64 and AMD64 builds from [Checks](https://github.com/" + gh.REPOSITORY
     notes += "/actions/runs/" + str(run["id"]) + ") for this signed tag. Both bundles use format 3.\n\n"
-    notes += "GitHub build provenance was verified for both binary archives and Corresponding Source, "
+    notes += "Debian 13 packages for ARM64 and AMD64, a shared metapackage and native Debian source are included. "
+    notes += "Install verified matching packages with `apt install ./supivpn*.deb`; see DEPLOYMENT.md.\n\n"
+    notes += "GitHub build provenance was verified for all binary archives, Debian assets and Corresponding Source, "
     notes += "including the tag commit and Checks run attempt " + str(run["run_attempt"]) + ".\n\n"
     notes += "Database schema: " + str(compatibility["schema"]) + "; compatible VM schemas: "
     notes += ", ".join(sorted(compatibility["compatible_schemas"], key=int)) + ".\n"
@@ -223,7 +268,7 @@ def prepare(version, output):
     sums = a.checksums(assets)
     (output / "SHA256SUMS").write_bytes(sums)
     assets["SHA256SUMS"] = a.sha(sums)
-    metadata = {"format": 1, "repository": gh.REPOSITORY, "version": version, "commit": commit,
+    metadata = {"format": 2, "repository": gh.REPOSITORY, "version": version, "commit": commit,
                 "tag": oid, "run_id": run["id"], "run_attempt": run["run_attempt"], "assets": assets}
     (output / "release-metadata.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     print("Prepared verified release " + version + " at " + commit)
@@ -231,10 +276,12 @@ def prepare(version, output):
 
 def checked_release(directory, version, *, signed=False):
     metadata = a.json_object(a.regular(directory / "release-metadata.json", 8192))
-    a.require(metadata.get("format") == 1 and metadata.get("repository") == gh.REPOSITORY
+    a.require(metadata.get("format") == 2 and metadata.get("repository") == gh.REPOSITORY
               and metadata.get("version") == version and tag.COMMIT.fullmatch(metadata.get("commit", ""))
               and tag.COMMIT.fullmatch(metadata.get("tag", "")), "Release metadata mismatch")
     expected = {a.filename(version, arch) for arch in a.ARCHITECTURES}
+    for arch in a.ARCHITECTURES:
+        expected.update(deb.filenames(version, arch))
     expected.update({"supivpn-source-" + metadata["commit"] + ".tar.gz", "SHA256SUMS", "release-notes.md"})
     a.require(set(metadata.get("assets", {})) == expected
               and {path.name for path in directory.iterdir()} == expected | {"release-metadata.json"}

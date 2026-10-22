@@ -3,13 +3,15 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 Licensed under AGPL-3.0-only. See [LICENSE](../LICENSE) and [COPYRIGHT.md](../COPYRIGHT.md).
 
-These local development packages target Debian 13 with systemd 257 or later,
-on `amd64` and `arm64`. They are not yet published release assets or an APT
-repository. Container images below are disposable build/test environments;
+These packages target Debian 13 with systemd 257 or later, on `amd64` and `arm64`.
+The release workflow delivers `.deb` assets through GitHub Releases with signed
+checksums and build provenance. The stable [APT repository](APT_REPOSITORY.md) is prepared for GitHub Pages;
+its first publication is pending.
+Container images below are disposable build/test environments;
 container deployment is outside the plan.
 
 For the operator walkthrough, start with [DEPLOYMENT.md](../DEPLOYMENT.md):
-fresh Debian, dependency installation, database/TLS/SAML configuration, service
+fresh Debian, dependency installation, one-file setup with `supivpn-setup`, service
 activation, profile download and tunnel checks. This document covers packaging
 implementation and automated acceptance.
 
@@ -19,7 +21,7 @@ implementation and automated acceptance.
 | --- | --- | --- |
 | `supivpn-node` | Agent, profile/key bootstrap CLI, dedicated agent and OpenVPN units | OpenVPN Community 2.7.8, CA certificates, systemd |
 | `supivpn-controller` | Controller, explicit migration CLI, matching SQL and profile example | CA certificates, systemd, a reachable PostgreSQL 18 database |
-| `supivpn` | Metapackage depending on both components at the same package version | Both component packages |
+| `supivpn` | Matching components, `supivpn-setup` and its configuration templates | Both components, Python 3, OpenSSL, curl; PostgreSQL 18 for setup |
 
 The controller package does not install OpenVPN or PostgreSQL. The node package
 does not require a local controller; AWS transport remains available. The local
@@ -32,6 +34,28 @@ force installation around this dependency. Debian's default repository may not
 provide this version; provision a separately verified OpenVPN package first.
 The OpenVPN package built in `ci/debian` is only a test fixture, not a supported
 distribution channel. See [OpenVPN requirements](OPENVPN_UPGRADE.md).
+
+## Release packages
+
+The authenticated tag workflow runs the same build and lifecycle checks on native
+ARM64 and AMD64 runners. Package versions derive from the tag: `v1.2.3` becomes
+`1.2.3`, and `v1.2.3-rc.1` becomes `1.2.3~rc.1`, sorting before the stable version.
+A deterministic changelog entry uses the tagged commit timestamp. The repository's
+`UNRELEASED` changelog remains the default for local development builds.
+
+The public set contains five `.deb` files: node/controller for each architecture
+and one `supivpn_<version>_all.deb`; plus `supivpn_<version>.dsc` and
+`supivpn_<version>.tar.xz` with the matching vendored source. The source descriptor,
+source archive and metapackage must match byte for byte across the two runners.
+The OpenVPN test fixture, build caches, VM images and local configuration are
+never release assets. All packages and both source files have GitHub provenance
+and are covered by the release's signed `SHA256SUMS`.
+
+Publication requires a new reviewed signed tag containing this workflow, successful
+complete tag CI and the existing protected release signing step. It neither
+rebuilds packages nor adds assets to old published releases. **v0.5.0 and earlier
+have no Debian packages.** See [release delivery](RELEASES.md) and
+[download/verification](RELEASES.md#download-and-verify-supivpn).
 
 ## Build and check
 
@@ -49,7 +73,7 @@ metadata enters the builder. Outputs are kept in a new `local/debian/<arch>/buil
 directory on every run: three `.deb` files, the native source archive with vendored
 dependencies, `.dsc`, `.changes`, `.buildinfo` and an input SHA-256 inventory.
 These development outputs are unsigned. Distribute matching source with binaries;
-release signing/provenance and publishing remain a separate implementation step.
+the release workflow described above supplies signing/provenance for official assets.
 
 The source package uses debhelper 13. Its build environment must supply Go 1.27.3
 and `vendor/`; `debian/rules` verifies the SDK and never downloads dependencies.
@@ -93,8 +117,12 @@ The runner removes its own VM container on success or failure.
 The VM suite verifies:
 
 - Fresh installation leaves services stopped and not enabled.
-- The installed examples work with explicit migration, a restricted database
-  runtime identity, verified PostgreSQL TLS and authenticated Unix transport.
+- The installed `supivpn-setup` command creates consistent configuration, keys,
+  a dedicated PostgreSQL cluster, restricted roles and migrations. Plan leaves
+  the host unchanged; repeat initialization refuses to replace existing keys.
+  Generated firewall syntax and certificate refresh are checked before startup.
+- HTTPS readiness, verified PostgreSQL TLS and authenticated Unix transport work
+  under the installed systemd units. Runtime database privileges remain restricted.
 - Signed SAML profile download and VPN login assign the expected group address;
   ICMP and TCP traffic cross a real TUN device from a separate guest namespace.
 - Both crash orders recover the agent/OpenVPN pair; manual stop stays stopped.
@@ -126,12 +154,15 @@ pass. It records image and package digests and both boot IDs.
 Executables are installed in `/usr/sbin`, manuals in `/usr/share/man/man8`,
 units in `/usr/lib/systemd/system`,
 examples and licenses in `/usr/share/doc/<package>`, and inspection copies of SQL
-in `/usr/share/supivpn-controller/migrations`. SQL is also embedded in the migrator;
+in `/usr/share/supivpn-controller/migrations`. Setup templates are runtime data in
+`/usr/share/supivpn/examples`, so systems excluding documentation can still use
+the helper. SQL is also embedded in the migrator;
 never edit or execute the installed SQL files individually.
 
 Package installation creates the `supivpn-controller` system account with no login
 shell or home directory. It does not create active configuration or any keys.
-The examples must be copied and adapted by the operator.
+Configure a new combined host with the setup helper, or copy and adapt the
+examples for manual installation.
 
 | Operator-managed path | Owner and mode |
 | --- | --- |
@@ -139,6 +170,7 @@ The examples must be copied and adapted by the operator.
 | `/etc/supivpn/node` | `root:root`, 0700; files 0600 |
 | `/etc/supivpn/controller` | `root:supivpn-controller`, 0750; service-readable files 0640 |
 | `/etc/supivpn/controller/database.env` | `root:root`, 0600; read by systemd before switching UID |
+| `/etc/supivpn/controller/migration.env` after helper setup | `root:root`, 0600; separate migration identity |
 | `/etc/supivpn/keys` on a combined host | `root:supivpn-controller`, 0750 |
 | `/etc/supivpn/keys/tls-crypt-v2-server.key` on a combined host | `supivpn-controller:supivpn-controller`, 0600 |
 
@@ -146,7 +178,7 @@ The wrapping-key loader requires mode 0600. Bootstrap into a root-owned 0700
 directory using the explicit CLI key path; then apply the combined-host ownership
 above. The controller can read the key; its service filesystem is read-only.
 Root OpenVPN can read the same key. On a node-only host the key may remain root-owned.
-No package script generates, transfers, rotates or deletes working credentials.
+No maintainer script generates, transfers, rotates or deletes working credentials.
 
 The node unit creates `/run/supivpn` (0700) and persistent
 `/var/lib/supivpn-node` (0700). The controller creates its own private
@@ -155,6 +187,19 @@ directories are removed on stop. Never remove the generation journal to repair
 a failed restart; follow [recovery guidance](RECOVERY.md).
 
 ## Configuration and activation
+
+For a new combined host, `supivpn-setup` in the `supivpn` package automates
+configuration, key generation, restricted database roles and migrations from
+one setup JSON file. It creates a separate PostgreSQL `18/supivpn` cluster on
+loopback port 55433, leaving existing clusters untouched. `plan` is read-only;
+`init` is explicit and refuses existing SupiVPN files/state. Installation and
+upgrade maintainer scripts never call it. It prepares firewall rules for review
+and leaves SupiVPN services stopped. See [DEPLOYMENT.md](../DEPLOYMENT.md).
+
+The following paths also support [manual setup](DEPLOYMENT_MANUAL.md), a remote
+database, or independently installed component packages. Do not run `init` on
+an existing installation. The helper saves root-only runtime and migration
+credentials separately; neither belong in support output or source control.
 
 Use the examples under `/usr/share/doc/supivpn-node/examples/` and
 `/usr/share/doc/supivpn-controller/examples/`. In particular:

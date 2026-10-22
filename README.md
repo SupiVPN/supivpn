@@ -146,14 +146,19 @@ or exclusive features.
 
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** for a fresh Debian 13 server:
 install `supivpn-node`, `supivpn-controller` and the `supivpn` metapackage,
-prepare PostgreSQL 18 and TLS, configure your SAML IdP, start systemd services,
-download a profile and verify an actual tunnel. The guide includes complete
-configuration examples, a minimal firewall, optional private-network routing,
-denial checks, reboot acceptance and troubleshooting.
+supply your hostname, certificate and IdP in one setup file, then run
+`supivpn-setup init`. It generates matching configuration, keys and a restricted
+local PostgreSQL 18 database with migrations. Review the proposed firewall,
+start systemd services, download a profile and verify a tunnel. The guide includes
+denial checks, reboot acceptance and maintenance; the
+[manual reference](docs/DEPLOYMENT_MANUAL.md) covers individual setup steps and
+private-network routing.
 
 This first path runs all components on one host with a private Unix socket.
-The `.deb` files are currently unsigned local development builds; signed package
-delivery is still pending. VPN client DNS SAN verification is also unfinished;
+The guide adds the signed `apt.supivpn.com` source and installs with
+`apt install supivpn`. First APT publication is pending; v0.5.0 and earlier
+have no Debian packages. A local build and verified GitHub Release downloads
+remain available as alternatives. VPN client DNS SAN verification is unfinished;
 read the guide's evaluation scope and the [limitations below](#current-limitations).
 
 [Debian packaging](docs/DEBIAN_PACKAGING.md) describes build internals and

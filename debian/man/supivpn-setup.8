@@ -1,0 +1,60 @@
+.\" Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+.\" SPDX-License-Identifier: AGPL-3.0-only
+.TH SUPIVPN-SETUP 8 "October 2026" "SupiVPN" "System Administration"
+.SH NAME
+supivpn-setup \- configure a combined SupiVPN Debian host
+.SH SYNOPSIS
+.B supivpn-setup
+.I plan|init|check|certificates
+.RB [ --config
+.IR file ]
+.SH DESCRIPTION
+Explicit first-time setup on Debian 13 with systemd. Install matching SupiVPN
+packages and PostgreSQL 18 first. Supply trusted IdP metadata and a valid
+server certificate. The example is in
+.IR /usr/share/supivpn/examples/setup.example.json .
+.PP
+The plan action prints intended changes without changing the host.
+The init action requires root, refuses existing SupiVPN configuration or state,
+generates configuration, keys, restricted database roles and random credentials,
+creates the dedicated PostgreSQL 18/supivpn cluster on loopback port 55433,
+and runs the installed migrations. It starts only that database cluster.
+It does not alter existing clusters, install packages, apply firewall rules,
+enable services or start the VPN.
+.PP
+The check action verifies service state and HTTPS readiness using certificate
+validation. It does not establish a client tunnel or test the real IdP.
+The certificates action validates and refreshes certificate copies from the
+saved source directory. Stop the controller and node first, then start them
+and check readiness. This maintenance disconnects clients.
+.SH CONFIGURATION
+hostname, certificate_directory, idp_metadata_file, groups and admin_cidr are
+required. Groups are exact case-sensitive IdP names in priority order.
+Optional login_hostname defaults to hostname; vpn_network defaults to
+10.203.0.0/24; ssh_port to 22; database_name to supivpn.
+Equal subnet pools are allocated to the groups. Internet routing and DNS
+remain unchanged. The generated firewall permits only the gateway ping
+from VPN clients; review it before applying on a fresh dedicated host.
+.SH FILES
+.TP
+.I /etc/supivpn/setup.json
+Saved setup inputs; the default configuration for maintenance actions.
+.TP
+.I /etc/supivpn/controller/database.env
+Root-only runtime credentials. Never print or source for diagnostics.
+.TP
+.I /etc/supivpn/controller/migration.env
+Separate root-only migration credentials for future explicit upgrades.
+.TP
+.I /etc/supivpn/firewall.nft
+Firewall proposal; never automatically applied.
+.SH FAILURE
+Partial initialization is preserved for local diagnosis. There is no automatic
+rollback, deletion, takeover or credential rotation. Do not remove state on a
+working installation to retry initialization.
+.SH SEE ALSO
+.BR supivpn (8),
+.BR supivpn-controller (8),
+.BR supivpn-migrate (8)
+.PP
+https://github.com/SupiVPN/supivpn/blob/main/DEPLOYMENT.md

@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from unittest.mock import patch
 import unittest
 
@@ -29,6 +30,24 @@ def module(name):
 
 
 class CandidateContextTests(unittest.TestCase):
+    def test_debian_candidates_refuse_untrusted_context_and_extra_build_outputs(self):
+        with patch.dict(sys.modules, github_candidate=module("github_candidate")):
+            candidate = module("github_debian")
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request"}, clear=True), \
+                patch.object(candidate.debian_packages, "build") as build, self.assertRaises(a.ValidationError):
+            candidate.main()
+        build.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            for name in candidate.deb.filenames("v0.6.0", "arm64"):
+                (work / name).write_bytes(b"synthetic candidate")
+            (work / "openvpn-test.deb").write_bytes(b"must stay local")
+            output = work / "output"
+            with self.assertRaises(a.ValidationError):
+                candidate.retain(work, output, "arm64", "a" * 40, "v0.6.0", "b" * 40,
+                                 {"GITHUB_RUN_ID": "42", "GITHUB_RUN_ATTEMPT": "1"})
+            self.assertFalse(output.exists())
+
     def test_only_canonical_tag_push_with_complete_identity_can_package(self):
         candidate = module("github_candidate")
         valid = {"GITHUB_REPOSITORY": "SupiVPN/supivpn", "GITHUB_REF": "refs/tags/v0.4.0",
@@ -97,11 +116,11 @@ class WorkflowTests(unittest.TestCase):
         job = self.workflow("checks.yml")["jobs"]["attest"]
         self.assertEqual(job["if"], "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')"
                          " && github.repository == 'SupiVPN/supivpn'")
-        self.assertEqual(set(job["needs"]), {"scope", "build"})
+        self.assertEqual(set(job["needs"]), {"scope", "build", "debian"})
         self.assertEqual(job["permissions"], {"contents": "read", "id-token": "write", "attestations": "write"})
         self.assertEqual(job["strategy"]["matrix"]["arch"], ["arm64", "amd64"])
         # No checkout, shell, cache restore, cross-run download or private signing key.
-        download, attest = job["steps"]
+        download, attest, deb_download, deb_attest = job["steps"]
         self.assertEqual(set(download), {"uses", "with"})
         self.assertTrue(download["uses"].startswith("actions/download-artifact@"))
         self.assertEqual(download["with"], {"name": "candidate-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}",
@@ -109,6 +128,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(set(attest), {"uses", "with"})
         self.assertTrue(attest["uses"].startswith("actions/attest@"))
         self.assertEqual(attest["with"], {"subject-path": "candidate/*.tar.gz", "create-storage-record": "false"})
+        self.assertEqual(set(deb_download), {"uses", "with"})
+        self.assertEqual(deb_download["uses"], download["uses"])
+        self.assertEqual(deb_download["with"], {"name": "debian-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}",
+                                                "path": "debian-candidate"})
+        self.assertEqual(set(deb_attest), {"uses", "with"})
+        self.assertEqual(deb_attest["uses"], attest["uses"])
+        self.assertEqual(deb_attest["with"], {"subject-path": "debian-candidate/*.deb\ndebian-candidate/*.dsc\ndebian-candidate/*.tar.xz\n",
+                                              "create-storage-record": "false"})
+        builder = self.workflow("checks.yml")["jobs"]["debian"]
+        self.assertEqual(builder["env"]["SUPIVPN_TAG_OID"], "${{ needs.scope.outputs.tag_oid }}")
+        for step in builder["steps"]:
+            if step.get("run") == "python3 -B ci/github_debian.py" or "upload-artifact@" in step.get("uses", ""):
+                self.assertEqual(step["if"], job["if"])
+
 
     def test_independent_checks_run_in_parallel_with_a_complete_final_gate(self):
         jobs = self.workflow("checks.yml")["jobs"]
@@ -165,9 +198,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("refs/heads/main", publish["if"])
         for name, job in config["jobs"].items():
             secret_steps = [step for step in job["steps"] if "secrets." in str(step.get("env", {}))]
-            self.assertEqual(len(secret_steps), 1 if name == "sign" else 0)
-            if secret_steps:
-                self.assertNotIn("GH_TOKEN", secret_steps[0].get("env", {}))
+            self.assertEqual(len(secret_steps), 2 if name == "sign" else 0)
+            for step in secret_steps:
+                self.assertNotIn("GH_TOKEN", step.get("env", {}))
+        self.assertEqual({step["run"] for step in signer["steps"] if "secrets." in str(step.get("env", {}))},
+                         {"python3 -B tools/github_release.py sign", "python3 -B tools/apt_repository.py sign"})
+
+    def test_apt_deployment_is_stable_release_only_and_contains_no_signing_keys(self):
+        jobs = self.workflow("release.yml")["jobs"]
+        checked = jobs["pages-artifact"]
+        self.assertEqual(set(checked["needs"]), {"publish", "sign"})
+        self.assertEqual(checked["permissions"], {"contents": "read"})
+        self.assertEqual(checked["steps"][-1]["with"]["path"], "out/apt/site/")
+        pages = jobs["pages"]
+        self.assertEqual(pages["needs"], "pages-artifact")
+        self.assertEqual(pages["permissions"], {"pages": "write", "id-token": "write"})
+        self.assertEqual(pages["environment"]["name"], "github-pages")
+        self.assertEqual(len(pages["steps"]), 1)
+        self.assertTrue(pages["steps"][0]["uses"].startswith("actions/deploy-pages@"))
+        for job in (checked, pages):
+            self.assertIn("refs/heads/main", job["if"])
+            self.assertIn("!contains(inputs.tag, '-')", job["if"])
+            self.assertNotIn("secrets.", str(job))
 
     def test_actions_are_pinned_and_checkouts_do_not_retain_tokens(self):
         for name in ("checks.yml", "release.yml"):

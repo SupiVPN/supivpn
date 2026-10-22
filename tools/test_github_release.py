@@ -22,7 +22,9 @@ OID = "b" * 40
 RUN = {"id": 42, "run_attempt": 2, "path": ".github/workflows/checks.yml", "head_sha": C,
        "head_branch": V, "event": "push", "status": "completed", "conclusion": "success",
        "repository": {"full_name": "SupiVPN/supivpn"}, "head_repository": {"full_name": "SupiVPN/supivpn"}}
-SOURCE = {"LICENSE": (b"AGPL test fixture", 0o644), "Makefile": (b"all:\n", 0o644)}
+SOURCE = {"LICENSE": (b"AGPL test fixture", 0o644), "Makefile": (b"all:\n", 0o644),
+          "debian/changelog": (b"supivpn (0.0.0) UNRELEASED; urgency=medium\n", 0o644)}
+EPOCH = 1792684800
 
 
 def source_tar(changes=None):
@@ -41,6 +43,25 @@ def source_tar(changes=None):
     return buffer.getvalue()
 
 
+def debian_files(arch):
+    files = {name: raw for name, (raw, _) in SOURCE.items()}
+    files["debian/changelog"] = release.deb.changelog(files["debian/changelog"], V, EPOCH)
+    files["vendor/modules.txt"] = b"test module"
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:xz") as archive:
+        for name, raw in files.items():
+            info = tarfile.TarInfo("source/" + name)
+            info.size, info.mode = len(raw), 0o644
+            archive.addfile(info, io.BytesIO(raw))
+    raw = buffer.getvalue()
+    value = release.deb.version(V)
+    name = f"supivpn_{value}.tar.xz"
+    dsc = (f"Format: 3.0 (native)\nSource: supivpn\nVersion: {value}\nChecksums-Sha256:\n"
+           f" {a.sha(raw)} {len(raw)} {name}\n").encode()
+    return {filename: raw if filename == name else dsc if filename.endswith(".dsc")
+            else filename.encode() for filename in release.deb.filenames(V, arch)}
+
+
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(dir=Path(tempfile.gettempdir()).resolve())
@@ -49,6 +70,7 @@ class ReleaseTests(unittest.TestCase):
         files = fixture(self.root)
         self.sources = {name: raw for name, raw in files.items() if name not in a.BUILT_FILES}
         self.candidates = {}
+        self.debian = {}
         for arch in a.ARCHITECTURES:
             fixture(self.root, arch)
             target, digest = a.package(self.root, V, C, self.root / arch, arch=arch)
@@ -62,6 +84,8 @@ class ReleaseTests(unittest.TestCase):
                 record["source"] = {"filename": name, "sha256": a.sha(data[name])}
             data["candidate.json"] = json.dumps(record).encode()
             self.candidates[arch] = (data, record)
+            files = debian_files(arch)
+            self.debian[arch] = (files, {"assets": {name: a.sha(raw) for name, raw in files.items()}})
 
     def prepared(self, provenance=None):
         output = self.root / "prepared"
@@ -71,19 +95,73 @@ class ReleaseTests(unittest.TestCase):
                 patch.object(release, "select_run", return_value=RUN), \
                 patch.object(release.release_identity, "release_sources", return_value=self.sources), \
                 patch.object(source_archive, "source_files", return_value=SOURCE), \
-                patch.object(release, "fetch_candidate", side_effect=lambda run, commit, version, oid, arch: self.candidates[arch]), \
+                patch.object(release, "fetch_candidate", side_effect=lambda run, commit, version, oid, arch, debian=False:
+                             (self.debian if debian else self.candidates)[arch]), \
+                patch.object(release.deb, "commit_epoch", return_value=EPOCH), \
+                patch.object(release.deb, "verify_package"), \
                 patch.object(release, "verify_provenance", side_effect=provenance or self.check_provenance) as attest, \
                 patch.object(release.tag, "git", return_value=result(out=signed_tag(V, C, notes))), \
                 contextlib.redirect_stdout(io.StringIO()):
             release.prepare(V, output)
-        self.assertEqual(attest.call_count, 3)
+        self.assertEqual(attest.call_count, 13)
         return output
 
     def check_provenance(self, path, commit, version, run):
         self.assertEqual((commit, version, run), (C, V, RUN))
         expected = {name: raw for files, _ in self.candidates.values() for name, raw in files.items()
                     if name.endswith(".tar.gz")}
+        expected.update({name: raw for files, _ in self.debian.values() for name, raw in files.items()})
         self.assertEqual(path.read_bytes(), expected[path.name])
+
+    def test_debian_failure_never_reaches_signing_manifest(self):
+        def reject(path, *args):
+            if path.name.endswith(".deb"):
+                raise a.ValidationError("Debian provenance rejected")
+        with self.assertRaises(a.ValidationError):
+            self.prepared(reject)
+        self.assertFalse((self.root / "prepared/SHA256SUMS").exists())
+
+    def test_cross_architecture_shared_packages_must_match(self):
+        files, record = self.debian["amd64"]
+        name = next(n for n in files if n.endswith("_all.deb"))
+        files[name] = b"different shared package"
+        record["assets"][name] = a.sha(files[name])
+        with self.assertRaisesRegex(a.ValidationError, "Cross-architecture Debian"):
+            self.prepared(lambda *args: None)
+        self.assertFalse((self.root / "prepared/SHA256SUMS").exists())
+
+    def test_all_debian_assets_are_required_and_signed(self):
+        output = self.prepared()
+        metadata = release.checked_release(output, V)
+        for arch in a.ARCHITECTURES:
+            for name in release.deb.filenames(V, arch):
+                self.assertIn(name, metadata["assets"])
+                self.assertIn("  " + name + "\n", (output / "SHA256SUMS").read_text())
+        name = next(output.glob("*.deb"))
+        name.unlink()
+        with self.assertRaises(a.ValidationError):
+            release.checked_release(output, V)
+
+    def test_debian_zip_refuses_wrong_run_version_digest_and_extra_files(self):
+        files, _ = self.debian["arm64"]
+        record = {"format": 1, "repository": "SupiVPN/supivpn", "commit": C, "version": V,
+                  "tag": OID, "arch": "arm64", "run_id": 42, "run_attempt": 2,
+                  "assets": {name: a.sha(raw) for name, raw in files.items()}}
+        def zipped(items, metadata):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                for name, raw in items.items():
+                    archive.writestr(name, raw)
+                archive.writestr("candidate.json", json.dumps(metadata))
+            return output.getvalue()
+        release.debian_zip(zipped(files, record), "arm64", C, V, OID, RUN)
+        for key, value in (("commit", "d" * 40), ("tag", "d" * 40), ("version", "v99.0.0"),
+                           ("run_id", 1), ("run_attempt", 1), ("arch", "amd64"), ("assets", {})):
+            with self.subTest(key=key), self.assertRaises(a.ValidationError):
+                release.debian_zip(zipped(files, dict(record, **{key: value})), "arm64", C, V, OID, RUN)
+        for altered in (dict(files, **{"openvpn-test.deb": b"fixture"}), dict(files, **{next(iter(files)): b"tampered"})):
+            with self.assertRaises(a.ValidationError):
+                release.debian_zip(zipped(altered, record), "arm64", C, V, OID, RUN)
 
     def test_source_provenance_failure_stops_before_unpacking_or_preparing_manifest(self):
         def reject_source(path, *args):

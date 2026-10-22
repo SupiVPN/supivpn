@@ -66,8 +66,8 @@ def secret_subkey(records, policy):
     return usable[0]["fpr"]
 
 
-def verify(manifest, signature, policy, *, home=None, env=None):
-    a.regular(manifest, 8192)
+def verify(manifest, signature, policy, *, home=None, env=None, limit=8192):
+    a.regular(manifest, limit)
     a.regular(signature, 8192)
     args = ["gpg", "--batch", "--no-auto-key-retrieve"]
     if home is not None:
@@ -81,16 +81,33 @@ def verify(manifest, signature, policy, *, home=None, env=None):
         "Artifact signature invalid or unauthorized")
 
 
-def sign(manifest, policy):
+def verify_inline(manifest, signature, policy, *, home=None, env=None):
+    expected = a.regular(manifest, 65536)
+    a.regular(signature, 73728)
+    args = ["gpg", "--batch", "--no-auto-key-retrieve", "--no-auto-key-import"]
+    if home is not None:
+        args += ["--no-options", "--homedir", str(home)]
+    result = subprocess.run([*args, "--max-output", "65536", "--status-fd=2", "--decrypt", str(signature)],
+                            capture_output=True, timeout=30, env=env)
+    a.require(result.returncode == 0 and result.stdout == expected
+              and signatures.valid_signature(result.stderr.decode(), policy["release_signers"],
+                                             policy["artifact_signing_subkeys"]),
+              "APT inline signature invalid or unauthorized")
+
+
+def sign(manifest, policy, *, apt=False):
     private = os.environ.pop(KEY_ENV, "")
     passphrase = os.environ.pop(PASSPHRASE, "")
     a.require(0 < len(private) <= 65536 and private.startswith("-----BEGIN PGP PRIVATE KEY BLOCK-----")
               and private.count("-----BEGIN PGP ") == 1, "Configure the CI signing-subkey environment secret")
     a.require(0 < len(passphrase) <= 4096 and not any(c in passphrase for c in "\r\n\0"),
               "Configure the CI signing-passphrase environment secret")
-    a.regular(manifest, 8192)
-    target = manifest.with_name(manifest.name + ".asc")
+    a.regular(manifest, 65536 if apt else 8192)
+    a.require(not apt or manifest.name == "Release", "APT Release filename required")
+    target = manifest.with_name("Release.gpg" if apt else manifest.name + ".asc")
     a.require(not target.exists() and not target.is_symlink(), "Artifact signature already exists")
+    inline = manifest.with_name("InRelease")
+    a.require(not apt or (not inline.exists() and not inline.is_symlink()), "APT signature already exists")
     # Pass armored input and passphrase through pipes, not argv or child environments.
     # GnuPG's imported private subkey lives only in the temporary keyring.
     env = {k: v for k, v in os.environ.items()
@@ -119,12 +136,22 @@ def sign(manifest, policy):
                        "--local-user", key + "!", "--digest-algo", "SHA512",
                        "--armor", "--detach-sign", "--output", "-", str(manifest)],
                       (passphrase + "\n").encode())
-            passphrase = ""
             a.require(0 < len(raw) <= 8192 and raw.startswith(b"-----BEGIN PGP SIGNATURE-----"),
                       "Invalid artifact signature output")
             check = home / "signature.asc"
             check.write_bytes(raw)
-            verify(manifest, check, policy, home=home, env=env)
+            verify(manifest, check, policy, home=home, env=env, limit=65536 if apt else 8192)
+            if apt:
+                clear = run("apt-signing", ["--pinentry-mode", "loopback", "--passphrase-fd", "0",
+                            "--local-user", key + "!", "--digest-algo", "SHA512", "--armor",
+                            "--clearsign", "--output", "-", str(manifest)], (passphrase + "\n").encode())
+                a.require(0 < len(clear) <= 73728, "Invalid APT signature output")
+                check_inline = home / "InRelease"
+                check_inline.write_bytes(clear)
+                verify_inline(manifest, check_inline, policy, home=home, env=env)
+                with inline.open("xb") as stream:
+                    stream.write(clear)
+            passphrase = ""
             with target.open("xb") as stream:
                 stream.write(raw)
         finally:

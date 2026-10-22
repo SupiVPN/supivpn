@@ -28,7 +28,9 @@ Description: SupiVPN authorization controller and database migration CLI
 
 Package: supivpn
 Architecture: all
-Depends: ${misc:Depends}, supivpn-node (= ${binary:Version}), supivpn-controller (= ${binary:Version})
+Depends: ${misc:Depends}, supivpn-node (= ${binary:Version}), supivpn-controller (= ${binary:Version}), python3, openssl, curl
 Description: combined VPN node and authorization controller
  Installs matching versions of both SupiVPN components on one host.
- Configuration, database migration and service activation remain explicit.
+ Includes supivpn-setup for explicit first-time configuration of a combined
+ host with a separately installed PostgreSQL 18 server. Installation itself
+ never configures a VPN, runs migrations or starts services.
