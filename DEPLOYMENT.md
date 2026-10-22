@@ -31,10 +31,10 @@ Use a fresh, dedicated **Debian 13 amd64 or arm64** VM with systemd 257+,
   without configuring IPv6 reachability.
 
 The APT path needs no Go SDK, Docker, source checkout or GitHub account on the VM.
-**Publication status:** `apt.supivpn.com` must be enabled and populated by the
-first stable package release before these commands work. v0.5.0 and earlier
-have no `.deb` assets. Until that launch, use the
-[local build fallback](docs/DEBIAN_PACKAGING.md#build-and-check).
+The signed APT repository is available starting with
+[v0.6.0](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.0).
+v0.5.0 and earlier have no `.deb` assets. A
+[local build](docs/DEBIAN_PACKAGING.md#build-and-check) remains available.
 
 On the VM, enter a root Bash shell and install the prerequisites:
 

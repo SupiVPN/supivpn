@@ -134,8 +134,10 @@ carry embedded OpenPGP signatures; verify the signed checksum manifest first.
 Stable releases also populate [apt.supivpn.com](https://apt.supivpn.com);
 [DEPLOYMENT.md](../DEPLOYMENT.md#add-the-supivpn-repository) uses APT for installation.
 See [APT operations](APT_REPOSITORY.md) for Pages setup, signing, retention and recovery.
-**The first APT deployment is still pending; v0.5.0 and earlier have no `.deb`
-assets.** Preparation refuses missing packages, mismatched version/architecture,
+Debian packages and APT delivery start with
+[v0.6.0](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.0);
+v0.5.0 and earlier have no `.deb` assets.
+Preparation refuses missing packages, mismatched version/architecture,
 modified source, missing provenance or different shared assets across builds.
 
 ## Download and verify SupiVPN
