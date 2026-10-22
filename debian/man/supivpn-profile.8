@@ -1,0 +1,55 @@
+.\" Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+.\" SPDX-License-Identifier: AGPL-3.0-only
+.TH SUPIVPN-PROFILE 8 "October 2026" "SupiVPN" "System Administration"
+.SH NAME
+supivpn-profile \- initialize a wrapping key or create a VPN client profile
+.SH SYNOPSIS
+.B supivpn-profile
+.B \-init
+.BI \-server-key " file"
+.RI [ options ]
+.br
+.B supivpn-profile
+.BI \-out " file"
+.BI \-server-key " file"
+.BI \-template " file"
+.RI [ options ]
+.SH DESCRIPTION
+Explicitly initializes a tls-crypt-v2 server wrapping key, preserving an
+existing key, or issues a client profile into a new mode-0600 file.
+Profile contents are never written to standard output.
+.SH OPTIONS
+.TP
+.B \-init
+Initialize or validate the server wrapping key. Mutually exclusive with \-out.
+.TP
+.BI \-server-key " file"
+Wrapping key path. Default: /var/lib/supivpn/tls-crypt-v2-server.key.
+For the combined Debian installation, explicitly select
+/etc/supivpn/keys/tls-crypt-v2-server.key and follow the documented ownership rules.
+.TP
+.BI \-openvpn " file"
+Absolute OpenVPN executable path. Default: /usr/sbin/openvpn.
+.TP
+.BI \-template " file"
+Client template. Default: /etc/supivpn/client.ovpn.template.
+.TP
+.BI \-out " file"
+Create a new client profile at this path.
+.TP
+.BI \-secret-arn " arn"
+Use an AWS Secrets Manager cluster wrapping key. Only valid with \-init.
+This is an explicit external credential operation, not part of package setup.
+.TP
+.B \-h
+Show command-line help.
+.SH NOTES
+The initial implementation requires the tested OpenVPN Community 2.7.8.
+Package installation never invokes this command or creates keys.
+.SH SEE ALSO
+.BR supivpn (8),
+.BR openvpn (8)
+.br
+/usr/share/doc/supivpn-node/DEBIAN_PACKAGING.md.gz
+.br
+/usr/share/doc/supivpn-node/TLS_CRYPT_V2.md.gz

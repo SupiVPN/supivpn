@@ -1,0 +1,44 @@
+.\" Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+.\" SPDX-License-Identifier: AGPL-3.0-only
+.TH SUPIVPN 8 "October 2026" "SupiVPN" "System Administration"
+.SH NAME
+supivpn \- authorize OpenVPN sessions through SupiVPN
+.SH SYNOPSIS
+.B supivpn
+.BI \-config " file"
+.RI [ options ]
+.SH DESCRIPTION
+Runs the VPN node agent. The Debian service uses
+/etc/supivpn/node/agent.json and starts its paired OpenVPN service after
+the agent binds its listeners. A service readiness notification does not
+replace the HTTPS /readyz check for management and lease readiness.
+.SH OPTIONS
+.TP
+.BI \-config " file"
+Read JSON configuration. The standalone default is /etc/supivpn/config.json.
+.TP
+.B \-check-config
+Validate configuration without starting services.
+.TP
+.B \-operator-request
+Read a local user-session request from standard input and send it to the
+operator socket selected by the configuration. Requires local authorization.
+.TP
+.B \-learn-address
+Validate the source address supplied by the OpenVPN learn-address hook.
+This mode is intended for invocation by OpenVPN.
+.TP
+.B \-h
+Show command-line help.
+.SH FILES
+/usr/share/doc/supivpn-node/examples/agent.example.json
+.br
+/usr/share/doc/supivpn-node/DEBIAN_PACKAGING.md.gz
+.SH NOTES
+Use supivpn-node.service to start, stop or restart the node and OpenVPN pair.
+Installation never activates a VPN or modifies host networking.
+.SH SEE ALSO
+.BR supivpn-controller (8),
+.BR supivpn-profile (8),
+.BR systemctl (1),
+.BR openvpn (8)

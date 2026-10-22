@@ -71,6 +71,16 @@ compatibility review and integration tests. Follow the
 
 ## Test suites
 
+### Debian packages
+
+`make deb ARCH=arm64` or `ARCH=amd64` builds `supivpn-node`,
+`supivpn-controller`, `supivpn` and matching vendored source in a disposable
+Debian 13 builder. `make deb-test` additionally checks package contents, unit
+syntax and the package installation/removal lifecycle. Outputs stay under
+`local/debian/<arch>/`; nothing is installed on the development host.
+See [Debian packaging](docs/DEBIAN_PACKAGING.md) for prerequisites and the
+distinction between container checks and clean-VM acceptance.
+
 | Command | Checks |
 | --- | --- |
 | `make audit` | Local pre-commit file, secret-pattern, and repository language checks plus auditor tests; no Git or network access |

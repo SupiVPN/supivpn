@@ -1,0 +1,9 @@
+#!/bin/sh
+# Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+# SPDX-License-Identifier: AGPL-3.0-only
+set -eu
+# --no-start also suppresses debhelper's stop snippet. Stop only on removal.
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+    deb-systemd-invoke stop supivpn-node.service supivpn-openvpn.service
+fi
+#DEBHELPER#

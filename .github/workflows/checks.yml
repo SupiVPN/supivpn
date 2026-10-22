@@ -259,6 +259,33 @@ jobs:
       - name: Native OpenVPN interoperability and failover
         run: make test-openvpn
 
+  debian:
+    name: Debian packages (${{ matrix.arch }})
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build offline and check disposable package installation
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: make deb-test
+
   attest:
     name: Attest release candidates
     needs: [scope, build]
@@ -285,7 +312,7 @@ jobs:
 
   required:
     name: Required checks
-    needs: [scope, audit, tests, security, fuzz, build, openvpn, attest]
+    needs: [scope, audit, tests, security, fuzz, build, openvpn, debian, attest]
     if: always()
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 2
@@ -303,7 +330,7 @@ jobs:
           code = needs["scope"]["outputs"].get("code")
           assert code in {"true", "false"}, "Missing verification scope"
           expected = "success" if code == "true" else "skipped"
-          for job in ("tests", "security", "fuzz", "build", "openvpn"):
+          for job in ("tests", "security", "fuzz", "build", "openvpn", "debian"):
               assert needs[job]["result"] == expected, job + " did not satisfy the required checks"
           attest = os.environ["ATTEST_EXPECTED"]
           assert attest in {"true", "false"}, "Missing attestation scope"

@@ -1,0 +1,28 @@
+{
+  "logging": {"output": "stderr"},
+  "public_url": "https://login.example.test:8443",
+  "database_tls": {"mode": "verify-full", "ca_file": "/etc/supivpn/controller/database-ca.pem", "server_name": "database.example.test"},
+  "idp_metadata": "/etc/supivpn/controller/idp-metadata.xml",
+  "saml_groups_attribute": "groups",
+  "groups": [
+    {"name": "admins-vpn", "priority": 10, "max_connections_per_user": 2},
+    {"name": "engineers-production-vpn", "priority": 20, "session_seconds": 3600}
+  ],
+  "pending_seconds": 180,
+  "session_seconds": 43200,
+  "max_connections_per_user": 1,
+  "profile": {
+    "endpoint": "vpn.example.test",
+    "template_file": "/etc/supivpn/controller/client.ovpn.template",
+    "server_key_file": "/etc/supivpn/keys/tls-crypt-v2-server.key"
+  },
+  "vm": {
+    "listen": ":8443",
+    "tls_certificate": "/etc/supivpn/controller/crt.pem",
+    "tls_chain": "/etc/supivpn/controller/chain.pem",
+    "tls_private_key": "/etc/supivpn/controller/key.pem",
+    "agent_socket": "/run/supivpn-controller/agent.sock",
+    "agent_uid": 0,
+    "node_id": "node-a"
+  }
+}

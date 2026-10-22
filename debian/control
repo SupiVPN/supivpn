@@ -1,0 +1,34 @@
+Source: supivpn
+Section: net
+Priority: optional
+Maintainer: Stanislav Kazachkov <enot@supivpn.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://supivpn.com
+Vcs-Git: https://github.com/SupiVPN/supivpn.git
+Vcs-Browser: https://github.com/SupiVPN/supivpn
+
+Package: supivpn-node
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ca-certificates, openvpn (>= 2.7.8), openvpn (<< 2.7.9~), systemd (>= 257)
+Description: SupiVPN node agent and OpenVPN integration
+ Authorizes OpenVPN sessions through a SupiVPN controller. Includes the
+ profile/key bootstrap CLI and a dedicated pair of systemd services.
+ Installation leaves services disabled. Configuration and activation
+ are explicit operator actions.
+
+Package: supivpn-controller
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, adduser, ca-certificates, systemd (>= 257)
+Description: SupiVPN authorization controller and database migration CLI
+ Provides SAML login, group access policy and browser profile issuance.
+ Requires a reachable PostgreSQL 18 database, supplied separately.
+ Installation never starts services or runs database migrations.
+
+Package: supivpn
+Architecture: all
+Depends: ${misc:Depends}, supivpn-node (= ${binary:Version}), supivpn-controller (= ${binary:Version})
+Description: combined VPN node and authorization controller
+ Installs matching versions of both SupiVPN components on one host.
+ Configuration, database migration and service activation remain explicit.

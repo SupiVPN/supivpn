@@ -1,0 +1,22 @@
+#!/bin/sh
+# Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+# SPDX-License-Identifier: AGPL-3.0-only
+set -eu
+if [ "$1" = configure ]; then
+    if ! getent passwd supivpn-controller >/dev/null; then
+        if getent group supivpn-controller >/dev/null; then
+            echo 'Refusing an existing unrelated supivpn-controller group' >&2
+            exit 1
+        fi
+        adduser --system --group --no-create-home --home /nonexistent \
+            --shell /usr/sbin/nologin supivpn-controller
+    fi
+    # Never silently take over a pre-existing login or a privileged account.
+    getent passwd supivpn-controller | awk -F: \
+        '$3 > 0 && $3 < 1000 && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" {ok=1} END {exit !ok}'
+    test "$(id -gn supivpn-controller)" = supivpn-controller
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload
+    fi
+fi
+#DEBHELPER#

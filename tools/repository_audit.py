@@ -13,7 +13,7 @@ import stat
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = {"cmd", "internal", "examples", "testdata", "docs", "tools", "ci", ".github"}
+SOURCE_DIRS = {"cmd", "internal", "examples", "testdata", "docs", "tools", "ci", ".github", "debian"}
 LOCAL_DIRS = {".git", ".idea", ".codex", "__pycache__", ".terraform", ".terragrunt-cache"}
 LOCAL_FILES = {"AGENTS.md", "AGENT_NOTES.md", ".DS_Store"}
 LOCAL_PATTERNS = (
@@ -68,6 +68,22 @@ def permitted(path):
         return path.suffix in {".yml", ".yaml", ".md"} or path.name == "CODEOWNERS"
     if path.parts[0] == "tools":
         return path.suffix in {".py", ".md"}
+    if path.parts[0] == "debian":
+        return (path.as_posix() in {
+            "debian/control", "debian/changelog", "debian/rules", "debian/copyright",
+            "debian/source/format", "debian/supivpn-node.install",
+            "debian/supivpn-controller.install", "debian/supivpn-controller.postinst",
+            "debian/supivpn-node.postinst", "debian/supivpn-node.prerm", "debian/supivpn-controller.prerm",
+            "debian/supivpn.docs", "debian/supivpn-node.docs", "debian/supivpn-controller.docs",
+            "debian/supivpn-node.manpages", "debian/supivpn-controller.manpages",
+            "debian/supivpn-node.lintian-overrides", "debian/supivpn-controller.lintian-overrides",
+        } or (path.parent == Path("debian/man") and path.name in {
+            "supivpn.8", "supivpn-profile.8", "supivpn-controller.8", "supivpn-migrate.8",
+        }) or (path.parent == Path("debian/units") and path.name in {
+            "supivpn-node.service", "supivpn-openvpn.service", "supivpn-controller.service",
+        }) or (path.parent == Path("debian/examples") and path.name in {
+            "agent.example.json", "controller.example.json", "server.conf.example",
+        }))
     if path.parts[0] == "ci":
         return (path.suffix in {".py", ".sh", ".yaml", ".md", ".example", ".nft"}
                 or path.name in {"Dockerfile", ".dockerignore"} or path == Path("ci/signers.json"))

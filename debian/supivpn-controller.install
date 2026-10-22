@@ -1,0 +1,6 @@
+debian/bin/supivpn-controller usr/sbin
+debian/bin/supivpn-migrate usr/sbin
+debian/units/supivpn-controller.service usr/lib/systemd/system
+internal/postgres/migrations/*.sql usr/share/supivpn-controller/migrations
+debian/examples/controller.example.json usr/share/doc/supivpn-controller/examples
+examples/client.ovpn.example usr/share/doc/supivpn-controller/examples

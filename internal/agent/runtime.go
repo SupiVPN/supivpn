@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"supivpn/internal/saml"
+	"supivpn/internal/servicenotify"
 	"supivpn/internal/logging"
     "supivpn/internal/controller"
 )
@@ -212,6 +213,17 @@ func run(ctx context.Context, path string) error {
 		}
 	}()
 	a.logEvent("agent.https_ready", nil)
+	// systemd starts the paired OpenVPN unit only after these listeners exist.
+	// Bound the wait in managed mode so a failed OpenVPN launch cannot leave an
+	// apparently active agent waiting forever. Standalone behavior is unchanged.
+	if os.Getenv("NOTIFY_SOCKET") != "" {
+		if err := unix.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			return err
+		}
+	}
+	if _, err := servicenotify.Ready(); err != nil {
+		return err
+	}
 	conn, err := unix.Accept()
 	if err != nil {
 		return errors.New("stopped before OpenVPN connected")

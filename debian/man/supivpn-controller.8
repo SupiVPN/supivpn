@@ -1,0 +1,36 @@
+.\" Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+.\" SPDX-License-Identifier: AGPL-3.0-only
+.TH SUPIVPN-CONTROLLER 8 "October 2026" "SupiVPN" "System Administration"
+.SH NAME
+supivpn-controller \- serve SupiVPN login and authorization requests
+.SH SYNOPSIS
+.B supivpn-controller
+.BI \-config " file"
+.SH DESCRIPTION
+Runs the HTTPS controller and a private Unix agent listener using an already
+provisioned PostgreSQL database. Database migrations are a separate operation.
+The Debian service uses /etc/supivpn/controller/controller.json and the
+supivpn-controller system account.
+.SH OPTIONS
+.TP
+.BI \-config " file"
+Read JSON configuration. The standalone default is /etc/supivpn/controller.json.
+.TP
+.B \-h
+Show command-line help.
+.SH ENVIRONMENT
+.TP
+.B SUPIVPN_DATABASE_URL
+Database connection string for the restricted runtime identity.
+Keep it out of command-line arguments and logs. The Debian unit reads it from
+/etc/supivpn/controller/database.env, which must be root-owned with mode 0600.
+.SH FILES
+/usr/share/doc/supivpn-controller/examples/controller.example.json
+.br
+/usr/share/doc/supivpn-controller/DEBIAN_PACKAGING.md.gz
+.br
+/usr/share/doc/supivpn-controller/POSTGRES.md.gz
+.SH SEE ALSO
+.BR supivpn (8),
+.BR supivpn-migrate (8),
+.BR systemctl (1)

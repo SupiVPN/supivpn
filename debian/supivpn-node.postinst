@@ -1,0 +1,8 @@
+#!/bin/sh
+# Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+# SPDX-License-Identifier: AGPL-3.0-only
+set -eu
+if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload
+fi
+#DEBHELPER#
