@@ -142,6 +142,11 @@ or exclusive features.
 
 ## Deploying SupiVPN
 
+For the Debian 13 package layout, local `.deb` builds and service lifecycle, see
+[Debian packages and systemd services](docs/DEBIAN_PACKAGING.md). Packages are
+currently development builds; clean-host deployment acceptance and signed
+package delivery are still pending.
+
 1. Run `make build` or build a single component as described in [BUILD.md](BUILD.md).
 2. Prepare PostgreSQL and the owner/runtime/migrator roles; apply migrations
    before starting the controller.

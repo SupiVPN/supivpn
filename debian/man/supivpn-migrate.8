@@ -1,0 +1,45 @@
+.\" Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+.\" SPDX-License-Identifier: AGPL-3.0-only
+.TH SUPIVPN-MIGRATE 8 "October 2026" "SupiVPN" "System Administration"
+.SH NAME
+supivpn-migrate \- explicitly apply SupiVPN database migrations
+.SH SYNOPSIS
+.B supivpn-migrate
+.RI [ options ]
+.SH DESCRIPTION
+Applies the migrations embedded in this build using a separate database owner
+identity. Review schema compatibility and backups before invoking it.
+Package installation and controller startup never run this command.
+.SH OPTIONS
+.TP
+.BI \-config " file"
+Non-secret AWS migration configuration. Without it, use SUPIVPN_DATABASE_URL.
+.TP
+.BI \-expected-schema-sha256 " digest"
+Require the expected SQL source digest from provisioning.
+.TP
+.BI \-public-role " name"
+Pre-created restricted public database login.
+.TP
+.BI \-agent-role " name"
+Pre-created restricted agent database login.
+.TP
+.BI \-recovery-role " name"
+Pre-created restricted recovery database login.
+.TP
+.B \-h
+Show command-line help.
+.SH ENVIRONMENT
+.TP
+.B SUPIVPN_DATABASE_URL
+Database connection string for the migration owner identity.
+Supply it through a protected process environment, never command-line
+arguments or a committed file. Do not reuse it for the controller runtime.
+.SH FILES
+/usr/share/supivpn-controller/migrations/
+contains inspection copies of embedded SQL. Do not edit or apply these files
+individually.
+.SH SEE ALSO
+.BR supivpn-controller (8)
+.br
+/usr/share/doc/supivpn-controller/POSTGRES.md.gz

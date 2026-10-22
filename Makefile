@@ -53,13 +53,14 @@ tag: export SUPIVPN_TAG_COMMIT := $(value COMMIT)
 .PHONY: help setup all prepare build build-all security-binaries-all agent controller profile migrate lambda bootstrap \
  test test-saml test-security vet integration test-all check fuzz fuzz-xml fuzz-saml test-xmlsec test-openvpn test-connect \
  xmlsec-image openvpn-image postgres-start postgres-stop test-db-restart \
- security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag
+  security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag deb deb-test
 
 help:
 	@printf '%s\n' \
 	 'setup             Install project-local Python tools and download Go modules' \
 	 'build / all       Build Linux binaries for the host architecture; ARCH=arm64 or amd64 overrides it' \
 	 'build-all         Build both ARM64 and AMD64 into local/<arch>/' \
+	 'deb / deb-test    Build Debian 13 packages + corresponding source; optionally check package lifecycle; ARCH=arm64|amd64' \
 	 'ci-test-coverage  Ensure integration tags retain all ordinary Go source and test files' \
 	 'prepare           Source audit -> unit/race -> vet -> build + manifest' \
 	 'tag               Local GPG tag with automatic release notes; VERSION=vX.Y.Z[-rc.N] [COMMIT=main|<full SHA>]; no push' \
@@ -86,6 +87,12 @@ help:
 	 'Details: BUILD.md; artifacts: local/'
 
 all: build
+
+deb: | $(LOCAL)/go.mod
+	@$(PYTHON) -B tools/debian_packages.py --arch "$(ARCH)" --go "$(GO)" --docker "$(DOCKER)"
+
+deb-test: | $(LOCAL)/go.mod
+	@$(PYTHON) -B tools/debian_packages.py --arch "$(ARCH)" --go "$(GO)" --docker "$(DOCKER)" --test
 
 setup: | $(LOCAL)/go.mod
 	@test -x "$(LOCAL)/dev-venv/bin/python3" || python3 -m venv "$(LOCAL)/dev-venv"

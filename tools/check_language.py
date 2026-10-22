@@ -27,6 +27,8 @@ TEXT_SUFFIXES = {
     ".sql", ".yaml", ".yml", ".toml", ".txt", ".example", ".tfvars", ".nft",
 }
 TEXT_NAMES = {"Makefile", "LICENSE", ".gitignore", "go.mod", "go.sum", "Dockerfile"}
+TEXT_NAMES |= {"control", "changelog", "rules", "copyright", "format"}
+TEXT_SUFFIXES |= {".install", ".docs", ".postinst", ".prerm", ".manpages", ".lintian-overrides", ".8"}
 MAX_BYTES = 2 * 1024 * 1024
 
 

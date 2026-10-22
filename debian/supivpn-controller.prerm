@@ -1,0 +1,8 @@
+#!/bin/sh
+# Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+# SPDX-License-Identifier: AGPL-3.0-only
+set -eu
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+    deb-systemd-invoke stop supivpn-controller.service
+fi
+#DEBHELPER#

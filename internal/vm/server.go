@@ -21,6 +21,7 @@ import (
 
 	"supivpn/internal/agentapi"
 	"supivpn/internal/unixpeer"
+	"supivpn/internal/servicenotify"
 )
 
 type Config struct {
@@ -144,6 +145,9 @@ func Serve(ctx context.Context, c Config, public, agents http.Handler) error {
 		return err
 	}
 	defer local.Close()
+	if _, err := servicenotify.Ready(); err != nil {
+		return err
+	}
 	return ServeListeners(ctx, web, local, public, agents)
 }
 

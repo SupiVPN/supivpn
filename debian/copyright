@@ -1,0 +1,21 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: SupiVPN
+Source: https://github.com/SupiVPN/supivpn
+
+Files: cmd/* internal/* examples/* docs/* tools/* ci/* debian/* *.md Makefile go.mod go.sum
+Copyright: 2026 Stanislav Kazachkov (SupiVPN)
+License: AGPL-3.0-only
+ The full license is installed as LICENSE.gz alongside this file.
+ The corresponding source is available from the source location above.
+ Local package builds also produce a matching source archive including vendored
+ Go dependencies. Distribute that archive alongside any shared binary packages.
+ .
+ Dependency and Go runtime notices and license texts are installed as
+ THIRD_PARTY_NOTICES.md.gz and THIRD_PARTY_LICENSES.txt.gz.
+ Vendored dependency licenses remain in the corresponding source archive.
+
+Files: vendor/*
+Copyright: See the per-module copyright statements and THIRD_PARTY_NOTICES.md
+License: various
+ Each vendored module retains its own license and copyright files. The complete
+ license texts for linked dependencies are also in THIRD_PARTY_LICENSES.txt.

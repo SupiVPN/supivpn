@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+# Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+# SPDX-License-Identifier: AGPL-3.0-only
+
+export CGO_ENABLED = 0
+export GOTOOLCHAIN = local
+export GOWORK = off
+export GOPROXY = off
+export GOSUMDB = off
+export GOCACHE = $(CURDIR)/debian/.go-cache
+export GOARCH = $(shell dpkg-architecture -qDEB_HOST_ARCH)
+export GOOS = linux
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	@test "$$(go env GOVERSION)" = go1.27.3
+	@test -f vendor/modules.txt
+
+override_dh_auto_build:
+	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn ./cmd/supivpn
+	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn-profile ./cmd/supivpn-profile
+	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn-controller ./cmd/supivpn-controller
+	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn-migrate ./cmd/supivpn-migrate
+
+# Full runtime checks run in the project CI, independently of package building.
+override_dh_auto_test:
+
+override_dh_auto_clean:
+	rm -rf debian/bin debian/.go-cache
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start --no-stop-on-upgrade
+
+# The Go linker strips these pure Go binaries; there are no shared dependencies.
+override_dh_dwz:
+override_dh_strip:
+override_dh_shlibdeps:
+
+override_dh_compress:
+	dh_compress -Xexamples -Xmigrations

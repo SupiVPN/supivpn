@@ -70,7 +70,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", config["on"])
         self.assertTrue(any("apt-get install" in step.get("run", "") and "gnupg" in step["run"]
                             for step in config["jobs"]["audit"]["steps"]))
-        for name in ("tests", "build", "openvpn"):
+        for name in ("tests", "build", "openvpn", "debian"):
             self.assertEqual({x["runner"] for x in config["jobs"][name]["strategy"]["matrix"]["include"]},
                              {"ubuntu-24.04-arm", "ubuntu-24.04"})
         for name, job in config["jobs"].items():
@@ -112,7 +112,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_independent_checks_run_in_parallel_with_a_complete_final_gate(self):
         jobs = self.workflow("checks.yml")["jobs"]
-        executable = {"tests", "security", "fuzz", "build", "openvpn"}
+        executable = {"tests", "security", "fuzz", "build", "openvpn", "debian"}
         self.assertNotIn("needs", jobs["scope"])
         self.assertNotIn("needs", jobs["audit"])
         for name in executable:

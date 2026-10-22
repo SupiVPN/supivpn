@@ -1,0 +1,43 @@
+# Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+# SPDX-License-Identifier: AGPL-3.0-only
+[Unit]
+Description=SupiVPN authorization controller
+Documentation=https://github.com/SupiVPN/supivpn/blob/main/docs/DEBIAN_PACKAGING.md
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=supivpn-controller
+Group=supivpn-controller
+EnvironmentFile=/etc/supivpn/controller/database.env
+ExecStart=/usr/sbin/supivpn-controller -config /etc/supivpn/controller/controller.json
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=45
+TimeoutStopSec=30
+KillMode=control-group
+RuntimeDirectory=supivpn-controller
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
