@@ -9,12 +9,10 @@ import (
 	"bytes"
 	"compress/flate"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -33,7 +31,6 @@ import (
 	"time"
 
 	"supivpn/internal/controller"
-	"supivpn/internal/profile"
 	"supivpn/internal/saml"
 )
 
@@ -63,6 +60,15 @@ func vmCommand(t *testing.T, name string, args ...string) string {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	if err != nil {
+		if name == "supivpn-setup" {
+			// This helper emits fixed diagnostics and suppresses child output.
+			// Expose only its diagnostic line, never captured process output.
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.HasPrefix(line, "Setup failed: ") && len(line) < 200 {
+					t.Log(line)
+				}
+			}
+		}
 		// A command may handle generated passwords, profiles or one-time URLs.
 		t.Fatalf("VM command %s failed (output withheld): %v", filepath.Base(name), err)
 	}
@@ -162,50 +168,28 @@ func TestDebianVMPrepare(t *testing.T) {
 			t.Fatal("package installation started a service")
 		}
 	}
-	vmCommand(t, "install", "-d", "-m", "0755", "/etc/supivpn")
-	vmCommand(t, "install", "-d", "-m", "0700", "/etc/supivpn/node")
-	for _, dir := range []string{"/etc/supivpn/controller", "/etc/supivpn/keys"} {
-		vmCommand(t, "install", "-d", "-m", "0750", "-g", "supivpn-controller", dir)
+	// Only synthetic inputs are supplied to the installed operator setup command.
+	fixtures := "/opt/supivpn-test/setup-fixtures"
+	vmCommand(t, "install", "-d", "-m", "0700", fixtures)
+	ca := testVPNCertificateFor(t, fixtures, 48*time.Hour)
+	for dst, src := range map[string]string{"cert.pem": "crt.pem", "privkey.pem": "key.pem"} {
+		data, err := os.ReadFile(filepath.Join(fixtures, src))
+		if err != nil {
+			t.Fatal("missing synthetic certificate")
+		}
+		vmWrite(t, filepath.Join(fixtures, dst), data, 0600, "")
 	}
-	ca := testVPNCertificate(t, "/etc/supivpn/node")
-	vmWrite(t, "/etc/supivpn/node/chain.pem", ca, 0600, "")
+	vmWrite(t, filepath.Join(fixtures, "chain.pem"), ca, 0600, "")
+	vmWrite(t, "/usr/local/share/ca-certificates/supivpn-test.crt", ca, 0644, "")
+	vmCommand(t, "update-ca-certificates")
 	_, metadata := testIdP(t)
 	md, err := xml.Marshal(metadata)
 	if err != nil {
 		t.Fatal("cannot encode test IdP metadata")
 	}
-	vmWrite(t, "/etc/supivpn/node/idp-metadata.xml", md, 0600, "")
-	for _, name := range []string{"crt.pem", "key.pem", "chain.pem", "ca.pem", "idp-metadata.xml"} {
-		data, err := os.ReadFile("/etc/supivpn/node/" + name)
-		if err != nil {
-			t.Fatal("cannot copy generated fixture")
-		}
-		vmWrite(t, "/etc/supivpn/controller/"+name, data, 0640, "root:supivpn-controller")
-	}
-	issuer := profile.Issuer{OpenVPN: "/usr/sbin/openvpn"}
-	keyPath := "/etc/supivpn/keys/tls-crypt-v2-server.key"
-	vmCommand(t, "chmod", "0700", "/etc/supivpn/keys")
-	if err := issuer.EnsureServerKey(context.Background(), keyPath); err != nil {
-		t.Fatal("test wrapping-key generation failed")
-	}
-	vmCommand(t, "chown", "supivpn-controller:supivpn-controller", keyPath)
-	vmCommand(t, "chmod", "0750", "/etc/supivpn/keys")
-	uid := vmCommand(t, "id", "-u", "supivpn-controller")
-	controllerUID, err := strconv.Atoi(uid)
-	if err != nil || controllerUID <= 0 {
-		t.Fatal("invalid controller service identity")
-	}
-	agentConfig := vmJSON(t, "/usr/share/doc/supivpn-node/examples/agent.example.json")
-	agentConfig["public_url"] = "https://localhost:9443"
-	remote := agentConfig["remote_controller"].(map[string]any)
-	remote["controller_uid"], remote["public_url"] = controllerUID, "https://localhost:8443"
-	vmSaveJSON(t, "/etc/supivpn/node/agent.json", agentConfig, 0600, "")
-	controllerConfig := vmJSON(t, "/usr/share/doc/supivpn-controller/examples/controller.example.json")
-	controllerConfig["public_url"] = "https://localhost:8443"
-	controllerConfig["database_tls"] = map[string]any{"mode": "verify-full", "ca_file": "/etc/supivpn/controller/ca.pem", "server_name": "localhost"}
-	controllerConfig["profile"].(map[string]any)["endpoint"] = "localhost"
-	vmSaveJSON(t, "/etc/supivpn/controller/controller.json", controllerConfig, 0640, "root:supivpn-controller")
-	template, err := os.ReadFile("/usr/share/doc/supivpn-controller/examples/client.ovpn.example")
+	vmWrite(t, filepath.Join(fixtures, "idp.xml"), md, 0600, "")
+	templatePath := "/usr/share/supivpn/examples/client.ovpn.example"
+	template, err := os.ReadFile(templatePath)
 	if err != nil {
 		t.Fatal("missing installed client template")
 	}
@@ -214,14 +198,63 @@ func TestDebianVMPrepare(t *testing.T) {
 		t.Fatal("invalid packaged client template")
 	}
 	template = bytes.Join([][]byte{template[:start], []byte("<ca>\n"), ca, template[end:]}, nil)
-	vmWrite(t, "/etc/supivpn/controller/client.ovpn.template", template, 0640, "root:supivpn-controller")
-	server, err := os.ReadFile("/usr/share/doc/supivpn-node/examples/server.conf.example")
-	if err != nil {
-		t.Fatal("missing installed server example")
+	vmWrite(t, templatePath, template, 0644, "")
+	setup := map[string]any{
+		"hostname": "localhost", "certificate_directory": fixtures,
+		"idp_metadata_file": filepath.Join(fixtures, "idp.xml"),
+		"groups":            []string{"admins-vpn", "engineers-production-vpn"},
+		"admin_cidr":        "198.51.100.10/32", "database_name": "supivpn_test",
 	}
-	server = bytes.ReplaceAll(server, []byte("/etc/ssl/certs/ca-certificates.crt"), []byte("/etc/supivpn/node/ca.pem"))
-	vmWrite(t, "/etc/supivpn/node/openvpn.conf", server, 0600, "")
-	vmDatabase(t)
+	setupPath := filepath.Join(fixtures, "setup.json")
+	setup["hostname"] = "wrong.example.test"
+	vmSaveJSON(t, setupPath, setup, 0600, "")
+	if exec.Command("supivpn-setup", "init", "--config", setupPath).Run() == nil {
+		t.Fatal("setup accepted a certificate for another hostname")
+	}
+	if _, err := os.Stat("/etc/supivpn"); !os.IsNotExist(err) {
+		t.Fatal("rejected certificate left partial configuration")
+	}
+	setup["hostname"] = "localhost"
+	vmSaveJSON(t, setupPath, setup, 0600, "")
+	vmCommand(t, "supivpn-setup", "plan", "--config", setupPath)
+	if _, err := os.Stat("/etc/supivpn"); !os.IsNotExist(err) {
+		t.Fatal("plan modified the host")
+	}
+	vmCommand(t, "supivpn-setup", "init", "--config", setupPath)
+	for _, unit := range []string{"supivpn-controller", "supivpn-node", "supivpn-openvpn"} {
+		if vmPID(t, unit) != "0" {
+			t.Fatal("setup started the VPN before firewall review")
+		}
+	}
+	keyPath := "/etc/supivpn/keys/tls-crypt-v2-server.key"
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal("missing generated wrapping key")
+	}
+	if exec.Command("supivpn-setup", "init", "--config", setupPath).Run() == nil {
+		t.Fatal("setup accepted existing state")
+	}
+	after, err := os.ReadFile(keyPath)
+	if err != nil || !bytes.Equal(key, after) {
+		t.Fatal("repeated setup changed the key")
+	}
+	for _, path := range []string{"database.env", "migration.env"} {
+		info, err := os.Stat("/etc/supivpn/controller/" + path)
+		if err != nil || info.Mode().Perm() != 0600 {
+			t.Fatal("credentials are not private")
+		}
+	}
+	grants := vmCommand(t, "runuser", "-u", "postgres", "--", "psql", "-X", "-h", "/var/run/postgresql", "-p", "55433", "-d", "supivpn_test", "-Atc",
+		"SELECT has_database_privilege('supivpn_runtime','supivpn_test','CREATE'), has_database_privilege('supivpn_runtime','supivpn_test','TEMP'), pg_has_role('supivpn_runtime','supivpn_owner','MEMBER')")
+	if grants != "f|f|f" {
+		t.Fatal("runtime has database owner privileges")
+	}
+	vmCommand(t, "nft", "--check", "--file", "/etc/supivpn/firewall.nft")
+	// The network acceptance suite supplies its own network namespaces/rules.
+	// Do not apply the operator's external-firewall proposal to test SSH.
+	vmWrite(t, "/etc/supivpn/node/ca.pem", ca, 0600, "")
+	vmCommand(t, "supivpn-setup", "certificates")
+	t.Log("installed setup generated config, keys, restricted DB, migrations and a valid firewall; repeat init refused")
 }
 
 func TestDebianVMServices(t *testing.T) {
@@ -238,6 +271,7 @@ func TestDebianVMServices(t *testing.T) {
 	vmWait(t, "controller readiness", 30*time.Second, func() bool { return vmReady(client, 8443) })
 	vmCommand(t, "systemctl", "start", "supivpn-node")
 	vmWait(t, "node readiness and real OpenVPN", 45*time.Second, func() bool { return vmReady(client, 9443) })
+	vmCommand(t, "supivpn-setup", "check")
 	t.Log("controller and node are ready under installed systemd units")
 	vmCheckSandbox(t)
 	if !t.Run("signed-SAML-and-tunnel", func(t *testing.T) { vmTunnel(t, client, signer) }) {
@@ -259,9 +293,9 @@ func TestDebianVMServices(t *testing.T) {
 	}
 	vmCommand(t, "systemctl", "start", "supivpn-node")
 	vmWait(t, "manual start", 45*time.Second, func() bool { return vmReady(client, 9443) })
-	vmCommand(t, "systemctl", "enable", "supivpn-controller", "supivpn-node")
+	vmCommand(t, "systemctl", "enable", "postgresql@18-supivpn", "supivpn-controller", "supivpn-node")
 	t.Log("manual stop/start passed; services enabled for the separate cold-boot check")
-	for _, unit := range []string{"supivpn-controller", "postgresql@18-main"} {
+	for _, unit := range []string{"supivpn-controller", "postgresql@18-supivpn"} {
 		if !t.Run("outage-"+unit, func(t *testing.T) { vmOutageRecovery(t, client, signer, unit) }) {
 			t.FailNow()
 		}
@@ -320,12 +354,18 @@ func vmLoginUntil(t *testing.T, client *http.Client, signer *saml.ServiceProvide
 		t.Fatal("signed SAML callback failed")
 	}
 	defer callback.Body.Close()
-	if callback.StatusCode != status {
-		t.Fatalf("SAML callback returned %d, want %d", callback.StatusCode, status)
-	}
 	data, err = io.ReadAll(io.LimitReader(callback.Body, 1<<20))
 	if err != nil {
 		t.Fatal("cannot read authorized response")
+	}
+	if callback.StatusCode != status {
+		// Report fixed categories only; never print a response/profile/assertion.
+		if bytes.HasPrefix(data, []byte("VPN connection limit reached.")) {
+			t.Log("the previous connection still occupies the user's slot")
+		} else if bytes.HasPrefix(data, []byte("SSO refused.")) {
+			t.Log("the signed SAML response was refused")
+		}
+		t.Fatalf("SAML callback returned %d, want %d", callback.StatusCode, status)
 	}
 	return data
 }
@@ -372,59 +412,6 @@ func vmStartVPN(t *testing.T, client *http.Client, signer *saml.ServiceProvider)
 	t.Cleanup(func() { server.Close() })
 	go func() { _ = server.Serve(listener) }()
 	return &vmVPN{log: clientLog}
-}
-
-func vmDatabase(t *testing.T) {
-	t.Helper()
-	vmCommand(t, "install", "-d", "-m", "0700", "-o", "postgres", "-g", "postgres", "/etc/supivpn-test-db")
-	for _, name := range []string{"crt.pem", "key.pem"} {
-		b, err := os.ReadFile("/etc/supivpn/node/" + name)
-		if err != nil {
-			t.Fatal("missing generated database TLS fixture")
-		}
-		vmWrite(t, "/etc/supivpn-test-db/"+name, b, 0600, "postgres:postgres")
-	}
-	vmWrite(t, "/etc/postgresql/18/main/conf.d/supivpn-test.conf", []byte("listen_addresses = '127.0.0.1'\nssl = on\nssl_cert_file = '/etc/supivpn-test-db/crt.pem'\nssl_key_file = '/etc/supivpn-test-db/key.pem'\n"), 0644, "")
-	vmWrite(t, "/etc/postgresql/18/main/pg_hba.conf", []byte("local all postgres peer\nhostssl supivpn_test all 127.0.0.1/32 scram-sha-256\n"), 0640, "postgres:postgres")
-	vmCommand(t, "systemctl", "restart", "postgresql@18-main")
-	password := make([]byte, 32)
-	if _, err := rand.Read(password); err != nil {
-		t.Fatal("cannot generate disposable database password")
-	}
-	runtimePass := hex.EncodeToString(password)
-	if _, err := rand.Read(password); err != nil {
-		t.Fatal("cannot generate disposable migration password")
-	}
-	migrationPass := hex.EncodeToString(password)
-	sql := fmt.Sprintf(`CREATE ROLE supivpn_owner NOLOGIN NOINHERIT;
-CREATE ROLE supivpn_runtime LOGIN NOINHERIT PASSWORD '%s';
-CREATE ROLE supivpn_test_migrator LOGIN NOINHERIT PASSWORD '%s';
-GRANT supivpn_owner TO supivpn_test_migrator;
-CREATE DATABASE supivpn_test;
-REVOKE ALL ON DATABASE supivpn_test FROM PUBLIC;
-GRANT CONNECT, CREATE ON DATABASE supivpn_test TO supivpn_owner;
-GRANT CONNECT ON DATABASE supivpn_test TO supivpn_runtime, supivpn_test_migrator;
-\connect supivpn_test
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT USAGE, CREATE ON SCHEMA public TO supivpn_owner;
-CREATE SCHEMA supivpn AUTHORIZATION supivpn_owner;
-GRANT USAGE ON SCHEMA supivpn TO supivpn_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE supivpn_owner IN SCHEMA supivpn GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO supivpn_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE supivpn_owner IN SCHEMA supivpn GRANT USAGE, SELECT ON SEQUENCES TO supivpn_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE supivpn_owner IN SCHEMA public GRANT SELECT ON TABLES TO supivpn_runtime;
-`, runtimePass, migrationPass)
-	cmd := exec.Command("runuser", "-u", "postgres", "--", "psql", "-X", "-v", "ON_ERROR_STOP=1")
-	cmd.Stdin = strings.NewReader(sql)
-	if err := cmd.Run(); err != nil {
-		t.Fatal("disposable database bootstrap failed; output withheld")
-	}
-	dsn := "postgres://supivpn_test_migrator:" + migrationPass + "@127.0.0.1/supivpn_test?sslmode=verify-full&sslrootcert=/etc/supivpn/node/ca.pem&host=localhost"
-	cmd = exec.Command("/usr/sbin/supivpn-migrate")
-	cmd.Env = append(os.Environ(), "SUPIVPN_DATABASE_URL="+dsn)
-	if err := cmd.Run(); err != nil {
-		t.Fatal("installed migration CLI failed; output withheld")
-	}
-	vmWrite(t, "/etc/supivpn/controller/database.env", []byte("SUPIVPN_DATABASE_URL=postgres://supivpn_runtime:"+runtimePass+"@127.0.0.1/supivpn_test\n"), 0600, "")
 }
 
 func vmCheckSandbox(t *testing.T) {

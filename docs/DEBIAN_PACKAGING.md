@@ -9,7 +9,7 @@ repository. Container images below are disposable build/test environments;
 container deployment is outside the plan.
 
 For the operator walkthrough, start with [DEPLOYMENT.md](../DEPLOYMENT.md):
-fresh Debian, dependency installation, database/TLS/SAML configuration, service
+fresh Debian, dependency installation, one-file setup with `supivpn-setup`, service
 activation, profile download and tunnel checks. This document covers packaging
 implementation and automated acceptance.
 
@@ -19,7 +19,7 @@ implementation and automated acceptance.
 | --- | --- | --- |
 | `supivpn-node` | Agent, profile/key bootstrap CLI, dedicated agent and OpenVPN units | OpenVPN Community 2.7.8, CA certificates, systemd |
 | `supivpn-controller` | Controller, explicit migration CLI, matching SQL and profile example | CA certificates, systemd, a reachable PostgreSQL 18 database |
-| `supivpn` | Metapackage depending on both components at the same package version | Both component packages |
+| `supivpn` | Matching components, `supivpn-setup` and its configuration templates | Both components, Python 3, OpenSSL, curl; PostgreSQL 18 for setup |
 
 The controller package does not install OpenVPN or PostgreSQL. The node package
 does not require a local controller; AWS transport remains available. The local
@@ -93,8 +93,12 @@ The runner removes its own VM container on success or failure.
 The VM suite verifies:
 
 - Fresh installation leaves services stopped and not enabled.
-- The installed examples work with explicit migration, a restricted database
-  runtime identity, verified PostgreSQL TLS and authenticated Unix transport.
+- The installed `supivpn-setup` command creates consistent configuration, keys,
+  a dedicated PostgreSQL cluster, restricted roles and migrations. Plan leaves
+  the host unchanged; repeat initialization refuses to replace existing keys.
+  Generated firewall syntax and certificate refresh are checked before startup.
+- HTTPS readiness, verified PostgreSQL TLS and authenticated Unix transport work
+  under the installed systemd units. Runtime database privileges remain restricted.
 - Signed SAML profile download and VPN login assign the expected group address;
   ICMP and TCP traffic cross a real TUN device from a separate guest namespace.
 - Both crash orders recover the agent/OpenVPN pair; manual stop stays stopped.
@@ -126,12 +130,15 @@ pass. It records image and package digests and both boot IDs.
 Executables are installed in `/usr/sbin`, manuals in `/usr/share/man/man8`,
 units in `/usr/lib/systemd/system`,
 examples and licenses in `/usr/share/doc/<package>`, and inspection copies of SQL
-in `/usr/share/supivpn-controller/migrations`. SQL is also embedded in the migrator;
+in `/usr/share/supivpn-controller/migrations`. Setup templates are runtime data in
+`/usr/share/supivpn/examples`, so systems excluding documentation can still use
+the helper. SQL is also embedded in the migrator;
 never edit or execute the installed SQL files individually.
 
 Package installation creates the `supivpn-controller` system account with no login
 shell or home directory. It does not create active configuration or any keys.
-The examples must be copied and adapted by the operator.
+Configure a new combined host with the setup helper, or copy and adapt the
+examples for manual installation.
 
 | Operator-managed path | Owner and mode |
 | --- | --- |
@@ -139,6 +146,7 @@ The examples must be copied and adapted by the operator.
 | `/etc/supivpn/node` | `root:root`, 0700; files 0600 |
 | `/etc/supivpn/controller` | `root:supivpn-controller`, 0750; service-readable files 0640 |
 | `/etc/supivpn/controller/database.env` | `root:root`, 0600; read by systemd before switching UID |
+| `/etc/supivpn/controller/migration.env` after helper setup | `root:root`, 0600; separate migration identity |
 | `/etc/supivpn/keys` on a combined host | `root:supivpn-controller`, 0750 |
 | `/etc/supivpn/keys/tls-crypt-v2-server.key` on a combined host | `supivpn-controller:supivpn-controller`, 0600 |
 
@@ -146,7 +154,7 @@ The wrapping-key loader requires mode 0600. Bootstrap into a root-owned 0700
 directory using the explicit CLI key path; then apply the combined-host ownership
 above. The controller can read the key; its service filesystem is read-only.
 Root OpenVPN can read the same key. On a node-only host the key may remain root-owned.
-No package script generates, transfers, rotates or deletes working credentials.
+No maintainer script generates, transfers, rotates or deletes working credentials.
 
 The node unit creates `/run/supivpn` (0700) and persistent
 `/var/lib/supivpn-node` (0700). The controller creates its own private
@@ -155,6 +163,19 @@ directories are removed on stop. Never remove the generation journal to repair
 a failed restart; follow [recovery guidance](RECOVERY.md).
 
 ## Configuration and activation
+
+For a new combined host, `supivpn-setup` in the `supivpn` package automates
+configuration, key generation, restricted database roles and migrations from
+one setup JSON file. It creates a separate PostgreSQL `18/supivpn` cluster on
+loopback port 55433, leaving existing clusters untouched. `plan` is read-only;
+`init` is explicit and refuses existing SupiVPN files/state. Installation and
+upgrade maintainer scripts never call it. It prepares firewall rules for review
+and leaves SupiVPN services stopped. See [DEPLOYMENT.md](../DEPLOYMENT.md).
+
+The following paths also support [manual setup](DEPLOYMENT_MANUAL.md), a remote
+database, or independently installed component packages. Do not run `init` on
+an existing installation. The helper saves root-only runtime and migration
+credentials separately; neither belong in support output or source control.
 
 Use the examples under `/usr/share/doc/supivpn-node/examples/` and
 `/usr/share/doc/supivpn-controller/examples/`. In particular:

@@ -135,13 +135,18 @@ func writeTestFile(t *testing.T, path string, data []byte) {
 
 func testVPNCertificate(t *testing.T, dir string) []byte {
 	t.Helper()
+	return testVPNCertificateFor(t, dir, time.Hour)
+}
+
+func testVPNCertificateFor(t *testing.T, dir string, validFor time.Duration) []byte {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cert := &x509.Certificate{SerialNumber: big.NewInt(1),
 		Subject:   pkix.Name{CommonName: "SupiVPN ephemeral test CA"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(validFor),
 		IsCA: true, BasicConstraintsValid: true,
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}

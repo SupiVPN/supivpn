@@ -7,7 +7,7 @@ test "$(cat /proc/1/comm)" = systemd
 test ! -e /.dockerenv
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y --no-install-recommends curl ca-certificates liblzo2-2 liblz4-1 libcap-ng0 openssl iproute2 iputils-ping python3
+apt-get install -y --no-install-recommends curl ca-certificates liblzo2-2 liblz4-1 libcap-ng0 openssl iproute2 iputils-ping python3 nftables
 # The upstream PostgreSQL repository supports Debian 13 on both target CPUs.
 # This configuration exists only inside the disposable guest.
 install -d /usr/share/postgresql-common/pgdg
