@@ -160,8 +160,9 @@ def apt_public_key(public, policy):
         args = ["gpg", "--no-options", "--homedir", temp, "--batch", "--no-autostart", "--no-auto-key-retrieve"]
         result = subprocess.run([*args, "--import"], input=public, capture_output=True, timeout=30)
         a.require(result.returncode == 0, "APT public key import failed")
+        # GnuPG uses <> for string inequality; != compares numeric prefixes.
         result = subprocess.run([*args, "--armor", "--export-options", "export-minimal",
-                                 "--export-filter", "drop-subkey=fpr != " + policy["artifact_signing_subkeys"][0],
+                                 "--export-filter", "drop-subkey=fpr <> " + policy["artifact_signing_subkeys"][0],
                                  "--export", policy["release_signers"][0]], capture_output=True, timeout=30)
         a.require(result.returncode == 0 and 0 < len(result.stdout) <= 65536, "APT public key export failed")
         exported = result.stdout

@@ -21,6 +21,59 @@ import artifact_signing as signing
 import test_artifact_signing as keys
 
 
+# Public-only synthetic certificate; its disposable private keys were discarded.
+# Both subkey fingerprints start with letters, so GnuPG's numeric comparison
+# treats them as zero. No expiration keeps this regression independent of time.
+FILTER_PUBLIC_KEY = b"""-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEato2oRYJKwYBBAHaRw8BAQdAg/TBGrFG+ZikMtfTcNI7Uz9kmxGyv9GslBGK
+jplbG1S0KkFQVCBSZWdyZXNzaW9uIFRlc3QgPHRlc3RAZXhhbXBsZS5pbnZhbGlk
+PoiQBBMWCgA4FiEEyowdtSNHIGlreYDDxDdYppae1PUFAmraNqECGwEFCwkIBwIG
+FQoJCAsCBBYCAwECHgECF4AACgkQxDdYppae1PXyrAD/YE0hkag/06FEaYDAp/es
+hLwmVOtWI2UDk3blLR/mgN0BANqYuEj8w22nT9WtAvFoy6ArYKlMu2oS7Dd8bdgF
+hwgCuDMEato2oRYJKwYBBAHaRw8BAQdAwJ7VDanAOQa4Bi1fwGPcmX1CXRZ/Xn90
+QOv1BAD2CqWI7wQYFgoAIBYhBMqMHbUjRyBpa3mAw8Q3WKaWntT1BQJq2jahAhsC
+AIEJEMQ3WKaWntT1diAEGRYKAB0WIQS0uZz6DoJRKbCbKVYZXjYzA+I+DgUCato2
+oQAKCRAZXjYzA+I+Dn8qAQCRaO4yqiV1FpU4uofzDyTJFtRKYdkRUs3HrBtui45V
+ugD/XDmLO9O4HiVoi2j7w3+LE2XKz2CSg7R4Yr0moSngWwESVwD9EHNFh8W6b5S+
+zraodJ/GtbJJwwqTXrbZW6sY148AuaQA/ihNvV6iqVSlTt4uBaz3qeUhyMHx+69V
+msMw1UWfk0ULuDMEato2oRYJKwYBBAHaRw8BAQdA/RwGbmTuyNesb9trmXIe6L1Q
+GDIedggiSUM5A54yqlqI7wQYFgoAIBYhBMqMHbUjRyBpa3mAw8Q3WKaWntT1BQJq
+2jahAhsCAIEJEMQ3WKaWntT1diAEGRYKAB0WIQTHnhvubZvhHMHM8B0oZW1p5lvJ
+QQUCato2oQAKCRAoZW1p5lvJQQX9AQCfDNgkaOqr222Y69zzL7VS1qncPxl4q4ts
+4QoBucweHQD9E8y4fM+S1i0wrrnunKtcKfdddr8JD5QZF2HIeGjigQR9rwD/dQdF
+65iFQdTn0yLfr/xT99vwSFHBZ7LiFVHzuBssA8UBANTGahwWdBrF7FcaFKKAuZv8
+mvASGC/n+YuqSl96DIkE
+=eC0d
+-----END PGP PUBLIC KEY BLOCK-----
+"""
+FILTER_PRIMARY = "CA8C1DB5234720696B7980C3C43758A6969ED4F5"
+FILTER_SUBKEYS = ("B4B99CFA0E825129B09B2956195E363303E23E0E",
+                  "C79E1BEE6D9BE11CC1CCF01D28656D69E65BC941")
+
+
+@unittest.skipUnless(shutil.which("gpg"), "GnuPG required")
+class PublicKeyTests(unittest.TestCase):
+    def test_selects_exact_subkey_when_numeric_fingerprints_collide(self):
+        for selected in FILTER_SUBKEYS:
+            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as home:
+                policy = {"release_signers": [FILTER_PRIMARY], "artifact_signing_subkeys": [selected]}
+                public = repo.apt_public_key(FILTER_PUBLIC_KEY, policy)
+                result = subprocess.run(
+                    ["gpg", "--no-options", "--homedir", home, "--batch", "--no-autostart",
+                     "--with-colons", "--show-keys"], input=public, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0)
+                fingerprints = [line.split(":")[9] for line in result.stdout.decode().splitlines()
+                                if line.startswith("fpr:")]
+                self.assertEqual(fingerprints, [FILTER_PRIMARY, selected])
+
+    def test_missing_primary_or_subkey_is_refused(self):
+        for primary, subkey in (("A" * 40, FILTER_SUBKEYS[0]), (FILTER_PRIMARY, "D" * 40)):
+            with self.subTest(primary=primary, subkey=subkey), self.assertRaises(a.ValidationError):
+                repo.apt_public_key(FILTER_PUBLIC_KEY,
+                                    {"release_signers": [primary], "artifact_signing_subkeys": [subkey]})
+
+
 def record(version, *, packages=True, **changes):
     return dict(tag_name=version, draft=False, prerelease=False,
                 assets=[{"name": name} for name in (repo.package_names(version)
