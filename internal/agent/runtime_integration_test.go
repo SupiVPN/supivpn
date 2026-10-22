@@ -38,10 +38,21 @@ import (
 type testVMController struct {
 	browser, agent *http.Client
 	endpoint       string
+	socket         string
 	stop           func()
 }
 
 func serveRuntimeVM(t *testing.T, app *controlruntime.Application) *testVMController {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "supivpn-run-")
+	if err != nil {
+		t.Fatal("test directory failed")
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return serveRuntimeVMAt(t, app, filepath.Join(dir, "agent.sock"))
+}
+
+func serveRuntimeVMAt(t *testing.T, app *controlruntime.Application, socket string) *testVMController {
 	t.Helper()
 	seed := httptest.NewTLSServer(http.NotFoundHandler())
 	client := seed.Client()
@@ -51,16 +62,9 @@ func serveRuntimeVM(t *testing.T, app *controlruntime.Application) *testVMContro
 	if err != nil {
 		t.Fatal("test HTTPS listener failed")
 	}
-	dir, err := os.MkdirTemp("", "supivpn-run-")
-	if err != nil {
-		web.Close()
-		t.Fatal("test directory failed")
-	}
-	socket := filepath.Join(dir, "agent.sock")
 	local, err := vm.ListenAgent(socket, uint32(os.Geteuid()), "runtime-node")
 	if err != nil {
 		web.Close()
-		os.RemoveAll(dir)
 		t.Fatal("test Unix listener failed")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -72,7 +76,7 @@ func serveRuntimeVM(t *testing.T, app *controlruntime.Application) *testVMContro
 	client.Timeout = 5 * time.Second
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	stopped := false
-	result := &testVMController{browser: client, agent: &http.Client{Transport: transport, Timeout: 5 * time.Second}, endpoint: "https://" + web.Addr().String()}
+	result := &testVMController{browser: client, agent: &http.Client{Transport: transport, Timeout: 5 * time.Second}, endpoint: "https://" + web.Addr().String(), socket: socket}
 	result.stop = func() {
 		if stopped {
 			return
@@ -89,7 +93,6 @@ func serveRuntimeVM(t *testing.T, app *controlruntime.Application) *testVMContro
 		case <-time.After(7 * time.Second):
 			t.Error("controller shutdown timed out")
 		}
-		os.RemoveAll(dir)
 	}
 	t.Cleanup(result.stop)
 	return result
@@ -205,11 +208,7 @@ func testRuntimeSAML(t *testing.T, rest bool, prefix string) {
 			// Exercise the real agent HTTP client and management bridge, including
 			// after the controller is replaced below. Unix peer auth is the VM
 			// alternative to the separately tested EC2 SigV4 transport.
-			client, err := agentclient.New("https://controller.test", agentRoundTrip(func(r *http.Request) (*http.Response, error) {
-				copy := r.Clone(r.Context())
-				copy.URL.Scheme, copy.URL.Host = "http", "controller"
-				return server.agent.Transport.RoundTrip(copy)
-			}), nil)
+			client, err := agentclient.NewUnix(server.socket, uint32(os.Geteuid()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -273,7 +272,7 @@ func testRuntimeSAML(t *testing.T, rest bool, prefix string) {
 			server.stop()
 			app.Close()
 			app = open()
-			server = serveRuntimeVM(t, app)
+			server = serveRuntimeVMAt(t, app, server.socket)
 			if tc.reverse {
 				req, _ := http.NewRequest("POST", server.endpoint+prefix+"/saml/acs", strings.NewReader(body))
 				req.Host = fixture.origin.Host

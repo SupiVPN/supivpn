@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"time"
 
 	"supivpn/internal/agentapi"
@@ -23,21 +24,52 @@ import (
 )
 
 type remoteConfig struct {
-	AgentURL       string `json:"agent_url"`
-	PublicURL      string `json:"public_url"`
-	Region         string `json:"region"`
-	NodeID         string `json:"node_id"`
-	StateDirectory string `json:"state_directory"`
+	Transport      string  `json:"transport,omitempty"`
+	AgentSocket    string  `json:"agent_socket,omitempty"`
+	ControllerUID  *uint32 `json:"controller_uid,omitempty"`
+	AgentURL       string  `json:"agent_url"`
+	PublicURL      string  `json:"public_url"`
+	Region         string  `json:"region"`
+	NodeID         string  `json:"node_id"`
+	StateDirectory string  `json:"state_directory"`
 }
 
 func (r *remoteConfig) validate(c config) error {
-	if !agentclient.ValidURL(r.AgentURL, false) || !agentclient.ValidURL(r.PublicURL, true) ||
-		!agentapi.ValidNode(r.NodeID) || !regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`).MatchString(r.Region) ||
+	if !agentclient.ValidURL(r.PublicURL, true) || !agentapi.ValidNode(r.NodeID) ||
 		!filepath.IsAbs(r.StateDirectory) || filepath.Clean(r.StateDirectory) == filepath.Dir(c.ManagementSocket) ||
 		c.SAMLGroupsAttribute == "" {
-		return errors.New("remote_controller requires HTTPS URLs, node_id, region, persistent state_directory and group pools")
+		return errors.New("remote_controller requires an HTTPS public_url, node_id, persistent state_directory and group pools")
+	}
+	switch r.Transport {
+	case "", "aws":
+		if !agentclient.ValidURL(r.AgentURL, false) || !regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`).MatchString(r.Region) || r.AgentSocket != "" || r.ControllerUID != nil {
+			return errors.New("AWS controller transport requires agent_url and region, without Unix settings")
+		}
+	case "unix":
+		if !agentclient.ValidSocketPath(r.AgentSocket) || r.ControllerUID == nil || r.AgentURL != "" || r.Region != "" ||
+			filepath.Clean(r.StateDirectory) == filepath.Dir(r.AgentSocket) {
+			return errors.New("Unix controller transport requires agent_socket, controller_uid and separate persistent state, without AWS settings")
+		}
+	default:
+		return errors.New("unknown controller transport")
 	}
 	return nil
+}
+
+func (r *remoteConfig) client() (*agentclient.Client, string, error) {
+	if r.Transport == "unix" {
+		if r.ControllerUID == nil {
+			return nil, "", errors.New("controller_uid is required")
+		}
+		api, err := agentclient.NewUnix(r.AgentSocket, *r.ControllerUID)
+		// Bind durable generations to both the socket and authenticated server UID.
+		return api, "unix:" + r.AgentSocket + "#uid=" + strconv.FormatUint(uint64(*r.ControllerUID), 10), err
+	}
+	if r.Transport != "" && r.Transport != "aws" {
+		return nil, "", errors.New("unknown controller transport")
+	}
+	api, err := agentclient.New(r.AgentURL, nil, agentclient.EC2Signer(r.Region))
+	return api, r.AgentURL, err
 }
 
 type remoteJob struct {
@@ -79,11 +111,11 @@ func (a *agent) startRemote(ctx context.Context) (func(), error) {
 		a.logEvent("session.unlimited_configured", nil)
 	}
 	cfg := a.config.RemoteController
-	api, err := agentclient.New(cfg.AgentURL, nil, agentclient.EC2Signer(cfg.Region))
+	api, endpoint, err := cfg.client()
 	if err != nil {
 		return nil, err
 	}
-	journal, err := agentclient.OpenJournal(cfg.StateDirectory, cfg.NodeID, cfg.AgentURL)
+	journal, err := agentclient.OpenJournal(cfg.StateDirectory, cfg.NodeID, endpoint)
 	if err != nil {
 		api.Close()
 		return nil, err
@@ -96,13 +128,13 @@ func (a *agent) startRemote(ctx context.Context) (func(), error) {
 		cleanup()
 		return nil, err
 	}
-	a.remote = &remoteAgent{api: api, node: cfg.NodeID, generation: generation, publicURL: cfg.PublicURL}
 	started := a.now()
 	if _, err := api.Call(startup, "heartbeat", agentclient.Request{Generation: generation}); err != nil ||
 		!a.now().Before(started.Add(40*time.Second)) {
 		cleanup()
 		return nil, errors.New("controller lease unavailable")
 	}
+	a.remote = &remoteAgent{api: api, node: cfg.NodeID, generation: generation, publicURL: cfg.PublicURL}
 	a.remote.leaseUntil = started.Add(40 * time.Second)
 	a.remote.heartbeatDue = started.Add(15 * time.Second)
 	a.logEvent("controller.ready", nil)

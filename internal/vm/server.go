@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"supivpn/internal/agentapi"
+	"supivpn/internal/unixpeer"
 )
 
 type Config struct {
@@ -77,7 +78,7 @@ func ListenAgent(path string, uid uint32, node string) (net.Listener, error) {
 	}
 	dir := filepath.Dir(path)
 	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 || !ownedByCurrentUser(info) {
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 || !unixpeer.OwnedBy(info, uint32(os.Geteuid())) {
 		return nil, errors.New("agent socket parent requires controller ownership and mode 0700")
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -107,7 +108,7 @@ func (l *agentListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		uid, err := peerUID(conn)
+		uid, err := unixpeer.UID(conn)
 		if err != nil || uid != l.uid {
 			conn.Close()
 			continue

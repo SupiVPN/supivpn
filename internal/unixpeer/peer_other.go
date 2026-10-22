@@ -4,7 +4,7 @@
 
 //go:build !linux && !darwin
 
-package vm
+package unixpeer
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-func ownedByCurrentUser(os.FileInfo) bool { return false }
-func peerUID(*net.UnixConn) (uint32, error) {
+func OwnedBy(os.FileInfo, uint32) bool { return false }
+func UID(*net.UnixConn) (uint32, error) {
 	return 0, errors.New("unsupported Unix peer credentials")
 }

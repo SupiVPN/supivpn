@@ -25,16 +25,16 @@ import (
 )
 
 type Request struct {
-	IncludeUsername *bool `json:"include_username,omitempty"`
-    IncludeSubject *bool `json:"include_subject,omitempty"`
-	Ready *bool `json:"ready,omitempty"`
-	Generation string `json:"generation"`
-	Previous   string `json:"previous_generation,omitempty"`
-	CID        *int64 `json:"cid,omitempty"`
-	KID        *int64 `json:"kid,omitempty"`
-	Ticket     string `json:"ticket,omitempty"`
-	DecisionID string `json:"decision_id,omitempty"`
-	Outcome    string `json:"outcome,omitempty"`
+	IncludeUsername *bool  `json:"include_username,omitempty"`
+	IncludeSubject  *bool  `json:"include_subject,omitempty"`
+	Ready           *bool  `json:"ready,omitempty"`
+	Generation      string `json:"generation"`
+	Previous        string `json:"previous_generation,omitempty"`
+	CID             *int64 `json:"cid,omitempty"`
+	KID             *int64 `json:"kid,omitempty"`
+	Ticket          string `json:"ticket,omitempty"`
+	DecisionID      string `json:"decision_id,omitempty"`
+	Outcome         string `json:"outcome,omitempty"`
 }
 
 type API interface {
@@ -72,8 +72,9 @@ func ValidURL(raw string, public bool) bool {
 		(u.Path == "" || public && u.Path == "/supivpn")
 }
 
-// New also supports an explicitly supplied transport (e.g. a Unix socket in the
-// colocated deployment). Redirects never receive signed requests or login tickets.
+// New creates an HTTPS client with optional request signing and transport.
+// Redirects never receive signed requests or login tickets. Use NewUnix for a
+// colocated controller with kernel peer authentication.
 func New(endpoint string, transport http.RoundTripper, sign Sign) (*Client, error) {
 	if !ValidURL(endpoint, false) {
 		return nil, errors.New("agent API requires an HTTPS origin")
@@ -86,10 +87,14 @@ func New(endpoint string, transport http.RoundTripper, sign Sign) (*Client, erro
 			MaxIdleConns: 2, MaxIdleConnsPerHost: 2, IdleConnTimeout: 60 * time.Second,
 		}
 	}
+	return newClient(endpoint, transport, sign), nil
+}
+
+func newClient(endpoint string, transport http.RoundTripper, sign Sign) *Client {
 	return &Client{endpoint: endpoint, sign: sign, http: &http.Client{
 		Transport: transport, Timeout: 6 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}, nil
+	}}
 }
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 
