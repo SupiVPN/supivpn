@@ -7,15 +7,22 @@ For the shorter, automated path, start with [DEPLOYMENT.md](../DEPLOYMENT.md).
 This reference describes the individual steps for an operator-managed installation.
 It uses PostgreSQL `18/main` on port 5432; the setup helper instead creates
 `18/supivpn` on port 55433. Do not mix these database procedures.
+For policy choices rather than installation steps, see the
+[configuration options](../DEPLOYMENT.md#choose-your-access-policy) and
+[paired group/pool examples](GROUPS.md#selection-and-policy-example).
 
 This guide takes a fresh **Debian 13** server to a SAML-authenticated VPN using
 the `supivpn` metapackage, `supivpn-node`, `supivpn-controller` and systemd.
 PostgreSQL 18, the controller and the VPN node share one host. The agent talks
 to the controller over a private Unix socket; no AWS account is needed.
+This is the same minimal evaluation deployment as the short guide, with manual
+installation steps. Production deployment documentation and IaC for an
+HA active-active cluster are next on the roadmap.
+Review the [architecture limits](../DEPLOYMENT.md#architecture-limits-to-plan-for),
+including the loss of existing tunnels and change of VPN IP on failover to another node.
 
-**Evaluation status:** use a release containing Debian assets, or build locally
-until the first such release is published. The [APT repository](APT_REPOSITORY.md)
-is prepared for first publication; the short guide uses APT after that launch.
+**Evaluation status:** signed Debian assets and the [APT repository](APT_REPOSITORY.md)
+are available starting with v0.6.0; the short guide uses APT.
 The shipped VPN client template validates
 the certificate chain, validity and server purpose, but does **not** verify the
 server DNS name. Required DNS SAN verification in OpenVPN Connect remains

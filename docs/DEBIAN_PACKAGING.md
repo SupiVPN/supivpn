@@ -5,8 +5,8 @@ Licensed under AGPL-3.0-only. See [LICENSE](../LICENSE) and [COPYRIGHT.md](../CO
 
 These packages target Debian 13 with systemd 257 or later, on `amd64` and `arm64`.
 The release workflow delivers `.deb` assets through GitHub Releases with signed
-checksums and build provenance. The stable [APT repository](APT_REPOSITORY.md) is prepared for GitHub Pages;
-its first publication is pending.
+checksums and build provenance. The stable [APT repository](APT_REPOSITORY.md)
+is published at `https://apt.supivpn.com`, starting with v0.6.0.
 Container images below are disposable build/test environments;
 container deployment is outside the plan.
 
@@ -195,6 +195,16 @@ loopback port 55433, leaving existing clusters untouched. `plan` is read-only;
 `init` is explicit and refuses existing SupiVPN files/state. Installation and
 upgrade maintainer scripts never call it. It prepares firewall rules for review
 and leaves SupiVPN services stopped. See [DEPLOYMENT.md](../DEPLOYMENT.md).
+
+The optional `database` block selects a pre-provisioned remote PostgreSQL 18
+writer and requires `postgresql-client-18`, without creating or managing a local
+cluster. It enforces verified TLS, separate restricted runtime/migration logins
+and an empty database before applying migrations. This helper extension is
+pending release after v0.6.0. See [remote setup and existing-data moves](REMOTE_DATABASE.md).
+`make test-setup-db ARCH=arm64` (or `amd64`) exercises real PostgreSQL TLS,
+role restrictions, refusal cases, migrations and DSN escaping in a disposable
+container without external networking. CI runs it on both architectures.
+It does not replace real systemd/VM or provider-network acceptance.
 
 The following paths also support [manual setup](DEPLOYMENT_MANUAL.md), a remote
 database, or independently installed component packages. Do not run `init` on

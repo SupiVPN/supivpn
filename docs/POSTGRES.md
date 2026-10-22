@@ -8,6 +8,10 @@ on October 9, 2026, including TLS reconnection after a real test-server restart.
 See [DEPENDENCY_UPGRADE.md](DEPENDENCY_UPGRADE.md).
 VM and Lambda controllers use the same backend.
 
+For Debian operators, see [PostgreSQL outside the VPN VM](REMOTE_DATABASE.md):
+private networking, verified TLS, separate identities, first-time setup and a
+controlled move of an existing database.
+
 ## Contract
 
 `Store` implements `controller.Backend`; HTTP/SAML logic is shared with SupiVPN.

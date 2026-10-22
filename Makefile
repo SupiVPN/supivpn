@@ -53,7 +53,7 @@ tag: export SUPIVPN_TAG_COMMIT := $(value COMMIT)
 .PHONY: help setup all prepare build build-all security-binaries-all agent controller profile migrate lambda bootstrap \
  test test-saml test-security vet integration test-all check fuzz fuzz-xml fuzz-saml test-xmlsec test-openvpn test-connect \
  xmlsec-image openvpn-image postgres-start postgres-stop test-db-restart \
-  security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag deb deb-test deb-vm-test
+  security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag deb deb-test deb-vm-test test-setup-db
 
 help:
 	@printf '%s\n' \
@@ -62,6 +62,7 @@ help:
 	 'build-all         Build both ARM64 and AMD64 into local/<arch>/' \
 	 'deb / deb-test    Build Debian 13 packages + corresponding source; optionally check package lifecycle; ARCH=arm64|amd64' \
 	 'deb-vm-test       Build/check packages, then boot disposable Debian 13 with real systemd and VPN traffic' \
+ 'test-setup-db     Check remote setup against isolated PostgreSQL 18 with real TLS and migrations' \
 	 'ci-test-coverage  Ensure integration tags retain all ordinary Go source and test files' \
 	 'prepare           Source audit -> unit/race -> vet -> build + manifest' \
 	 'tag               Local GPG tag with automatic release notes; VERSION=vX.Y.Z[-rc.N] [COMMIT=main|<full SHA>]; no push' \
@@ -147,6 +148,14 @@ profile:
 
 migrate:
 	@cd "$(ROOT)" && $(LINUX) $(GO) build $(BUILD_FLAGS) -o "$(BUILD_DIR)/supivpn-migrate" ./cmd/supivpn-migrate
+
+test-setup-db: migrate
+	@$(DOCKER) build --platform linux/$(ARCH) -t "supivpn-setup-db-test:$(ARCH)" "$(ROOT)/ci/debian/remote-database"
+	@$(DOCKER) run --rm --platform linux/$(ARCH) --network none --security-opt no-new-privileges \
+	 --env SUPIVPN_SETUP_DB_TEST=1 \
+	 --mount "type=bind,source=$(ROOT)/tools/debian_setup.py,target=/test/debian_setup.py,readonly" \
+	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/supivpn-migrate,target=/usr/sbin/supivpn-migrate,readonly" \
+	 "supivpn-setup-db-test:$(ARCH)"
 
 bootstrap:
 	@cd "$(ROOT)" && $(LINUX) $(GO) build $(BUILD_FLAGS) -tags=lambda.norpc -o "$(BUILD_DIR)/bootstrap" ./cmd/supivpn-lambda
