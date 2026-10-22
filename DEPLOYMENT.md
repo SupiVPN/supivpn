@@ -7,6 +7,12 @@ One Debian 13 VM, three `.deb` packages, one setup file. The `supivpn` package
 installs both components and provides `supivpn-setup` to configure the controller,
 node and local PostgreSQL 18 database. Services run directly under systemd.
 
+This is the **minimal deployment on a single VM**, intended for evaluation and
+initial validation. Production deployment documentation and infrastructure as
+code (IaC) are next on the roadmap, including an **HA active-active cluster**.
+The [existing cluster capabilities](docs/HA.md) describe the runtime and network
+requirements; the production guide and IaC are not delivered by this walkthrough.
+
 **Evaluation status:** the shipped VPN client template verifies the certificate
 chain but does not yet enforce the server DNS name.
 [DNS SAN verification](docs/TLS_CRYPT_V2.md#planned-dns-san-verification)
@@ -15,6 +21,54 @@ remains a production blocker. The helper does not remove that limitation.
 The short path below establishes a split tunnel and a ping to the VPN gateway.
 Private-network access is an explicit follow-up. Client Internet traffic and DNS
 continue through the client's normal connection.
+
+## Choose your access policy
+
+The setup file is a starting point, not the full runtime configuration.
+These capabilities are already available; choose the policy you need before
+opening access to private resources:
+
+| What you want | Where to configure it and read more |
+| --- | --- |
+| Choose which group wins when a user belongs to several | Explicit numeric priorities in controller `groups` and agent `group_pools`. [Selection rules and paired JSON examples](docs/GROUPS.md#selection-and-policy-example). One group is selected; permissions are not combined. |
+| Give groups different address capacity | One or several ordered `cidrs` per group, with independently sized, non-overlapping pools. [Pool rules](docs/IDENTITY_PROVIDER.md#pools) and [address planning](docs/HA.md#node-count-and-group-expansion). Equal pools are only a setup-helper default. |
+| Limit simultaneous connections or session duration | Global defaults and per-group `max_connections_per_user` / `session_seconds`. [Session policy](docs/SESSIONS.md#policy). Connection counts span nodes and groups; a signed IdP deadline can shorten a session. |
+| Let different groups reach different private services | Client routes plus firewall/ACL rules based on the assigned group CIDRs. [Worked routed-network example](docs/DEPLOYMENT_MANUAL.md#10-add-access-to-a-private-network). A route alone does not grant access. |
+| Send Internet traffic or DNS through the VPN | Configure OpenVPN, forwarding/SNAT and a DNS forwarder separately. [Full tunnel](docs/HOST.md#full-tunnel) and [client DNS](docs/HOST.md#client-dns-through-the-local-node). The helper configures neither. |
+| Use your SAML IdP and a convenient profile download entry | Set the groups claim and metadata; optionally add an IdP dashboard tile. [IdP requirements](docs/IDENTITY_PROVIDER.md#groups-claim) and [profile downloads](docs/PROFILES.md). Okta is the documented example, not the only SAML provider. |
+| Customize storage, logging or grow beyond one VM | [Database TLS and migrations](docs/POSTGRES.md#configurable-database-tls), [logging](docs/LOGGING.md#destinations-and-defaults), and [active-active architecture](docs/HA.md). The one-host helper does not provision an HA deployment. |
+
+For the Debian file paths and a safe point to customize them, see
+[configuration after setup](#customize-the-generated-configuration).
+The [manual reference](docs/DEPLOYMENT_MANUAL.md) covers each installation step.
+The helper's private Unix transport connects processes on one host; adding nodes
+on other VMs also needs the [appropriate authenticated transport](docs/CONTROLLER_API.md#agent-authentication).
+
+## Architecture limits to plan for
+
+- **Existing tunnels never move between nodes.** OpenVPN sessions and IP leases
+  are local to each node. After a node failure, the client reconnects and performs
+  fresh SAML authorization. If it connects to another node, its VPN IP **changes**
+  because node pools do not overlap; existing TCP/SSH sessions are lost. An
+  active-active cluster provides alternative nodes for new connections, not
+  seamless session failover. See [HA failure behavior](docs/HA.md#failure-behavior).
+- **One VM has no high availability.** This minimal setup puts the VPN, controller
+  and database on one host. Multiple VPN nodes alone do not make the shared
+  controller and PostgreSQL highly available. Controller/database outages block
+  new authorizations; an agent that cannot renew its lease in time stops its
+  OpenVPN pair, disconnecting existing clients. See
+  [heartbeat and fencing](docs/SESSIONS.md#heartbeat).
+- **IdP membership is checked at login, not continuously.** Removing a user or
+  changing groups in the IdP does not itself close an established tunnel. Neither
+  heartbeat nor TLS rekey reauthorizes it. Plan session deadlines and explicit
+  termination; automatic IdP-event revocation is not implemented. See
+  [group changes](docs/GROUPS.md#adding-and-removing-groups) and
+  [revocation limits](docs/REVOCATION.md).
+- **Pool capacity is local to a group on a node.** Exhaustion rejects a new
+  connection; the agent does not borrow addresses from another group or node.
+  UDP load balancing does not account for individual group-pool exhaustion or
+  guarantee retry on a node with free capacity. Size each group's surviving-node
+  pools and connection limits for failover. See [address planning](docs/HA.md#node-count-and-group-expansion).
 
 ## 1. Prepare the VM and packages
 
@@ -157,9 +211,18 @@ editor /root/supivpn-setup.json
 }
 ```
 
-Group names are case-sensitive; the first matching group wins. The default VPN
-network is `10.203.0.0/24`, divided into equal group pools. It must not overlap
-client LANs or destination networks. Optional fields: `vpn_network`, `ssh_port`
+Group names match the verified SAML assertion exactly and are case-sensitive.
+In this **setup file**, list them in your preferred priority order: the helper
+writes priorities **10, 20, 30, ...** into the generated runtime files. At login,
+the controller selects the matching group with the **lowest numeric priority**,
+regardless of the order in the assertion. A user in both example groups gets
+`admins-vpn`; their group permissions and limits are not combined. If no configured
+group matches, access is denied. See the [full policy example](docs/GROUPS.md#selection-and-policy-example).
+
+The helper initially gives each group one equal-sized pool within `10.203.0.0/24`
+and uses the global defaults of one simultaneous connection and a 12-hour session.
+You can customize all three after setup. The VPN network must not overlap
+client LANs or destination networks. Optional setup fields: `vpn_network`, `ssh_port`
 (default 22), `login_hostname` (defaults to `hostname`), and `database_name`
 (default `supivpn`). A separate login hostname needs DNS and certificate coverage.
 Do not put passwords or private-key contents in this file.
@@ -188,6 +251,37 @@ VPN or enable services at boot. Existing SupiVPN configuration, keys, node state
 or its database cluster cause a refusal. After a partial failure, inspect the
 reported step locally using the [manual reference](docs/DEPLOYMENT_MANUAL.md);
 do not delete state or rerun setup blindly. `init` is not an upgrade command.
+
+### Customize the generated configuration
+
+For a fresh host, this is the point to apply your policy, **before starting the
+VPN**. Keep the remaining generated settings, paths and service identities.
+The richer runtime fields belong in these files, not in `supivpn-setup.json`:
+
+| Installed file | Settings you can customize |
+| --- | --- |
+| `/etc/supivpn/controller/controller.json` | Allowed groups and priorities, global/per-group session and connection limits, SAML claim, public URL, profile issuance and database TLS. |
+| `/etc/supivpn/node/agent.json` | Matching group policy, each group's `cidr` or `cidrs`, and the enclosing `vpn_network`. |
+| `/etc/supivpn/node/openvpn.conf` | Tunnel network and client route/DNS pushes. Keep its network consistent with the agent. |
+| `/etc/supivpn/firewall.nft` | Host and forwarded access for the actual group CIDRs; this candidate takes effect only when applied in step 4. |
+| `/etc/supivpn/controller/client.ovpn.template` | Settings for newly downloaded profiles. Existing imported profiles do not update automatically. |
+
+For example, give admins two connections with one-hour sessions, leave engineers
+at one connection and twelve hours, and allocate two pools to admins. The
+[paired controller/agent example](docs/GROUPS.md#selection-and-policy-example)
+shows the exact fields. Group priorities, default limits and overrides must agree
+between controller and agent. Pool sizes need not be equal; exhaustion of the
+selected group's pools denies the connection instead of switching groups.
+Resource access still needs the [route and ACL setup](docs/DEPLOYMENT_MANUAL.md#10-add-access-to-a-private-network).
+
+On an existing installation, back up configuration and plan a maintenance window:
+there is no live policy reload. Stop `supivpn-node` and then `supivpn-controller`
+(disconnecting clients), update the matching files and network rules, then use the
+[documented service sequence](docs/DEBIAN_PACKAGING.md#configuration-and-activation)
+to load and check them. Do not rerun `init` or replace generated files wholesale
+with examples. Group removal and pool reuse need the
+[additional lifecycle precautions](docs/GROUPS.md#adding-and-removing-groups).
+Readiness alone does not validate your access policy; repeat the client checks below.
 
 ## 4. Review the firewall, start and check
 
@@ -219,8 +313,11 @@ again. The OpenVPN service follows the node; do not start or enable it separatel
    The profile contains key material; do not share or log it.
 2. Connect and complete the VPN's browser login. Confirm an address from the
    assigned group pool, then `ping 10.203.0.1` (or your selected gateway).
-3. Reconnect and confirm fresh SAML authorization. Verify the user without an
-   allowed group is denied, and disallowed host/private services stay unreachable.
+3. Reconnect and confirm fresh SAML authorization. Test a user in each group,
+   a user in both (the lower numeric priority wins), and a user without an allowed
+   group (denied). Confirm the selected pool and that disallowed host/private
+   services stay unreachable. For custom limits, multiple pools or routes, also
+   run the [policy acceptance checks](docs/GROUPS.md#check-your-policy).
 4. Record the client version/OS. A general minimum Connect version is not yet
    established; the automated VM tests use a Community client and synthetic IdP.
 

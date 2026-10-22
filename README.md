@@ -154,7 +154,21 @@ denial checks, reboot acceptance and maintenance; the
 [manual reference](docs/DEPLOYMENT_MANUAL.md) covers individual setup steps and
 private-network routing.
 
-This first path runs all components on one host with a private Unix socket.
+Before choosing the defaults, review the guide's
+[configuration options](DEPLOYMENT.md#choose-your-access-policy): explicit group
+priorities, per-group session/connection limits, multiple IP pools, resource ACLs,
+full tunnel and DNS. [Paired policy examples](docs/GROUPS.md#selection-and-policy-example)
+show how to customize the generated controller and agent configuration.
+
+This is a **minimal evaluation deployment**: all components on one VM with a
+private Unix socket. Production deployment documentation and IaC are next on the
+roadmap, including an **HA active-active cluster**. Existing cluster capabilities
+are described in [HA](docs/HA.md); the production guide and IaC are still planned.
+Existing tunnels do not migrate between nodes: reconnecting to another node
+requires fresh SAML authorization and **changes the VPN IP**; existing TCP/SSH
+sessions are lost. Review the other [architecture limits](DEPLOYMENT.md#architecture-limits-to-plan-for)
+when planning availability and access policy.
+
 The guide adds the signed `apt.supivpn.com` source and installs with
 `apt install supivpn`. Signed Debian delivery starts with
 [v0.6.0](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.0).
