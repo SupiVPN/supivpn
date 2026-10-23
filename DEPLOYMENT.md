@@ -277,7 +277,7 @@ The richer runtime fields belong in these files, not in `supivpn-setup.json`:
 
 | Installed file | Settings you can customize |
 | --- | --- |
-| `/etc/supivpn/controller/controller.json` | Allowed groups and priorities, global/per-group session and connection limits, SAML claim, public URL, profile issuance and database TLS. Releases containing `vpn_login_confirmation` also support the [default confirmation page and explicit opt-out](docs/IDENTITY_PROVIDER.md#vpn-login-confirmation). |
+| `/etc/supivpn/controller/controller.json` | Allowed groups and priorities, global/per-group session and connection limits, SAML claim, public URL, profile issuance and database TLS. Since v0.7.0, it also supports the [default VPN login confirmation and explicit opt-out](docs/IDENTITY_PROVIDER.md#vpn-login-confirmation), plus [optional assertion encryption](docs/ASSERTION_ENCRYPTION.md). |
 | `/etc/supivpn/node/agent.json` | Matching group policy, each group's `cidr` or `cidrs`, and the enclosing `vpn_network`. |
 | `/etc/supivpn/node/openvpn.conf` | Tunnel network and client route/DNS pushes. Keep its network consistent with the agent. |
 | `/etc/supivpn/firewall.nft` | Host and forwarded access for the actual group CIDRs; this candidate takes effect only when applied in step 4. |

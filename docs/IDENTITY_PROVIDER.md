@@ -42,8 +42,10 @@ work. An IdP-initiated assertion never replaces the correlated authorization res
 
 ## VPN login confirmation
 
-**Availability:** this option is implemented on the development branch and is not
-included in v0.6.1. Deploy a release containing it before changing configuration.
+**Availability:** enabled by default since
+[v0.7.0](https://github.com/SupiVPN/supivpn/releases/tag/v0.7.0).
+Upgrade from v0.6.1 or earlier before changing this setting. Forward both GET
+and POST `/login/{ticket}` through public proxies and gateways when upgrading.
 
 `vpn_login_confirmation` controls the browser page shown before VPN SAML starts:
 
