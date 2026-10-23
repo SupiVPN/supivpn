@@ -36,6 +36,13 @@ A cluster needs a shared controller/PostgreSQL and disjoint node pools.
 In remote mode, the controller handles SAML and the agent applies verified
 decisions; its local HTTPS listener serves health/readiness.
 
+`vpn_login_confirmation` defaults to enabled when omitted, null, or true.
+Set it on the public controller (VM/Lambda), or a legacy local-SAML agent;
+omit it from remote nodes and agent-only/recovery Lambdas. Setting it to false
+skips the pre-SAML page and reintroduces the risk of a relayed login link using
+another person's IdP session to authorize the requesting VPN client. Profile
+downloads are unaffected. See the [JSON example and security limits](IDENTITY_PROVIDER.md#vpn-login-confirmation).
+
 `pending_seconds` sets the browser authorization timeout; `session_seconds`
 sets VPN authorization duration. The example 180/43200 seconds is not mandatory
 policy for every deployment. Groups can override `session_seconds` (60..43200,

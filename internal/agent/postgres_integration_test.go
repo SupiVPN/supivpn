@@ -423,12 +423,11 @@ func TestPostgresIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal("second controller initialization failed")
 		}
-		response := httptest.NewRecorder()
-		first.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, a.origin.String()+"/login/"+ticket, nil))
-		if response.Code != http.StatusFound || len(response.Result().Cookies()) != 1 {
+		response := confirmVPNLogin(t, first.Handler(), a.origin, ticket)
+		if response.Code != http.StatusFound || len(response.Result().Cookies()) != 2 {
 			t.Fatal("controller did not start login")
 		}
-		cookie := response.Result().Cookies()[0]
+		cookie := samlLoginCookie(t, response.Result(), ticket)
 		pending, err := second.Lookup(ctx, ticket, sha256.Sum256([]byte(cookie.Value)))
 		if err != nil {
 			t.Fatal("second controller cannot find browser binding")

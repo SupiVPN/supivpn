@@ -224,9 +224,8 @@ func testOpenVPNClusterFailover(t *testing.T, cause string) {
 		pending := a.connections[event.cid]
         if attempt==1 && cause=="session-reconnect" && (pending.cid==previousCID || pending.ticket==previousTicket) {t.Fatal("expired connection or ticket reused")}
         previousCID,previousTicket=pending.cid,pending.ticket
-		w := httptest.NewRecorder()
-		a.handler().ServeHTTP(w, httptest.NewRequest("GET", a.origin.String()+"/login/"+pending.ticket, nil))
-		if w.Code != 302 || len(w.Result().Cookies()) != 1 {
+		w := confirmVPNLogin(t, a.handler(), a.origin, pending.ticket)
+		if w.Code != 302 || len(w.Result().Cookies()) != 2 {
 			t.Fatal("new SAML login required")
 		}
 		assertion := groupAssertionFor(a, "admins-vpn", "engineers-production-vpn")
@@ -251,7 +250,7 @@ func testOpenVPNClusterFailover(t *testing.T, cause string) {
 		body := url.Values{"RelayState": {pending.ticket}, "SAMLResponse": {base64.StdEncoding.EncodeToString(data)}}.Encode()
 		r := httptest.NewRequest("POST", a.sp.AcsURL.String(), strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		r.AddCookie(w.Result().Cookies()[0])
+		r.AddCookie(samlLoginCookie(t, w.Result(), pending.ticket))
 		result := httptest.NewRecorder()
 		a.handler().ServeHTTP(result, r)
 		if result.Code != http.StatusOK {

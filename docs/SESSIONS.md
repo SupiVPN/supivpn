@@ -75,7 +75,12 @@ At expiry, the agent sends OpenVPN `client-kill CID`; the server sends RESTART
 to the client, which may reconnect automatically and start a **new** SP-initiated
 SAML login. IP may change; existing TCP/SSH sessions break.
 Password/MFA prompts depend on IdP policy and browser session; `ForceAuthn`
-is not enabled.
+is not enabled. By default, each new VPN login first requires explicit confirmation
+in the controller page, even if the IdP session could complete SSO without a prompt.
+The operator can disable that step with `vpn_login_confirmation=false`, accepting
+the risk that opening a relayed link can authorize someone else's VPN connection.
+Only approve the login opened by your own OpenVPN Connect; see the
+[configuration and login-link limitations](IDENTITY_PROVIDER.md#vpn-login-confirmation).
 
 If the user does not complete the new login, no new VPN access is granted.
 Old tickets/assertions/callbacks cannot restore the previous tunnel.

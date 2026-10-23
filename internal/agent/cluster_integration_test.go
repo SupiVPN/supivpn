@@ -110,12 +110,11 @@ func TestClusterTwoNodes(t *testing.T) {
 	complete := func(i int) {
 		t.Helper()
 		ticket := agents[i].connections[7].ticket
-		w := httptest.NewRecorder()
-		controllers[0].Handler().ServeHTTP(w, httptest.NewRequest("GET", fixture.origin.String()+"/login/"+ticket, nil))
-		if w.Code != 302 || len(w.Result().Cookies()) != 1 {
+		w := confirmVPNLogin(t, controllers[0].Handler(), fixture.origin, ticket)
+		if w.Code != 302 || len(w.Result().Cookies()) != 2 {
 			t.Fatal("SAML redirect failed")
 		}
-		cookie := w.Result().Cookies()[0]
+		cookie := samlLoginCookie(t, w.Result(), ticket)
 		pending, err := stores[1].Lookup(ctx, ticket, sha256.Sum256([]byte(cookie.Value)))
 		if err != nil {
 			t.Fatal("shared browser binding missing")
