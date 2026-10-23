@@ -8,8 +8,9 @@ installs both components and provides `supivpn-setup` to configure the controlle
 node and local PostgreSQL 18 database. Services run directly under systemd.
 To keep PostgreSQL on another host, see the
 [external database walkthrough](docs/REMOTE_DATABASE.md), including a controlled
-move of an existing database. Remote setup-helper support is prepared for the
-next release; the published v0.6.0 helper still configures only a local database.
+move of an existing database. Remote setup-helper support is available from
+[v0.6.1](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.1); the v0.6.0 helper
+configures only a local database.
 
 This is the **minimal deployment on a single VM**, intended for evaluation and
 initial validation. Production deployment documentation and infrastructure as
@@ -171,7 +172,7 @@ apt-get install supivpn
 
 For remote PostgreSQL, install `postgresql-client-18` in place of `postgresql-18`
 and complete the [database preparation](docs/REMOTE_DATABASE.md#1-prepare-a-private-database-endpoint).
-Use a release containing the helper extension, or the manual path on v0.6.0.
+Use v0.6.1 or later for the helper extension, or the manual path on v0.6.0.
 
 The current agent requires upstream OpenVPN **2.7.8**. If the Debian revision above is superseded,
 select the available revision of that same upstream version after review;

@@ -9,8 +9,9 @@ credentials. This separates the database's storage, backups and maintenance
 from the VPN host; it does **not** make a single VPN/controller VM highly available.
 See [architecture limits](../DEPLOYMENT.md#architecture-limits-to-plan-for).
 
-**Version status:** the optional `database` setup block described below is
-prepared for the next release. Published **v0.6.0** only supports a local database
+**Version requirement:** the optional `database` setup block described below is
+available from [v0.6.1](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.1).
+**v0.6.0** only supports a local database
 through `supivpn-setup`; its controller already supports a remote database through
 [manual configuration](DEPLOYMENT_MANUAL.md). Do not pass the new block to the
 v0.6.0 helper. The [existing-installation procedure](#move-an-existing-database)
@@ -258,7 +259,7 @@ objects and [are not included in `pg_dump`](https://www.postgresql.org/docs/18/a
    moving the same package version and complete schema.
 6. Stop and disable the **old dedicated** local cluster after the restore is
    confirmed: `systemctl disable --now postgresql@18-supivpn`. Do not stop unrelated
-   clusters or remove its data. With a helper version supporting remote mode,
+   clusters or remove its data. With **v0.6.1 or later**,
    add the same `database` metadata block to `/etc/supivpn/setup.json` so checks
    select remote mode; its password-input paths are not read by `check`.
    On **v0.6.0**, leave that file unchanged and use the manual checks below:
@@ -267,7 +268,7 @@ objects and [are not included in `pg_dump`](https://www.postgresql.org/docs/18/a
    units, HTTPS controller `/healthz`, node `/readyz`, a fresh profile/login,
    expected group/IP and denied resource access as in
    [deployment acceptance](../DEPLOYMENT.md#5-connect-and-finish-acceptance).
-   With the new helper, run `supivpn-setup check` as well. Reboot the VPN VM in a
+   With v0.6.1 or later, run `supivpn-setup check` as well. Reboot the VPN VM in a
    maintenance window and repeat readiness/client acceptance with the old
    database still stopped. Verify automated remote backups and a restore drill.
 
