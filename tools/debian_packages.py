@@ -48,7 +48,7 @@ def prepare(root, work, go, *, version=None, epoch=None):
     return source
 
 
-def build(root, arch, go, docker, *, test=False, vm=False, version=None, epoch=None):
+def build(root, arch, go, docker, *, test=False, vm=False, vm_database="local", version=None, epoch=None):
     output = root / "local/debian" / arch
     output.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="build-", dir=output))
@@ -68,7 +68,7 @@ def build(root, arch, go, docker, *, test=False, vm=False, version=None, epoch=N
              image, "python3", "/packages/source/ci/debian/check_packages.py", "/packages"])
     if vm:
         from debian_vm import run_vm
-        run_vm(root, work, arch, docker, go)
+        run_vm(root, work, arch, docker, go, database=vm_database)
     print("Debian build and matching source: " + str(work))
     return work
 
@@ -80,11 +80,12 @@ def main():
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--vm", action="store_true")
+    parser.add_argument("--vm-database", choices=["local", "remote"], default="local")
     parser.add_argument("--version", help="Local release-format build; does not sign or publish")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     epoch = debian_release.commit_epoch(root, "HEAD") if args.version else None
-    build(root, args.arch, args.go, args.docker, test=args.test, vm=args.vm,
+    build(root, args.arch, args.go, args.docker, test=args.test, vm=args.vm, vm_database=args.vm_database,
           version=args.version, epoch=epoch)
 
 

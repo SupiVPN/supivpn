@@ -206,6 +206,9 @@ func TestDebianVMPrepare(t *testing.T) {
 		"admin_cidr":        "198.51.100.10/32", "database_name": "supivpn_test",
 	}
 	setupPath := filepath.Join(fixtures, "setup.json")
+	if vmRemoteDatabase() {
+		vmConfigureRemoteDatabase(t, setup, setupPath)
+	}
 	setup["hostname"] = "wrong.example.test"
 	vmSaveJSON(t, setupPath, setup, 0600, "")
 	if exec.Command("supivpn-setup", "init", "--config", setupPath).Run() == nil {
@@ -244,10 +247,14 @@ func TestDebianVMPrepare(t *testing.T) {
 			t.Fatal("credentials are not private")
 		}
 	}
-	grants := vmCommand(t, "runuser", "-u", "postgres", "--", "psql", "-X", "-h", "/var/run/postgresql", "-p", "55433", "-d", "supivpn_test", "-Atc",
+	grants := vmDatabaseQuery(t,
 		"SELECT has_database_privilege('supivpn_runtime','supivpn_test','CREATE'), has_database_privilege('supivpn_runtime','supivpn_test','TEMP'), pg_has_role('supivpn_runtime','supivpn_owner','MEMBER')")
 	if grants != "f|f|f" {
 		t.Fatal("runtime has database owner privileges")
+	}
+	if vmRemoteDatabase() {
+		vmCheckRemoteDatabase(t)
+		vmWrite(t, filepath.Join(vmDBFixtures, "server-started"), []byte(vmDatabaseQuery(t, "SELECT pg_postmaster_start_time()::text")), 0600, "")
 	}
 	vmCommand(t, "nft", "--check", "--file", "/etc/supivpn/firewall.nft")
 	// The network acceptance suite supplies its own network namespaces/rules.
@@ -293,9 +300,15 @@ func TestDebianVMServices(t *testing.T) {
 	}
 	vmCommand(t, "systemctl", "start", "supivpn-node")
 	vmWait(t, "manual start", 45*time.Second, func() bool { return vmReady(client, 9443) })
-	vmCommand(t, "systemctl", "enable", "postgresql@18-supivpn", "supivpn-controller", "supivpn-node")
+	databaseDependency := "postgresql@18-supivpn"
+	if vmRemoteDatabase() {
+		databaseDependency = "external-database"
+	} else {
+		vmCommand(t, "systemctl", "enable", databaseDependency)
+	}
+	vmCommand(t, "systemctl", "enable", "supivpn-controller", "supivpn-node")
 	t.Log("manual stop/start passed; services enabled for the separate cold-boot check")
-	for _, unit := range []string{"supivpn-controller", "postgresql@18-supivpn"} {
+	for _, unit := range []string{"supivpn-controller", databaseDependency} {
 		if !t.Run("outage-"+unit, func(t *testing.T) { vmOutageRecovery(t, client, signer, unit) }) {
 			t.FailNow()
 		}
@@ -440,6 +453,15 @@ func TestDebianVMAfterReboot(t *testing.T) {
 	vmWait(t, "controller after boot", time.Minute, func() bool { return vmReady(client, 8443) })
 	vmWait(t, "node after boot", time.Minute, func() bool { return vmReady(client, 9443) })
 	vmCheckSandbox(t)
+	vmCommand(t, "supivpn-setup", "check")
+	if vmRemoteDatabase() {
+		vmCheckRemoteDatabase(t)
+		before, err := os.ReadFile(filepath.Join(vmDBFixtures, "server-started"))
+		if err != nil || string(before) != vmDatabaseQuery(t, "SELECT pg_postmaster_start_time()::text") {
+			t.Fatal("external database restarted with the Debian guest")
+		}
+		t.Log("cold boot recovered all services without a local database; external PostgreSQL remained running")
+	}
 }
 
 func TestDebianVMPackageLifecycle(t *testing.T) {

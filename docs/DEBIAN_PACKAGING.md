@@ -95,6 +95,9 @@ sandbox enforcement or real tunnel acceptance. Those require a clean Debian VM.
 ```sh
 make deb-vm-test ARCH=arm64
 make deb-vm-test ARCH=amd64
+# The same real-VM suite with PostgreSQL outside the guest:
+make deb-vm-test ARCH=arm64 VM_DATABASE=remote
+make deb-vm-test ARCH=amd64 VM_DATABASE=remote
 ```
 
 This includes `deb-test`, then boots the pinned official Debian 13 generic image
@@ -113,6 +116,23 @@ generated solely for the disposable guest. No host credentials or working
 configuration are mounted. Logs, disks and evidence stay under
 `local/debian-vm/`; treat these as private test artifacts, not release assets.
 The runner removes its own VM container on success or failure.
+
+With `VM_DATABASE=remote`, the guest installs only `postgresql-client-18`.
+A separate disposable PostgreSQL 18 container shares the QEMU runner's network
+namespace and listens only on its loopback interface, with no published database
+port. The guest reaches it through QEMU's gateway using `db.supivpn.test` and
+`verify-full` TLS. The database is outside the guest OS and survives guest reboot;
+it is removed after the run. This is test infrastructure, not a container
+deployment option for SupiVPN.
+
+Remote acceptance also rejects an incorrect CA, hostname and password before
+writing configuration. Random test passwords contain spaces, quotes, backslashes
+and a dollar sign, exercising the installed systemd unit's `EnvironmentFile`
+parser through the running controller. No PostgreSQL server or local cluster may
+appear inside the guest. Database outages use a temporary guest firewall rule
+that rejects only traffic to the external test database, then removes that rule
+to verify recovery. The original local mode continues to stop/start PostgreSQL
+through systemd.
 
 The VM suite verifies:
 

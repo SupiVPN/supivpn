@@ -49,8 +49,7 @@ func startVMVPN(t *testing.T, name string, args ...string) *protocolLog {
 			// Keep the namespace alive and require the slot to drain before the
 			// next scenario reuses the same user with the setup default of one slot.
 			vmWait(t, "disconnected client slot release", 15*time.Second, func() bool {
-				return vmCommand(t, "runuser", "-u", "postgres", "--", "psql", "-X",
-					"-h", "/var/run/postgresql", "-p", "55433", "-At", "-d", "supivpn_test", "-c",
+				return vmDatabaseQuery(t,
 					"SELECT NOT EXISTS (SELECT 1 FROM supivpn.logins l JOIN supivpn.nodes n ON n.node_id=l.node_id AND n.generation=l.generation WHERE l.denial_reason='' AND l.state IN ('decided','acknowledged') AND (l.ack_result IS NULL OR l.ack_result='applied') AND n.fence_state<>'stopped')") == "t"
 			})
 		}
@@ -169,7 +168,7 @@ func vmOutageRecovery(t *testing.T, client *http.Client, signer *saml.ServicePro
 	before, generation := vmPairIdentity(t), vmGeneration(t)
 	controllerPID := vmPID(t, "supivpn-controller")
 	// Restore the task-owned guest dependency even when an assertion fails.
-	t.Cleanup(func() { vmCommand(t, "systemctl", "start", unit) })
+	t.Cleanup(func() { vmDependency(t, unit, true) })
 	t.Cleanup(func() {
 		if t.Failed() {
 			for _, service := range []string{"supivpn-node", "supivpn-openvpn", "supivpn-controller", "postgresql@18-supivpn"} {
@@ -177,13 +176,13 @@ func vmOutageRecovery(t *testing.T, client *http.Client, signer *saml.ServicePro
 			}
 		}
 	})
-	vmCommand(t, "systemctl", "stop", unit)
+	vmDependency(t, unit, false)
 	vmAssertLoginUnavailable(t, client)
 	for i := 0; i < 4; i++ {
 		vpn.traffic(t)
 		time.Sleep(2 * time.Second)
 	}
-	vmCommand(t, "systemctl", "start", unit)
+	vmDependency(t, unit, true)
 	vmWait(t, "controller after short outage", 30*time.Second, func() bool { return vmReady(client, 8443) })
 	vpn.traffic(t)
 	if !reflect.DeepEqual(before, vmPairIdentity(t)) || generation != vmGeneration(t) || vpn.connections() != 1 {
@@ -192,11 +191,11 @@ func vmOutageRecovery(t *testing.T, client *http.Client, signer *saml.ServicePro
 	// Observe a real renewal before the prolonged outage, without altering either
 	// the agent's 40-second deadline or the database's 60-second lease.
 	vmWait(t, "lease renewal after short outage", 25*time.Second, func() bool {
-		return vmCommand(t, "runuser", "-u", "postgres", "--", "psql", "-X", "-h", "/var/run/postgresql", "-p", "55433", "-At", "-d", "supivpn_test", "-c",
+		return vmDatabaseQuery(t,
 			"SELECT EXISTS (SELECT 1 FROM supivpn.nodes WHERE node_id='node-a' AND lease_expires_at>clock_timestamp()+interval '55 seconds')") == "t"
 	})
 	t.Log("short outage preserved the live tunnel, processes and generation; heartbeat resumed")
-	vmCommand(t, "systemctl", "stop", unit)
+	vmDependency(t, unit, false)
 	stopped := time.Now()
 	vmAssertLoginUnavailable(t, client)
 	vmWait(t, "lease expiry closing the old VPN pair", 50*time.Second, func() bool {
@@ -210,14 +209,14 @@ func vmOutageRecovery(t *testing.T, client *http.Client, signer *saml.ServicePro
 		}
 		time.Sleep(time.Second)
 	}
-	vmCommand(t, "systemctl", "start", unit)
+	vmDependency(t, unit, true)
 	vmWait(t, "automatic pair recovery after prolonged outage", 90*time.Second, func() bool {
 		return vmReady(client, 8443) && vmReady(client, 9443)
 	})
 	if generation == vmGeneration(t) || reflect.DeepEqual(before, vmPairIdentity(t)) {
 		t.Fatal("prolonged outage reused the old node generation or processes")
 	}
-	if unit == "postgresql@18-supivpn" && vmPID(t, "supivpn-controller") != controllerPID {
+	if unit != "supivpn-controller" && vmPID(t, "supivpn-controller") != controllerPID {
 		t.Fatal("database recovery required a controller restart")
 	}
 	next := vpn.challenge(t, path)

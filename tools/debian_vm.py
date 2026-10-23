@@ -64,7 +64,43 @@ def seed(work):
     (work / "meta-data").write_text("instance-id: supivpn-" + uuid.uuid4().hex + "\n")
 
 
-def run_vm(root, packages, arch, docker, go):
+def external_database(source, work, docker, vm_container, host_arch):
+    """Share only the VM runner's network; PostgreSQL stays outside the guest."""
+    fixtures = work / "database"
+    fixtures.mkdir(mode=0o700)
+    shutil.copyfile(source / "ci/debian/vm/database.py", fixtures / "database.py")
+    for filename in ("runtime.password", "migration.password"):
+        path = fixtures / filename
+        # Exercise libpq quoting and the real systemd EnvironmentFile parser.
+        path.write_text(os.urandom(24).hex() + " ' \\ \" $")
+        path.chmod(0o600)
+    image = "supivpn-setup-db-test:" + host_arch
+    run([docker, "build", "--platform", "linux/" + host_arch, "-t", image,
+         str(source / "ci/debian/remote-database")])
+    container = run([docker, "run", "--rm", "--pull", "never", "--detach",
+                     "--platform", "linux/" + host_arch,
+                     "--label", "supivpn.disposable-test=true",
+                     "--security-opt", "no-new-privileges",
+                     "--network", "container:" + vm_container,
+                     "--env", "SUPIVPN_VM_DATABASE_TEST=1",
+                     "--mount", f"type=bind,source={fixtures},target=/fixture",
+                     "--entrypoint", "python3", image, "-B", "/fixture/database.py"],
+                    capture_output=True, text=True).stdout.strip()
+    try:
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            if (fixtures / "ready").exists():
+                return container, fixtures
+            time.sleep(1)
+        raise TimeoutError("External disposable PostgreSQL did not become ready")
+    except BaseException:
+        run([docker, "stop", "--time", "10", container], stdout=subprocess.DEVNULL)
+        raise
+
+
+def run_vm(root, packages, arch, docker, go, *, database="local"):
+    if database not in {"local", "remote"}:
+        raise ValueError("Unknown VM database mode")
     host_arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "AMD64": "amd64"}[platform.machine()]
     cache = root / "local/debian-vm/cache"
     cache.mkdir(parents=True, exist_ok=True)
@@ -108,7 +144,11 @@ def run_vm(root, packages, arch, docker, go):
                       "-drive", "file=seed.iso,if=virtio,format=raw,readonly=on",
                       "-nic", "user,model=virtio-net-pci,hostfwd=tcp:0.0.0.0:2222-:22"]
     container = run(start, capture_output=True, text=True).stdout.strip()
+    database_container = None
     try:
+        database_fixtures = None
+        if database == "remote":
+            database_container, database_fixtures = external_database(source, work, docker, container, host_arch)
         published = run([docker, "port", container, "2222/tcp"], capture_output=True, text=True).stdout.strip()
         if not published.startswith("127.0.0.1:"):
             raise ValueError("VM SSH must bind only to host loopback")
@@ -135,25 +175,36 @@ def run_vm(root, packages, arch, docker, go):
         run(ssh + ["install -d -m 700 /opt/supivpn-test"])
         uploads = [work / p.name for p in debs] + [work / p for p in ("setup.sh", "openvpn-test.deb", "agent-vm.test")]
         run(["scp", *options, "-P", port, *map(str, uploads), "root@127.0.0.1:/opt/supivpn-test/"])
+        if database_fixtures:
+            run(ssh + ["install -d -m 700 /opt/supivpn-test/database"])
+            files = [database_fixtures / name for name in ("ca.pem", "runtime.password", "migration.password")]
+            run(["scp", *options, "-P", port, *map(str, files), "root@127.0.0.1:/opt/supivpn-test/database/"])
         listed = run(ssh + ["/opt/supivpn-test/agent-vm.test -test.list='^TestDebianVM'"], capture_output=True, text=True)
         if set(listed.stdout.splitlines()) != {"TestDebianVMPrepare", "TestDebianVMServices", "TestDebianVMAfterReboot", "TestDebianVMPackageLifecycle"}:
             raise ValueError("VM acceptance test binary is incomplete")
         print("VM: installing prerequisites and packages", flush=True)
         with (work / "install.log").open("w") as log:
-            run(ssh + ["sh /opt/supivpn-test/setup.sh"], stdout=log, stderr=subprocess.STDOUT)
-        test = "SUPIVPN_TEST_DEBIAN_VM=1 /opt/supivpn-test/agent-vm.test -test.v -test.timeout=10m -test.run="
+            run(ssh + ["sh /opt/supivpn-test/setup.sh " + database], stdout=log, stderr=subprocess.STDOUT)
+        test = ("SUPIVPN_TEST_DEBIAN_VM=1 SUPIVPN_TEST_VM_DATABASE=" + database +
+                " /opt/supivpn-test/agent-vm.test -test.v -test.timeout=10m -test.run=")
         run(ssh + [test + "'^TestDebianVM(Prepare|Services)$'"])
         print("VM: rebooting with services enabled", flush=True)
         run(ssh + ["systemctl reboot"])
         second_boot = wait_boot(first_boot)
         run(ssh + [test + "'^TestDebianVMAfterReboot$'"])
         run(ssh + [test + "'^TestDebianVMPackageLifecycle$'"])
-        report = {"architecture": arch, "image_version": IMAGE_VERSION, "image_sha512": IMAGE_SHA512[arch],
+        report = {"architecture": arch, "database_mode": database,
+                  "image_version": IMAGE_VERSION, "image_sha512": IMAGE_SHA512[arch],
                   "first_boot_id": first_boot, "second_boot_id": second_boot,
                   "packages_sha256": {p.name: digest(p, "sha256") for p in debs}, "result": "passed"}
         (work / "result.json").write_text(json.dumps(report, indent=2) + "\n")
         print("PASS: Debian VM " + arch + "; evidence: " + str(work / "result.json"), flush=True)
     finally:
         # Exact ID returned by our own docker run; never clean up other resources.
-        subprocess.run([docker, "stop", "--time", "5", container], check=True, timeout=30,
-                       stdout=subprocess.DEVNULL)
+        try:
+            if database_container:
+                subprocess.run([docker, "stop", "--time", "10", database_container], check=True,
+                               timeout=30, stdout=subprocess.DEVNULL)
+        finally:
+            subprocess.run([docker, "stop", "--time", "5", container], check=True, timeout=30,
+                           stdout=subprocess.DEVNULL)
