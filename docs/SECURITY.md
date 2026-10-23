@@ -54,7 +54,9 @@ This is a restricted Web SSO profile, not a general replacement for a SAML/XMLDS
   Encryption never replaces signature or authorization checks. CBC and RSA
   v1.5 key transport are rejected. XML limits also apply after decryption.
 - **RSA PKCS#1 v1.5 + SHA-256**, SHA-256 digest, **Exclusive XML C14N 1.0 without
-  comments**, optional InclusiveNamespaces PrefixList.
+  comments**, optional InclusiveNamespaces PrefixList with at most 64 entries.
+  Trusted SignedInfo verification precedes reference canonicalization/digest
+  processing. Output limits apply to leaf elements and attributes as well as text.
 - Exactly one Reference `#ID` targeting the verified element.
   Exactly two transforms: enveloped-signature → exclusive C14N.
   Empty/external URIs, multiple references, XPath, implicit transforms,
