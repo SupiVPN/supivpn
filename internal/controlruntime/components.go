@@ -16,7 +16,7 @@ import (
 )
 
 func OpenAgent(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error)) (*Application, error) {
-	if c.PendingSeconds < 30 || c.PendingSeconds > 180 || c.Gateway == nil || c.Profile != nil || c.IDPMetadata != "" || len(c.Groups) != 0 || c.VM != nil {
+	if c.PendingSeconds < 30 || c.PendingSeconds > 180 || c.Gateway == nil || c.Profile != nil || c.IDPMetadata != "" || len(c.Groups) != 0 || c.VM != nil || c.AssertionEncryption != nil {
 		return nil, errors.New("agent component requires only gateway, public URL, pending limit and database TLS configuration")
 	}
 	origin, err := url.Parse(c.PublicURL)

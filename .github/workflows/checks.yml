@@ -101,6 +101,15 @@ jobs:
           SUPIVPN_TEST_POSTGRES_ALLOW_RESET: '1'
           SUPIVPN_TEST_XMLSEC: /usr/bin/xmlsec1
         run: make ci-test-coverage integration TIMEOUT=600s
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: matrix.arch == 'amd64'
+        with:
+          node-version: '24'
+      - name: Check Okta fixtures without external credentials
+        if: matrix.arch == 'amd64'
+        run: |
+          node --test ci/okta/run.test.cjs
+          make okta-probe
 
   security:
     needs: scope

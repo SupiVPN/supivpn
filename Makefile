@@ -56,6 +56,11 @@ tag: export SUPIVPN_TAG_COMMIT := $(value COMMIT)
  xmlsec-image openvpn-image postgres-start postgres-stop test-db-restart \
   security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag deb deb-test deb-vm-test test-setup-db
 
+.PHONY: okta-probe
+okta-probe: | $(LOCAL)/go.mod
+	@mkdir -p "$(LOCAL)/okta-ci"
+	@$(GO) build -race -o "$(LOCAL)/okta-ci/profile-probe" ./testdata/okta
+
 help:
 	@printf '%s\n' \
 	 'setup             Install project-local Python tools and download Go modules' \

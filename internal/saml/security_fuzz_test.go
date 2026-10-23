@@ -7,6 +7,7 @@ package saml
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -15,10 +16,18 @@ import (
 // decode to the SAME signed claims, including identity, groups and deadlines.
 func FuzzSignedSAMLClaims(f *testing.F) {
 	sp, signer, base := fixture(f)
+	key, cert := encryptionFixture(f)
+	sp.AssertionEncryption, _ = NewAssertionEncryption(EncryptionOptional, key, cert)
 	var originals [][]byte
 	var expected []*Assertion
-	for _, mode := range []string{"response", "assertion", "both"} {
-		data := document(f, signedFixture(f, signer, base.Copy(), mode))
+	for _, mode := range []string{"response", "assertion", "both", "encrypted-response", "encrypted-assertion", "encrypted-both"} {
+		root := base.Copy()
+		if strings.HasPrefix(mode, "encrypted-") {
+			root = encryptedResponse(f, signer, root, &key.PublicKey, strings.TrimPrefix(mode, "encrypted-"))
+		} else {
+			root = signedFixture(f, signer, root, mode)
+		}
+		data := document(f, root)
 		a, err := sp.ParseXMLResponse(data, []string{"_request"}, sp.AcsURL)
 		if err != nil {
 			f.Fatal("valid signed fuzz fixture refused")
@@ -26,7 +35,7 @@ func FuzzSignedSAMLClaims(f *testing.F) {
 		originals = append(originals, data)
 		expected = append(expected, a)
 	}
-	for mode := byte(0); mode < 3; mode++ {
+	for mode := byte(0); int(mode) < len(originals); mode++ {
 		f.Add(mode, byte(0), uint32(0), []byte{})
 		f.Add(mode, byte(0), uint32(0), []byte(" "))
 		f.Add(mode, byte(1), uint32(50), []byte("<a:Assertion/>"))

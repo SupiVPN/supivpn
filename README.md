@@ -105,6 +105,9 @@ Start with [architecture](docs/ARCHITECTURE.md), [runtime commands](docs/RUNTIME
 [host requirements](docs/HOST.md), [controller](docs/CONTROLLER.md),
 [database](docs/DATABASE.md), [security model](docs/SECURITY_MODEL.md), or
 [release delivery](docs/RELEASES.md).
+See [optional assertion encryption](docs/ASSERTION_ENCRYPTION.md) for its
+availability, modes and key setup, and [real Okta acceptance](docs/OKTA_TESTS.md)
+for the isolated weekly and pre-release checks.
 
 The layout follows Go's [server project guidance](https://go.dev/doc/modules/layout)
 and [single-module repository guidance](https://go.dev/doc/modules/managing-source).

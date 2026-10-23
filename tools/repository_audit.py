@@ -86,6 +86,8 @@ def permitted(path):
             "agent.example.json", "controller.example.json", "server.conf.example", "setup.example.json",
         }))
     if path.parts[0] == "ci":
+        if path.as_posix() in {"ci/okta/run.cjs", "ci/okta/profile.cjs", "ci/okta/run.test.cjs"}:
+            return True
         return (path.suffix in {".py", ".sh", ".yaml", ".md", ".example", ".nft"}
                 or path.name in {"Dockerfile", ".dockerignore"} or path == Path("ci/signers.json"))
     if path.parts[0] == "docs":

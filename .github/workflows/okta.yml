@@ -1,0 +1,97 @@
+name: Real Okta
+
+on:
+  schedule:
+    - cron: '41 6 * * 2'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/saml/**'
+      - 'internal/controller/**'
+      - 'internal/controlruntime/**'
+      - 'internal/profile/**'
+      - 'internal/postgres/**'
+      - 'internal/gateway/**'
+      - 'internal/lambdaruntime/**'
+      - 'internal/agent/**'
+      - 'cmd/supivpn-controller/**'
+      - 'cmd/supivpn-lambda/**'
+      - 'testdata/okta/**'
+      - 'ci/okta/**'
+      - '.github/workflows/okta.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+# One dedicated test identity; never overlap password logins or cancel mid-test.
+concurrency:
+  group: real-okta
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    if: >-
+      github.repository == 'SupiVPN/supivpn' &&
+      github.ref == 'refs/heads/main' &&
+      vars.OKTA_LIVE_TESTS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: okta-tests
+    services:
+      postgres:
+        image: postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
+        env:
+          POSTGRES_DB: supivpn_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - '127.0.0.1:55432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres -d supivpn_test"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Prepare isolated browser tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libnss3-tools openssl
+          npm install --prefix local/okta-ci --no-save --ignore-scripts --no-audit --no-fund playwright@1.62.1
+          local/okta-ci/node_modules/.bin/playwright install --with-deps firefox
+      - name: Check fixture boundaries and build the probe
+        run: |
+          node --test ci/okta/run.test.cjs
+          make okta-probe
+      - name: Real SAML login and profile acceptance
+        env:
+          OKTA_TEST_ORIGIN: https://test.supivpn.com:18443
+          OKTA_TENANT_ORIGIN: ${{ vars.OKTA_TENANT_ORIGIN }}
+          OKTA_METADATA_URL: ${{ vars.OKTA_METADATA_URL }}
+          OKTA_TEST_ALLOWED_GROUP: ${{ vars.OKTA_TEST_ALLOWED_GROUP }}
+          OKTA_TEST_DENIED_GROUP: ${{ vars.OKTA_TEST_DENIED_GROUP }}
+          OKTA_TEST_USERNAME: ${{ secrets.OKTA_TEST_USERNAME }}
+          OKTA_TEST_PASSWORD: ${{ secrets.OKTA_TEST_PASSWORD }}
+        run: node ci/okta/run.cjs
+      # No traces, screenshots, HAR, profile downloads or key artifacts uploaded.
+      - name: Remove this runner's ephemeral fixtures
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          root = Path("local/okta-ci")
+          if root.is_dir():
+              for entry in root.glob("run-*"):
+                  if entry.is_dir() and not entry.is_symlink():
+                      shutil.rmtree(entry)
+          PY

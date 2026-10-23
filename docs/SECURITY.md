@@ -45,16 +45,22 @@ This is a restricted Web SSO profile, not a general replacement for a SAML/XMLDS
 
 - SP-initiated AuthnRequest via HTTP-Redirect; HTTP-POST responses only.
   One expected request ID, exact ACS/Destination/InResponseTo/Issuer/Audience.
-  IdP-initiated flows, Artifact binding, SLO, XML encryption, and signed
+  IdP-initiated flows, Artifact binding, SLO, and signed
   AuthnRequests are unsupported.
 - One Assertion; signed Response, Assertion, or both.
   Every present signature must verify.
+- Optional [assertion encryption](ASSERTION_ENCRYPTION.md): explicit disabled
+  (default), optional and required modes; RSA-OAEP with AES-128/256-GCM only.
+  Encryption never replaces signature or authorization checks. CBC and RSA
+  v1.5 key transport are rejected. XML limits also apply after decryption.
 - **RSA PKCS#1 v1.5 + SHA-256**, SHA-256 digest, **Exclusive XML C14N 1.0 without
   comments**, optional InclusiveNamespaces PrefixList.
 - Exactly one Reference `#ID` targeting the verified element.
   Exactly two transforms: enveloped-signature → exclusive C14N.
   Empty/external URIs, multiple references, XPath, implicit transforms,
-  SHA-1, ECDSA, RSA-PSS, and inclusive C14N are rejected.
+  SHA-1 signatures/digests, ECDSA, RSA-PSS, and inclusive C14N are rejected.
+  Standard OAEP-SHA1/MGF1-SHA1 defaults for encryption are a separate algorithm
+  use and do not enable SHA-1 signatures.
 - Trusted RSA keys come only from locally configured IdP metadata.
   Response KeyInfo adds no trust. Checks enforce RSA 2048–8192, certificate
   validity, digitalSignature when KeyUsage is present, and metadata validUntil
