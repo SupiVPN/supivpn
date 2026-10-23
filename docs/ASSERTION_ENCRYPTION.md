@@ -130,9 +130,15 @@ Renew the certificate before expiry.
   `http://www.w3.org/2009/xmlenc11#aes128-gcm` and
   `http://www.w3.org/2009/xmlenc11#aes256-gcm`.
   A 12-byte nonce precedes ciphertext and a 16-byte authentication tag.
-- One inline `EncryptedKey` under `EncryptedData/ds:KeyInfo`.
-  An optional Recipient must equal the SP Entity ID. An optional DataReference
-  must target that same EncryptedData ID.
+- One inline `EncryptedKey` under `EncryptedData/ds:KeyInfo`, or one immediate
+  sibling `EncryptedKey` inside the same `EncryptedAssertion` (Okta's layout).
+  The sibling layout requires exactly one `ds:RetrievalMethod` in the data's
+  KeyInfo, with Type `http://www.w3.org/2001/04/xmlenc#EncryptedKey` and URI
+  exactly `#<sibling-key-Id>`. Its reverse ReferenceList must contain exactly one
+  DataReference targeting `#<EncryptedData-Id>`. No transforms or wider key lookup
+  are performed; mixed inline/sibling keys and ambiguous references fail.
+  An optional Recipient must equal the SP Entity ID. For inline keys, an optional
+  DataReference must likewise target the same EncryptedData ID.
 - RSA-OAEP: XML Encryption 1.1
   `http://www.w3.org/2009/xmlenc11#rsa-oaep` with SHA-1 or SHA-256 for the
   OAEP digest and MGF1, or the XML Encryption 1.0
@@ -141,9 +147,9 @@ Renew the certificate before expiry.
   These defaults concern key wrapping only: **SHA-1 XML signatures remain rejected**.
   Prefer explicit SHA-256 digest and MGF1-SHA256 when the IdP supports them.
 - Optional OAEP label: empty or at most 64 decoded bytes.
-- No CBC, RSA PKCS#1 v1.5 key transport, external CipherReference,
-  RetrievalMethod, detached/sibling encrypted keys, EncryptedID or encrypted
-  attributes. Unknown algorithms or structures are rejected without fallback.
+- No CBC, RSA PKCS#1 v1.5 key transport, CipherReference, external or transformed
+  RetrievalMethod, keys outside the current EncryptedAssertion, EncryptedID or
+  encrypted attributes. Unknown algorithms or structures fail without fallback.
 
 The existing 1 MiB XML limit applies to the encrypted response and separately to
 decrypted XML; base64/encryption overhead reduces the usable assertion size.
@@ -160,6 +166,11 @@ OAEP-SHA256/MGF1-SHA256 (Debian's XMLSec lacks that XML Encryption 1.1 URI).
 `make integration` covers encrypted profile downloads and replay/group/browser
 binding across PostgreSQL-backed controllers, and VM/Lambda adapter flows.
 Signed-claim fuzzing includes encrypted responses.
+
+[Real Okta acceptance](OKTA_TESTS.md) exercises AES-256-GCM with RSA-OAEP,
+including the sibling-key layout, successful profile issuance in optional and
+required modes, and wrong-key/plaintext-policy rejection. The runner checks
+the actual encrypted wire format to prevent a silent plaintext fallback.
 
 Synthetic interoperability does not establish that every IdP emits this subset.
 Test the configured real IdP before requiring encryption.

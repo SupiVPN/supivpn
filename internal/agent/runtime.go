@@ -31,6 +31,7 @@ import (
 )
 
 type config struct {
+	VPNLoginConfirmation *bool `json:"vpn_login_confirmation,omitempty"`
 	AssertionEncryption *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
     Logging *logging.Config `json:"logging,omitempty"`
 	MaxConnectionsPerUser int         `json:"max_connections_per_user,omitempty"`
@@ -72,6 +73,9 @@ func readConfig(path string) (config, *url.URL, error) {
 	}
 	if c.RemoteController != nil && c.AssertionEncryption != nil {
 		return c, nil, errors.New("assertion encryption belongs to the remote controller")
+	}
+	if c.RemoteController != nil && c.VPNLoginConfirmation != nil {
+		return c, nil, errors.New("VPN login confirmation belongs to the remote controller")
 	}
 	if c.AssertionEncryption != nil && c.AssertionEncryption.PrivateKeyFile != "" && c.AssertionEncryption.PrivateKeyFile == c.TLSPrivateKey {
 		return c, nil, errors.New("use a dedicated SAML encryption key separate from TLS")

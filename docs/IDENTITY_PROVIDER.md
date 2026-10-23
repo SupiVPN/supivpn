@@ -30,10 +30,63 @@ the pool. Assign the app to the required users/groups and agree on IdP policy
 with the operator. The current controller does not request `ForceAuthn=true`;
 an existing browser session may complete SAML without another password prompt.
 
+By default, a VPN SAML login first displays an explicit confirmation page.
+Approve it only when OpenVPN Connect on your device has just opened it. See
+[VPN login confirmation](#vpn-login-confirmation) for configuration and the risk
+of disabling this step.
+
 The OpenVPN client initiates VPN login. Profile downloads can use the same
 [SAML app tile](PROFILES.md): the launch endpoint discards its unsolicited
 POST and redirects to a fresh SP-initiated flow. Direct links and Bookmarks also
 work. An IdP-initiated assertion never replaces the correlated authorization response.
+
+## VPN login confirmation
+
+**Availability:** this option is implemented on the development branch and is not
+included in v0.6.1. Deploy a release containing it before changing configuration.
+
+`vpn_login_confirmation` controls the browser page shown before VPN SAML starts:
+
+| JSON value | Behavior |
+| --- | --- |
+| Omitted, `null`, or `true` | Enabled: GET displays the page; an explicit browser-bound same-origin POST starts SAML. This is the safe default. |
+| `false` | Disabled: GET immediately starts SAML and redirects to the IdP. |
+
+Keep the default, or make it explicit in the existing runtime JSON:
+
+```json
+{
+  "vpn_login_confirmation": true
+}
+```
+
+This is a configuration fragment, not a complete file. Set it on the **public
+controller**, whether VM or public Lambda, with the same value on every replica.
+On Debian, that is `/etc/supivpn/controller/controller.json`. A legacy agent
+serving SAML locally also accepts the setting. Omit it from remote node agents,
+agent-only Lambda and recovery Lambda: those components do not serve browser
+login. Restart/redeploy the component after changing configuration. The setting
+does not alter profile downloads or their separate SAML flow.
+
+With confirmation enabled, a separate host-only Secure/HttpOnly SameSite=Strict
+cookie and exact same-origin form POST bind the action to that browser. Opening
+a copied login URL alone does not start SAML. Only approve a login opened by your
+own OpenVPN Connect; the URL's ticket selects the VPN connection to authorize.
+
+**Disabling the step reintroduces the relayed-login-link risk.** If an attacker
+starts a VPN connection and sends its login URL to another user, opening that
+URL with an existing valid IdP session can authorize the attacker's connection
+without a SupiVPN confirmation. To explicitly accept that risk, change the JSON
+value to `false`. Signed assertions, group policy, request correlation, browser
+cookies and replay protection still apply, but do not establish that the browser
+owns the requesting VPN client. MFA and assertion encryption do not establish
+that binding either.
+
+Even the enabled page confirms intent rather than device ownership: a user who
+knowingly approves someone else's login can still authorize that connection.
+Strong client/browser binding needs a separate client-assisted mechanism. API
+Gateway deployments must retain the exact GET and POST login routes and preserve
+Origin, cookies and form bodies; see [public routes](CONTROLLER_API.md).
 
 ## Groups claim
 

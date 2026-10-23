@@ -71,6 +71,16 @@ real stop operations and IAM/EC2/database failures need deployment testing.
    subset, negative tests, fuzzing, and XMLSec interoperability. These do not
    replace independent review of canonicalization, wrapping, schema assumptions,
    time conditions, and target IdP integration.
+   The internal October 23 review adds bounded inclusive-prefix handling,
+   signature-before-reference processing and VPN browser confirmation enabled
+   by default. [Setting `vpn_login_confirmation=false`](IDENTITY_PROVIDER.md#vpn-login-confirmation)
+   removes that step: a relayed link can use the victim's existing IdP session
+   to authorize another client's connection without SupiVPN confirmation.
+   A confirmation is not proof that the browser and requesting VPN client are
+   on the same device. A user who deliberately approves a relayed login can
+   still authorize another client's connection. Stronger client/browser binding
+   needs a separately designed client-assisted mechanism; neither MFA nor
+   assertion encryption establishes that binding.
 4. **Keys and compromise response.** Verify procedures for lost wrapping/TLS/IdP/
    database/agent credentials. Individual profile revocation and automatic wrapping-key
    rotation with overlap are not implemented. A profile alone cannot authorize VPN

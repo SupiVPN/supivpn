@@ -110,14 +110,9 @@ func verifySignature(e *etree.Element, certs []*x509.Certificate) (*etree.Elemen
 	if err != nil || len(expected) != sha256.Size {
 		return nil, errSAML
 	}
-	canonical, err := canonicalize(e, sig, rp)
-	if err != nil {
-		return nil, err
-	}
-	digest := sha256.Sum256(canonical)
-	if subtle.ConstantTimeCompare(expected, digest[:]) != 1 {
-		return nil, errSAML
-	}
+	// Authenticate SignedInfo before applying its reference transform to the
+	// larger document. Even the supported, bounded transform need not be run
+	// on behalf of a sender who cannot prove possession of a trusted IdP key.
 	signed, err := canonicalize(si, nil, prefixes)
 	if err != nil {
 		return nil, err
@@ -136,6 +131,7 @@ func verifySignature(e *etree.Element, certs []*x509.Certificate) (*etree.Elemen
 	}
 	h := sha256.Sum256(signed)
 	now := time.Now()
+	trusted := false
 	for _, cert := range certs {
 		key, ok := cert.PublicKey.(*rsa.PublicKey)
 		if !ok || key.N.BitLen() < 2048 || key.N.BitLen() > 8192 || now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) {
@@ -145,10 +141,22 @@ func verifySignature(e *etree.Element, certs []*x509.Certificate) (*etree.Elemen
 			continue
 		}
 		if rsa.VerifyPKCS1v15(key, crypto.SHA256, h[:], signature) == nil {
-			// Authorization consumes the exact canonical bytes whose digest we checked,
-			// with comments and this signature removed, never the unverified input tree.
-			return parseXML(canonical)
+			trusted = true
+			break
 		}
 	}
-	return nil, errSAML
+	if !trusted {
+		return nil, errSAML
+	}
+	canonical, err := canonicalize(e, sig, rp)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(canonical)
+	if subtle.ConstantTimeCompare(expected, digest[:]) != 1 {
+		return nil, errSAML
+	}
+	// Authorization consumes the exact canonical bytes whose digest we checked,
+	// with comments and this signature removed, never the unverified input tree.
+	return parseXML(canonical)
 }

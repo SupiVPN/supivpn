@@ -37,6 +37,7 @@ type Group struct {
 	Priority int    `json:"priority"`
 }
 type Config struct {
+	VPNLoginConfirmation *bool `json:"vpn_login_confirmation,omitempty"`
 	AssertionEncryption *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
     Logging *logging.Config `json:"logging,omitempty"`
 	DatabaseTLS *postgres.TLSConfig `json:"database_tls,omitempty"`
@@ -117,7 +118,7 @@ func (c Config) Policy() (controller.Config, *url.URL, error) {
 		c.PendingSeconds < 30 || c.PendingSeconds > 180 || !controller.ValidSessionSeconds(c.SessionSeconds) {
 		return controller.Config{}, nil, errors.New("invalid controller limits, metadata path or groups claim")
 	}
-	p := controller.Config{Policy: controller.Policy{SAMLGroupsAttribute: c.SAMLGroupsAttribute, MaxConnectionsPerUser: c.MaxConnectionsPerUser}, PendingSeconds: c.PendingSeconds, SessionSeconds: c.SessionSeconds}
+	p := controller.Config{Policy: controller.Policy{SAMLGroupsAttribute: c.SAMLGroupsAttribute, MaxConnectionsPerUser: c.MaxConnectionsPerUser}, PendingSeconds: c.PendingSeconds, SessionSeconds: c.SessionSeconds, VPNLoginConfirmation: c.VPNLoginConfirmation}
 	for _, g := range c.Groups {
 		p.Groups = append(p.Groups, controller.Group{GroupName: g.Name, Priority: g.Priority, MaxConnectionsPerUser: g.MaxConnectionsPerUser, SessionSeconds: g.SessionSeconds})
 	}

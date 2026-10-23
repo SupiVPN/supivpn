@@ -56,7 +56,7 @@ func (c *EncryptionConfig) Load() (*AssertionEncryption, error) {
 	}
 	defer clear(keyPEM)
 	block, rest := pem.Decode(keyPEM)
-	if block == nil || len(bytes.TrimSpace(rest)) != 0 || len(block.Headers) != 0 || !bytes.HasPrefix(bytes.TrimSpace(keyPEM), []byte("-----BEGIN "+block.Type+"-----")) {
+	if !singleEncryptionPEM(keyPEM, block, rest) {
 		return nil, errSAML
 	}
 	defer clear(block.Bytes)
@@ -79,7 +79,7 @@ func (c *EncryptionConfig) Load() (*AssertionEncryption, error) {
 		return nil, errors.New("cannot load SAML encryption certificate")
 	}
 	certBlock, rest := pem.Decode(certPEM)
-	if certBlock == nil || certBlock.Type != "CERTIFICATE" || len(certBlock.Headers) != 0 || len(bytes.TrimSpace(rest)) != 0 || !bytes.HasPrefix(bytes.TrimSpace(certPEM), []byte("-----BEGIN CERTIFICATE-----")) {
+	if !singleEncryptionPEM(certPEM, certBlock, rest) || certBlock.Type != "CERTIFICATE" {
 		return nil, errSAML
 	}
 	cert, err := x509.ParseCertificate(certBlock.Bytes)
@@ -87,6 +87,15 @@ func (c *EncryptionConfig) Load() (*AssertionEncryption, error) {
 		return nil, errSAML
 	}
 	return NewAssertionEncryption(c.Mode, key, cert)
+}
+
+func singleEncryptionPEM(data []byte, block *pem.Block, rest []byte) bool {
+	// pem.Decode deliberately skips malformed leading blocks. A file starting
+	// with the expected marker could otherwise hide another object before the
+	// decoded one. Base64 cannot contain these boundary markers.
+	return block != nil && len(block.Headers) == 0 && len(bytes.TrimSpace(rest)) == 0 &&
+		bytes.HasPrefix(bytes.TrimSpace(data), []byte("-----BEGIN "+block.Type+"-----")) &&
+		bytes.Count(data, []byte("-----BEGIN ")) == 1 && bytes.Count(data, []byte("-----END ")) == 1
 }
 
 func encryptionPEMFile(path string, private bool) ([]byte, error) {

@@ -47,10 +47,22 @@ a URL with the `/supivpn` prefix; Entity ID and ACS are derived from it.
   Requests have a 10-second timeout, or the shorter Lambda deadline.
 - Group mode is mandatory. IP pools remain agent configuration;
   the controller returns the selected group name and authorization deadlines.
+- `vpn_login_confirmation` is a JSON boolean for the public controller:
+  omitted/null/true enables the safe default; false starts VPN SAML immediately
+  on GET. Omit it from remote node agents and agent-only/recovery Lambdas.
+  Profile downloads are unaffected. See the [example and relay-risk warning](IDENTITY_PROVIDER.md#vpn-login-confirmation).
 
 Public routes: `GET /healthz`, `GET /saml/metadata`,
-`GET /login/{ticket}`, `GET /profile`, `POST /saml/launch`, `POST /saml/acs`.
+`GET /login/{ticket}`, `POST /login/{ticket}`, `GET /profile`,
+`POST /saml/launch`, `POST /saml/acs`.
 All paths are relative to `public_url`, including its optional `/supivpn` prefix.
+With the default confirmation enabled, VPN login GET displays a page without
+starting SAML. Its explicit form POST requires an exact same-origin header and a
+separate browser-bound token before redirecting to the IdP. Setting
+`vpn_login_confirmation=false` makes GET start SAML directly. API Gateway must
+expose both exact `GET` and `POST /login/{ticket}` routes to the public function, preserving
+Origin, cookies and the form body. Add the POST route when deploying this change
+from main; it is not present in v0.6.1. No catch-all route is needed.
 Launch discards the tile POST and returns a fixed 303 to `/profile`; it performs
 no authentication, pending-state creation, or key access. It is available only
 when profile downloads are configured and needs its own exact API route.

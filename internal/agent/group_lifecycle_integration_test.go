@@ -121,11 +121,12 @@ func (f *groupLifecycleFixture) begin(t *testing.T, node int, cid uint64, subjec
 		t.Fatalf("expected browser challenge, got %s", command)
 	}
 	ticket := a.connections[cid].ticket
-	w := httptest.NewRecorder()
-	requestStart := httptest.NewRequest("GET", f.app.origin.String()+"/login/"+ticket, nil)
-	f.control.Handler().ServeHTTP(w, requestStart.WithContext(logging.WithLogger(requestStart.Context(), f.publicLogger)))
-	if w.Code != http.StatusFound || len(w.Result().Cookies()) != 1 { t.Fatal("SAML redirect failed") }
-	cookie := w.Result().Cookies()[0]
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.control.Handler().ServeHTTP(w, r.WithContext(logging.WithLogger(r.Context(), f.publicLogger)))
+	})
+	w := confirmVPNLogin(t, handler, f.app.origin, ticket)
+	if w.Code != http.StatusFound || len(w.Result().Cookies()) != 2 { t.Fatal("SAML redirect failed") }
+	cookie := samlLoginCookie(t, w.Result(), ticket)
 	pending, err := f.stores[0].Lookup(context.Background(), ticket, sha256.Sum256([]byte(cookie.Value)))
 	if err != nil { t.Fatal(err) }
 	assertion := assertionFor(f.app)

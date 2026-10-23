@@ -19,6 +19,9 @@ Public URLs, SAML policy, metadata, and database settings must agree across repl
 See [parameters, API, and agent authentication](CONTROLLER_API.md).
 Optional [assertion encryption](ASSERTION_ENCRYPTION.md) uses a dedicated
 controller key and explicit disabled/optional/required modes.
+[VPN login confirmation](IDENTITY_PROVIDER.md#vpn-login-confirmation) is enabled
+by default; `vpn_login_confirmation=false` explicitly disables it and restores
+the documented risk from relayed login links. Set this only on the public controller.
 
 The VM process opens HTTPS and a private agent Unix socket with peer UID checks.
 It can run next to OpenVPN but does not own its management socket.
@@ -33,6 +36,11 @@ Agents do not need a Function URL or direct Lambda invocation.
 ## HTTPS and protection
 
 Public routes cover health, metadata, login initiation, ACS, and profile download.
+Expose both `GET` and `POST <public_url>/login/{ticket}`. With the default login
+confirmation enabled, GET displays the page and only the browser-bound same-origin
+form submission starts SAML. When explicitly disabled, GET redirects straight to
+the IdP. Preserve Origin, cookies and form bodies through proxies so the default
+can be restored without changing routes.
 For a single SAML dashboard tile, also expose exact `POST <public_url>/saml/launch`.
 It only redirects to the existing profile login; unsolicited assertions grant
 no access. See [Okta setup and rollout requirements](PROFILES.md).

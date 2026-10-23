@@ -84,6 +84,9 @@ func (a *Controller) authorizationBounds(assertion *saml.Assertion, requestID, g
 		}
 	}
 	if data := a.bearerConfirmation(assertion, requestID, now); data != nil {
+		if data.NotBefore.After(decision.NotBefore) {
+			decision.NotBefore = data.NotBefore
+		}
 		if data.NotOnOrAfter.Before(decision.NotOnOrAfter) {
 			decision.NotOnOrAfter = data.NotOnOrAfter
 		}

@@ -27,8 +27,9 @@ import (
 
 type Config struct {
 	Policy
-	PendingSeconds int
-	SessionSeconds int
+	PendingSeconds       int
+	SessionSeconds       int
+	VPNLoginConfirmation *bool
 }
 
 type Controller struct {
@@ -64,6 +65,10 @@ func New(c Config, origin *url.URL, sp *saml.ServiceProvider, backend Backend, n
 	}
 	if now == nil {
 		now = time.Now
+	}
+	if c.VPNLoginConfirmation != nil {
+		enabled := *c.VPNLoginConfirmation
+		c.VPNLoginConfirmation = &enabled
 	}
 	c.AllowedSubjects = append([]string(nil), c.AllowedSubjects...)
 	c.Groups = append([]Group(nil), c.Groups...)
@@ -116,7 +121,8 @@ func (a *Controller) Handler() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-		if r.TLS == nil || !strings.EqualFold(r.Host, a.origin.Host) {
+		expectedOrigin := serializedHTTPSOrigin(a.origin)
+		if r.TLS == nil || expectedOrigin == "" || serializedHTTPSOrigin(&url.URL{Scheme: "https", Host: r.Host}) != expectedOrigin {
 			http.Error(w, "Invalid HTTPS origin", http.StatusBadRequest)
 			return
 		}
@@ -160,15 +166,6 @@ func (a *Controller) metadata(w http.ResponseWriter, r *http.Request) {
 func CookieName(ticket string) string {
 	sum := sha256.Sum256([]byte(ticket))
 	return fmt.Sprintf("__Host-supivpn-%x", sum[:12])
-}
-
-func (a *Controller) login(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	ticket := strings.TrimPrefix(r.URL.Path, a.origin.Path+"/login/")
-	a.startLogin(w, r, ticket, a.backend)
 }
 
 func (a *Controller) profile(w http.ResponseWriter, r *http.Request) {

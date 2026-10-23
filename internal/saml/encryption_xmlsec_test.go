@@ -114,6 +114,17 @@ func TestXMLSecAssertionEncryption(t *testing.T) {
 				if _, err = sp.ParseXMLResponse(document(t, root), []string{"_request"}, sp.AcsURL); err != nil {
 					t.Fatal("signed encrypted response refused")
 				}
+				// Move the independently encrypted key into Okta's sibling layout.
+				// The ciphertext and authenticated assertion remain unchanged.
+				root.RemoveChild(root.FindElement("./Signature"))
+				root = peerEncryptionKey(root)
+				if _, err = sp.ParseXMLResponse(document(t, root), []string{"_request"}, sp.AcsURL); err != nil {
+					t.Fatal("XMLSec sibling encrypted key refused")
+				}
+				root = signedFixture(t, signer, root, "response")
+				if _, err = sp.ParseXMLResponse(document(t, root), []string{"_request"}, sp.AcsURL); err != nil {
+					t.Fatal("signed XMLSec sibling encrypted key refused")
+				}
 				// No library-specific re-encryption is needed to decrypt the original payload.
 				plainOut := filepath.Join(dir, "decrypted.xml")
 				run(t, "--decrypt", "--privkey-pem", keyPath, "--output", plainOut, outPath)

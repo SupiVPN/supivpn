@@ -6,6 +6,7 @@ package saml
 
 import (
 	"bytes"
+	"crypto"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,9 +21,18 @@ func FuzzSignedSAMLClaims(f *testing.F) {
 	sp.AssertionEncryption, _ = NewAssertionEncryption(EncryptionOptional, key, cert)
 	var originals [][]byte
 	var expected []*Assertion
-	for _, mode := range []string{"response", "assertion", "both", "encrypted-response", "encrypted-assertion", "encrypted-both"} {
+	for _, mode := range []string{"response", "assertion", "both", "encrypted-response", "encrypted-assertion", "encrypted-both", "peer-response", "peer-assertion", "peer-both"} {
 		root := base.Copy()
-		if strings.HasPrefix(mode, "encrypted-") {
+		if strings.HasPrefix(mode, "peer-") {
+			signatures := strings.TrimPrefix(mode, "peer-")
+			if signatures != "response" {
+				root = signedFixture(f, signer, root, "assertion")
+			}
+			root = peerEncryptionKey(encryptFixture(f, root, &key.PublicKey, 32, true, crypto.SHA1, crypto.SHA1))
+			if signatures != "assertion" {
+				root = signedFixture(f, signer, root, "response")
+			}
+		} else if strings.HasPrefix(mode, "encrypted-") {
 			root = encryptedResponse(f, signer, root, &key.PublicKey, strings.TrimPrefix(mode, "encrypted-"))
 		} else {
 			root = signedFixture(f, signer, root, mode)

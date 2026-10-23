@@ -22,6 +22,8 @@ const dsNamespace = "http://www.w3.org/2000/09/xmldsig#"
 const exclusiveC14N = "http://www.w3.org/2001/10/xml-exc-c14n#"
 const xmlNamespace = "http://www.w3.org/XML/1998/namespace"
 const maxXMLBytes = 1 << 20
+const maxInclusivePrefixes = 64
+const maxCanonicalBytes = 4 * maxXMLBytes
 
 var errSAML = errors.New("invalid or unsupported SAML")
 var xmlName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
@@ -314,7 +316,13 @@ func canonicalize(root, omit *etree.Element, prefixes string) ([]byte, error) {
 		return nil, err
 	}
 	inclusive := map[string]bool{}
-	for _, p := range strings.Fields(prefixes) {
+	list := strings.Fields(prefixes)
+	// Inclusive prefixes are consulted at every element. Bound that product
+	// even when an unauthenticated SignedInfo lists unused or repeated names.
+	if len(list) > maxInclusivePrefixes {
+		return nil, errSAML
+	}
+	for _, p := range list {
 		if p == "#default" {
 			p = ""
 		} else if !xmlName.MatchString(p) {
@@ -399,6 +407,9 @@ func canonicalize(root, omit *etree.Element, prefixes string) ([]byte, error) {
 			out.WriteString(" " + name + "=\"" + escaped(a.Value, true) + "\"")
 		}
 		out.WriteByte('>')
+		if out.Len() > maxCanonicalBytes {
+			return errSAML
+		}
 		for _, t := range e.Child {
 			switch c := t.(type) {
 			case *etree.Element:
@@ -411,11 +422,14 @@ func canonicalize(root, omit *etree.Element, prefixes string) ([]byte, error) {
 			default:
 				return errSAML
 			}
-			if out.Len() > 4*maxXMLBytes {
+			if out.Len() > maxCanonicalBytes {
 				return errSAML
 			}
 		}
 		out.WriteString("</" + q + ">")
+		if out.Len() > maxCanonicalBytes {
+			return errSAML
+		}
 		return nil
 	}
 	err = visit(root, scope, map[string]string{"xml": xmlNamespace}, 1)

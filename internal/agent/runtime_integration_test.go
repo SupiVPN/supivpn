@@ -28,6 +28,7 @@ import (
 	"github.com/beevik/etree"
 	"supivpn/internal/agentapi"
 	"supivpn/internal/agentclient"
+	"supivpn/internal/controller"
 	"supivpn/internal/controlruntime"
 	"supivpn/internal/gateway"
 	"supivpn/internal/postgres"
@@ -100,7 +101,7 @@ func serveRuntimeVMAt(t *testing.T, app *controlruntime.Application, socket stri
 func runtimeEvent(origin *url.URL, method, path, body string, cookie *http.Cookie) events.APIGatewayV2HTTPRequest {
 	route := method + " " + path
 	if strings.HasPrefix(path, "/login/") {
-		route = "GET /login/{ticket}"
+		route = method + " /login/{ticket}"
 	}
 	e := events.APIGatewayV2HTTPRequest{Version: "2.0", RouteKey: route, RawPath: path, Headers: map[string]string{"host": origin.Host, "content-type": "application/x-www-form-urlencoded"},
 		Body: base64.StdEncoding.EncodeToString([]byte(body)), IsBase64Encoded: true,
@@ -127,11 +128,11 @@ func runtimeAgentRequest(t *testing.T, client *http.Client, path, body string) (
 	return resp.StatusCode, b
 }
 func TestRuntimeSAMLAcrossVMAndLambda(t *testing.T) {
-	testRuntimeSAML(t, false, "")
+	testRuntimeSAML(t, false, "", false, nil)
 }
 
 func TestRuntimeSAMLAcrossVMAndREST(t *testing.T) {
-	testRuntimeSAML(t, true, "/supivpn")
+	testRuntimeSAML(t, true, "/supivpn", false, nil)
 }
 
 func TestEncryptedRuntimeSAMLAcrossVMAndLambda(t *testing.T) {
@@ -142,11 +143,25 @@ func TestEncryptedRuntimeSAMLAcrossVMAndLambda(t *testing.T) {
 			name = "rest-api"
 			prefix = "/supivpn"
 		}
-		t.Run(name, func(t *testing.T) { testRuntimeSAML(t, rest, prefix, true) })
+		t.Run(name, func(t *testing.T) { testRuntimeSAML(t, rest, prefix, true, nil) })
 	}
 }
 
-func testRuntimeSAML(t *testing.T, rest bool, prefix string, encrypted ...bool) {
+func TestRuntimeSAMLWithoutConfirmation(t *testing.T) {
+	disabled := false
+	for _, rest := range []bool{false, true} {
+		name, prefix := "http-api", ""
+		if rest {
+			name, prefix = "rest-api", "/supivpn"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Run("plaintext", func(t *testing.T) { testRuntimeSAML(t, rest, prefix, false, &disabled) })
+			t.Run("encrypted", func(t *testing.T) { testRuntimeSAML(t, rest, prefix, true, &disabled) })
+		})
+	}
+}
+
+func testRuntimeSAML(t *testing.T, rest bool, prefix string, encrypted bool, confirmationEnabled *bool) {
 	p, _ := integrationDatabase(t)
 	ctx := context.Background()
 	if _, err := p.Exec(ctx, "TRUNCATE supivpn.logins,supivpn.assertions,supivpn.nodes RESTART IDENTITY CASCADE"); err != nil {
@@ -167,9 +182,9 @@ func testRuntimeSAML(t *testing.T, rest bool, prefix string, encrypted ...bool) 
 		t.Fatal("cannot write public metadata fixture")
 	}
 	cfg := controlruntime.Config{PublicURL: fixture.origin.String(), IDPMetadata: metadataPath, SAMLGroupsAttribute: "groups",
-		Groups: []controlruntime.Group{{Name: "admins-vpn", Priority: 10}, {Name: "engineers-production-vpn", Priority: 20}}, PendingSeconds: 180, SessionSeconds: 900}
+		Groups: []controlruntime.Group{{Name: "admins-vpn", Priority: 10}, {Name: "engineers-production-vpn", Priority: 20}}, PendingSeconds: 180, SessionSeconds: 900, VPNLoginConfirmation: confirmationEnabled}
 	var encrypt func(*etree.Element) *etree.Element
-	if len(encrypted) == 1 && encrypted[0] {
+	if encrypted {
 		cfg.AssertionEncryption = &saml.EncryptionConfig{}
 		encrypt = enableAssertionEncryption(t, fixture.sp, cfg.AssertionEncryption)
 	}
@@ -234,27 +249,78 @@ func testRuntimeSAML(t *testing.T, rest bool, prefix string, encrypted ...bool) 
 			connectRemote(t, node, commands)
 			ticket := node.connections[7].ticket
 			var cookie *http.Cookie
-			if tc.reverse {
+			if confirmationEnabled != nil && !*confirmationEnabled {
+				var response *http.Response
+				if tc.reverse {
+					out, e := handle(ctx, runtimeEvent(fixture.origin, "GET", "/login/"+ticket, "", nil))
+					if e != nil {
+						t.Fatal("Lambda direct SAML start failed")
+					}
+					response = &http.Response{StatusCode: out.StatusCode, Header: http.Header{"Set-Cookie": out.Cookies}}
+				} else {
+					req, _ := http.NewRequest("GET", server.endpoint+prefix+"/login/"+ticket, nil)
+					req.Host = fixture.origin.Host
+					var e error
+					response, e = server.browser.Do(req)
+					if e != nil {
+						t.Fatal("VM direct SAML start failed")
+					}
+					response.Body.Close()
+				}
+				if response.StatusCode != http.StatusFound || len(response.Cookies()) != 1 {
+					t.Fatal("explicitly disabled confirmation did not start SAML")
+				}
+				cookie = response.Cookies()[0]
+				if cookie.Name != controller.CookieName(ticket) || cookie.Value == "" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteNoneMode {
+					t.Fatal("direct SAML start lost the browser binding")
+				}
+			} else if tc.reverse {
 				out, e := handle(ctx, runtimeEvent(fixture.origin, "GET", "/login/"+ticket, "", nil))
-				if e != nil || out.StatusCode != 302 || len(out.Cookies) != 1 {
-					t.Fatal("Lambda did not start SAML")
+				if e != nil || out.StatusCode != http.StatusOK || len(out.Cookies) != 1 {
+					t.Fatal("Lambda did not display VPN confirmation")
 				}
-				cookie, err = http.ParseSetCookie(out.Cookies[0])
-				if err != nil {
-					t.Fatal("invalid Lambda cookie")
+				confirmation, e := http.ParseSetCookie(out.Cookies[0])
+				if e != nil || confirmation.Name != controller.ConfirmationCookieName(ticket) || confirmation.SameSite != http.SameSiteStrictMode {
+					t.Fatal("invalid Lambda confirmation cookie")
 				}
+				form := url.Values{"confirmation": {confirmation.Value}}.Encode()
+				event := runtimeEvent(fixture.origin, "POST", "/login/"+ticket, form, confirmation)
+				event.Headers["origin"] = fixture.origin.Scheme + "://" + fixture.origin.Host
+				out, e = handle(ctx, event)
+				if e != nil || out.StatusCode != http.StatusFound {
+					t.Fatal("Lambda did not start SAML after confirmation")
+				}
+				cookie = samlLoginCookie(t, &http.Response{Header: http.Header{"Set-Cookie": out.Cookies}}, ticket)
 			} else {
 				req, _ := http.NewRequest("GET", server.endpoint+prefix+"/login/"+ticket, nil)
 				req.Host = fixture.origin.Host
 				resp, e := server.browser.Do(req)
 				if e != nil {
-					t.Fatal("VM did not start SAML")
+					t.Fatal("VM did not display VPN confirmation")
 				}
 				resp.Body.Close()
-				if resp.StatusCode != 302 || len(resp.Cookies()) != 1 {
-					t.Fatalf("VM start status: %d", resp.StatusCode)
+				if resp.StatusCode != http.StatusOK || len(resp.Cookies()) != 1 {
+					t.Fatalf("VM confirmation status: %d", resp.StatusCode)
 				}
-				cookie = resp.Cookies()[0]
+				confirmation := resp.Cookies()[0]
+				if confirmation.Name != controller.ConfirmationCookieName(ticket) || confirmation.SameSite != http.SameSiteStrictMode {
+					t.Fatal("invalid VM confirmation cookie")
+				}
+				form := url.Values{"confirmation": {confirmation.Value}}.Encode()
+				req, _ = http.NewRequest("POST", server.endpoint+prefix+"/login/"+ticket, strings.NewReader(form))
+				req.Host = fixture.origin.Host
+				req.Header.Set("Origin", fixture.origin.Scheme+"://"+fixture.origin.Host)
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.AddCookie(confirmation)
+				resp, e = server.browser.Do(req)
+				if e != nil {
+					t.Fatal("VM did not start SAML after confirmation")
+				}
+				resp.Body.Close()
+				if resp.StatusCode != http.StatusFound {
+					t.Fatalf("VM confirmed start status: %d", resp.StatusCode)
+				}
+				cookie = samlLoginCookie(t, resp, ticket)
 			}
 			pending, err := postgres.New(p).Lookup(ctx, ticket, sha256.Sum256([]byte(cookie.Value)))
 			if err != nil {
