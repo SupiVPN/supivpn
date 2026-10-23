@@ -131,7 +131,10 @@ class WorkflowTests(unittest.TestCase):
         execution = credential_steps[0]
         self.assertEqual(execution["run"], "node ci/okta/run.cjs")
         self.assertEqual({value for value in execution["env"].values() if "secrets." in value},
-                         {"${{ secrets.OKTA_TEST_USERNAME }}", "${{ secrets.OKTA_TEST_PASSWORD }}"})
+                         {"${{ secrets.OKTA_TEST_USERNAME }}", "${{ secrets.OKTA_TEST_PASSWORD }}",
+                          "${{ secrets.OKTA_ENCRYPTION_PRIVATE_KEY }}"})
+        self.assertEqual(execution["env"]["OKTA_ENCRYPTED_METADATA_URL"], "${{ vars.OKTA_ENCRYPTED_METADATA_URL }}")
+        self.assertEqual(execution["env"]["OKTA_ENCRYPTION_CERTIFICATE"], "${{ vars.OKTA_ENCRYPTION_CERTIFICATE }}")
         for step in job["steps"]:
             self.assertNotIn("upload-artifact", step.get("uses", ""))
             if step.get("uses", "").startswith("actions/checkout@"):

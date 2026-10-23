@@ -110,6 +110,27 @@ func encryptedResponse(t testing.TB, signer *SigningContext, base *etree.Element
 	return root
 }
 
+// Match Okta's peer key layout without retaining any real assertions or keys.
+func peerEncryptionKey(root *etree.Element) *etree.Element {
+	wrapper := root.FindElement("./EncryptedAssertion")
+	data := wrapper.FindElement("./EncryptedData")
+	info := data.FindElement("./KeyInfo")
+	key := info.FindElement("./EncryptedKey")
+	info.RemoveChild(key)
+	key.CreateAttr("xmlns:x", xencNamespace)
+	key.CreateAttr("xmlns:ds", dsNamespace)
+	key.CreateAttr("xmlns:x11", xenc11Namespace)
+	info.CreateAttr("xmlns:ds", dsNamespace)
+	key.CreateAttr("Id", "_recipient_key")
+	data.CreateAttr("Id", "_encrypted")
+	ref := info.CreateElement("ds:RetrievalMethod")
+	ref.CreateAttr("URI", "#_recipient_key")
+	ref.CreateAttr("Type", xencNamespace+"EncryptedKey")
+	key.CreateElement("x:ReferenceList").CreateElement("x:DataReference").CreateAttr("URI", "#_encrypted")
+	wrapper.AddChild(key)
+	return root
+}
+
 func TestAssertionEncryptionModes(t *testing.T) {
 	sp, signer, base := fixture(t)
 	key, cert := encryptionFixture(t)
@@ -127,9 +148,17 @@ func TestAssertionEncryptionModes(t *testing.T) {
 				t.Run(signatures, func(t *testing.T) {
 					plain := signedFixture(t, signer, base.Copy(), signatures)
 					encrypted := encryptedResponse(t, signer, base, &key.PublicKey, signatures)
-					for i, root := range []*etree.Element{plain, encrypted} {
+					peer := base.Copy()
+					if signatures == "assertion" || signatures == "both" {
+						peer = signedFixture(t, signer, peer, "assertion")
+					}
+					peer = peerEncryptionKey(encryptFixture(t, peer, &key.PublicKey, 32, true, crypto.SHA1, crypto.SHA1))
+					if signatures == "response" || signatures == "both" {
+						peer = signedFixture(t, signer, peer, "response")
+					}
+					for i, root := range []*etree.Element{plain, encrypted, peer} {
 						result, err := sp.ParseXMLResponse(document(t, root), []string{"_request"}, sp.AcsURL)
-						want := signatures != "none" && ((i == 0 && mode != EncryptionRequired) || (i == 1 && mode != EncryptionDisabled))
+						want := signatures != "none" && ((i == 0 && mode != EncryptionRequired) || (i > 0 && mode != EncryptionDisabled))
 						if (err == nil) != want {
 							t.Fatalf("mode/signature/format policy failed: format %d", i)
 						}

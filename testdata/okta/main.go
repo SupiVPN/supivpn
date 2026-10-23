@@ -79,6 +79,8 @@ func run() error {
 	deny := flag.Bool("deny-group", false, "allow only the configured empty group locally")
 	rootPath := flag.String("root", "", "private per-run fixture directory")
 	encryptionMode := flag.String("encryption-mode", "optional", "assertion encryption policy under test")
+	encryptedApp := flag.Bool("encrypted-app", false, "use the dedicated encrypted test app")
+	wrongKey := flag.Bool("wrong-encryption-key", false, "negative test with an unrelated recipient key")
 	flag.Parse()
 	if *port < 1024 || *port > 65535 || !regexp.MustCompile("^[a-f0-9]{24}$").MatchString(*runID) {
 		return errors.New("invalid local test arguments")
@@ -116,7 +118,17 @@ func run() error {
 	if !store.Ready(ctx) {
 		return errors.New("database not ready")
 	}
-	data, err := os.ReadFile(filepath.Join(root, "idp-metadata.xml"))
+	metadataName, recipientName := "idp-metadata.xml", "saml"
+	if *encryptedApp {
+		metadataName, recipientName = "encrypted-idp-metadata.xml", "encrypted-saml"
+	}
+	if *wrongKey {
+		if !*encryptedApp || *encryptionMode == "disabled" {
+			return errors.New("wrong-key test requires encrypted assertions")
+		}
+		recipientName = "saml"
+	}
+	data, err := os.ReadFile(filepath.Join(root, metadataName))
 	if err != nil {
 		return err
 	}
@@ -128,8 +140,12 @@ func run() error {
 	sp := &saml.ServiceProvider{EntityID: origin + "/saml/metadata",
 		MetadataURL: *base.JoinPath("saml/metadata"), AcsURL: *base.JoinPath("saml/acs"),
 		IDPMetadata: md, AuthnNameIDFormat: saml.UnspecifiedNameIDFormat}
-	sp.AssertionEncryption, err = (&saml.EncryptionConfig{Mode: *encryptionMode,
-		CertificateFile: filepath.Join(root, "saml.crt"), PrivateKeyFile: filepath.Join(root, "saml.key")}).Load()
+	encryptionConfig := &saml.EncryptionConfig{Mode: *encryptionMode}
+	if *encryptionMode != "disabled" {
+		encryptionConfig.CertificateFile = filepath.Join(root, recipientName+".crt")
+		encryptionConfig.PrivateKeyFile = filepath.Join(root, recipientName+".key")
+	}
+	sp.AssertionEncryption, err = encryptionConfig.Load()
 	if err != nil {
 		return err
 	}
