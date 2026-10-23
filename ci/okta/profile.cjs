@@ -10,6 +10,7 @@ const https = require('node:https');
 const crypto = require('node:crypto');
 const {spawn, execFileSync} = require('node:child_process');
 const {once} = require('node:events');
+const {assertionFormat,childEnvironment:sanitizedEnvironment} = require('./run.cjs');
 const project = path.resolve(__dirname, '../..');
 const {firefox, request} = require(path.join(project,'local/okta-ci/node_modules/playwright'));
 const root = process.argv[2];
@@ -30,8 +31,7 @@ function password() {
   return process.env.OKTA_TEST_PASSWORD;
 }
 function childEnvironment() {
-  const env={...process.env};
-  delete env.OKTA_TEST_PASSWORD;
+  const env=sanitizedEnvironment(process.env);
   delete env.DEBUG;delete env.PWDEBUG;delete env.NODE_OPTIONS;
   return env;
 }
@@ -89,9 +89,10 @@ async function stopServer() {
   }
   server=undefined;
 }
-async function startServer(port,deny,mode='optional') {
+async function startServer(port,deny,mode='optional',encrypted=false,wrongKey=false) {
   const id=crypto.randomBytes(12).toString('hex');
-  server=spawn(path.join(project,'local/okta-ci/profile-probe'),['--root',root,'--db-port',String(port),'--run-id',id,'--encryption-mode',mode,...(deny?['--deny-group']:[])],
+  server=spawn(path.join(project,'local/okta-ci/profile-probe'),['--root',root,'--db-port',String(port),'--run-id',id,'--encryption-mode',mode,
+    ...(deny?['--deny-group']:[]),...(encrypted?['--encrypted-app']:[]),...(wrongKey?['--wrong-encryption-key']:[])],
     {cwd:project,stdio:['ignore','pipe','pipe'],env:childEnvironment()});
   server.stdout.on('data',()=>{});
   server.stderr.on('data',()=>{});
@@ -105,7 +106,7 @@ async function startServer(port,deny,mode='optional') {
   throw Error('profile_server_not_ready');
 }
 
-async function signInAndDownload(expectDenied, expectedCount) {
+async function signInAndDownload(expectDenied, expectedCount, encrypted=false) {
   const context=await browserContext();
   const api=await request.newContext({ignoreHTTPSErrors:false,timeout:15000});
   const page=await context.newPage();
@@ -114,6 +115,7 @@ async function signInAndDownload(expectDenied, expectedCount) {
   let identifierSent=false,passwordSent=false;
   let missingRefused=false,wrongRefused=false;
   try {
+    const initial=await status();
     await page.route('**/*',async route=>{
       if(route.request().isNavigationRequest() && ![origin,tenant].includes(new URL(route.request().url()).origin))return route.abort();
       return route.continue();
@@ -131,8 +133,8 @@ async function signInAndDownload(expectDenied, expectedCount) {
         check(body && body.length<1048576 && cookie && /^__Host-supivpn-/.test(cookie),'callback_binding');
         const assertionXML=Buffer.from(new URLSearchParams(body.toString('utf8')).get('SAMLResponse')||'','base64');
         try {
-          check(/<(?:[A-Za-z0-9_]+:)?Assertion[\s>]/.test(assertionXML.toString('utf8')) &&
-            !assertionXML.includes(Buffer.from('EncryptedAssertion')),'test_app_must_emit_plaintext');
+          phase=encrypted?'encrypted_assertion_wire_format':'plaintext_assertion_wire_format';
+          assertionFormat(assertionXML,encrypted);
         } finally {assertionXML.fill(0);}
         const baseHeaders={'content-type':'application/x-www-form-urlencoded','origin':tenant};
         let r=await api.post(origin+'/saml/acs',{headers:baseHeaders,data:body,maxRedirects:0});
@@ -178,10 +180,13 @@ async function signInAndDownload(expectDenied, expectedCount) {
     check(!routeFailure && callbackCompleted && passwordSent,'fresh_password_login_incomplete');
     phase='profile_validation';
     let digest;
-    if(expectDenied==='plaintext-required') {
-      check(reply.status===403 && !download,'required_encryption_accepted_plaintext');
+    if(['plaintext-required','encrypted-disabled','wrong-recipient-key'].includes(expectDenied)) {
+      check(reply.status===403 && !download,'encryption_policy_or_key_not_enforced');
       const s=await status();
-      check(s.allowed===0 && s.denied===0 && s.key_loads===0,'plaintext_reached_authorization');
+      check(s.allowed===0 && s.denied===0 && s.key_loads===0,'invalid_encryption_reached_authorization');
+      check(s.assertions===initial.assertions && s.consumed_logins===initial.consumed_logins,
+        'rejected_encryption_consumed_state');
+      check(s.vpn_logins===0 && s.nodes===0,'rejected_encryption_created_session');
       return;
     }
     if(expectDenied) {
@@ -211,7 +216,11 @@ async function signInAndDownload(expectDenied, expectedCount) {
     const after=await status();
     check(after.key_loads===before.key_loads && after.allowed===before.allowed,'replay_issued_profile');
     check(after.vpn_logins===0 && after.nodes===0,'profile_created_vpn_session');
-    check(after.profile_logins===after.consumed_logins && after.assertions===after.consumed_logins,'one_use_state_not_consumed');
+    // Earlier intentionally rejected logins remain pending. Measure this login's
+    // state changes instead of treating unrelated pending rows as consumed.
+    check(after.profile_logins-initial.profile_logins===1 &&
+      after.consumed_logins-initial.consumed_logins===1 && after.assertions-initial.assertions===1,
+      'one_use_state_not_consumed');
     return digest;
   } finally {
     if(body)body.fill(0);
@@ -249,9 +258,35 @@ async function signInAndDownload(expectDenied, expectedCount) {
     stage='required_encryption_rejects_plaintext';
     await startServer(port,false,'required');
     await signInAndDownload('plaintext-required',0);
+    await stopServer();
+    const keys=new Set([first,second]);
+    for(const mode of ['optional','required']) {
+      stage=mode+'_encrypted_profiles';
+      await startServer(port,false,mode,true);
+      for(let count=0;count<2;count++) {
+        const digest=await signInAndDownload(false,count,true);
+        check(!keys.has(digest),'client_keys_reused');
+        keys.add(digest);
+      }
+      await stopServer();
+      result[mode+'_accepts_encrypted']=true;
+      stage=mode+'_wrong_recipient_key';
+      await startServer(port,false,mode,true,true);
+      await signInAndDownload('wrong-recipient-key',0,true);
+      await stopServer();
+      result[mode+'_rejects_wrong_recipient_key']=true;
+    }
+    stage='encrypted_group_denial';
+    await startServer(port,true,'required',true);
+    await signInAndDownload(true,0,true);
+    await stopServer();
+    stage='disabled_rejects_encrypted';
+    await startServer(port,false,'disabled',true);
+    await signInAndDownload('encrypted-disabled',0,true);
     Object.assign(result,{real_okta_password_login:true,production_controller:true,postgresql_18:true,
       optional_accepts_plaintext:true,required_rejects_plaintext:true,scoped_ephemeral_https:true,
-      browser_profile_downloads:2,profile_format_and_endpoint:true,unique_client_keys:true,
+      encrypted_wire_aes256_gcm_rsa_oaep:true,encrypted_group_denial:true,disabled_rejects_encrypted:true,
+      browser_profile_downloads:6,profile_format_and_endpoint:true,unique_client_keys:true,
       no_saml_or_password_in_profile:true,missing_and_wrong_cookie_refused:true,replay_refused:true,
       unauthorized_group_refused:true,wrapping_key_loaded_only_after_authorization:true,no_vpn_session_created:true});
     passed=true;

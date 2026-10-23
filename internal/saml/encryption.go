@@ -120,7 +120,7 @@ func (sp *ServiceProvider) decryptAssertion(wrapper *etree.Element) (*etree.Elem
 		return nil, errSAML
 	}
 	if !named(wrapper, AssertionNamespace, "EncryptedAssertion") ||
-		onlyChildren(wrapper, allowed(xencNamespace, "EncryptedData")) != nil {
+		onlyChildren(wrapper, allowed(xencNamespace, "EncryptedData", "EncryptedKey")) != nil {
 		return nil, errSAML
 	}
 	data, err := one(wrapper, xencNamespace, "EncryptedData")
@@ -150,10 +150,10 @@ func (sp *ServiceProvider) decryptAssertion(wrapper *etree.Element) (*etree.Elem
 		}
 	}
 	info, err := one(data, dsNamespace, "KeyInfo")
-	if err != nil || onlyChildren(info, allowed(xencNamespace, "EncryptedKey")) != nil {
+	if err != nil {
 		return nil, errSAML
 	}
-	encryptedKey, err := one(info, xencNamespace, "EncryptedKey")
+	encryptedKey, peerKey, err := assertionKey(wrapper, info)
 	if err != nil || (attribute(encryptedKey, "Recipient") != "" && attribute(encryptedKey, "Recipient") != sp.EntityID) {
 		return nil, errSAML
 	}
@@ -184,7 +184,11 @@ func (sp *ServiceProvider) decryptAssertion(wrapper *etree.Element) (*etree.Elem
 			}
 		}
 	}
-	if refs := children(encryptedKey, xencNamespace, "ReferenceList"); len(refs) > 0 {
+	refs := children(encryptedKey, xencNamespace, "ReferenceList")
+	if peerKey && len(refs) != 1 {
+		return nil, errSAML
+	}
+	if len(refs) > 0 {
 		if onlyChildren(refs[0], allowed(xencNamespace, "DataReference")) != nil {
 			return nil, errSAML
 		}
@@ -236,6 +240,31 @@ func (sp *ServiceProvider) decryptAssertion(wrapper *etree.Element) (*etree.Elem
 	}
 	return assertion, nil
 }
+
+// Okta uses a sibling EncryptedKey. Resolve only the one immediate sibling,
+// with an exact fragment reference and a reverse DataReference checked above.
+// This is not general XMLDSig retrieval: no transforms, document-wide lookup,
+// external URI, key chaining or ambiguous inline/sibling selection is supported.
+func assertionKey(wrapper, info *etree.Element) (*etree.Element, bool, error) {
+	peers := children(wrapper, xencNamespace, "EncryptedKey")
+	if len(peers) == 0 {
+		if onlyChildren(info, allowed(xencNamespace, "EncryptedKey")) != nil {
+			return nil, false, errSAML
+		}
+		key, err := one(info, xencNamespace, "EncryptedKey")
+		return key, false, err
+	}
+	if len(peers) != 1 || onlyChildren(info, allowed(dsNamespace, "RetrievalMethod")) != nil {
+		return nil, false, errSAML
+	}
+	ref, err := one(info, dsNamespace, "RetrievalMethod")
+	if err != nil || onlyChildren(ref, nil) != nil || attribute(peers[0], "Id") == "" ||
+		attribute(ref, "Type") != xencNamespace+"EncryptedKey" || attribute(ref, "URI") != "#"+attribute(peers[0], "Id") {
+		return nil, false, errSAML
+	}
+	return peers[0], true, nil
+}
+
 func cipherValue(e *etree.Element) ([]byte, error) {
 	data, err := one(e, xencNamespace, "CipherData")
 	if err != nil || onlyChildren(data, allowed(xencNamespace, "CipherValue")) != nil {
