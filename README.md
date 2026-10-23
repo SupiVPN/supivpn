@@ -155,8 +155,8 @@ denial checks, reboot acceptance and maintenance; the
 private-network routing.
 To move PostgreSQL off the VPN VM, use the
 [external database guide](docs/REMOTE_DATABASE.md): private networking, verified
-TLS and a controlled data cutover. It also documents the remote setup-helper
-extension planned for the next release.
+TLS and a controlled data cutover. Remote setup-helper support is available from
+[v0.6.1](https://github.com/SupiVPN/supivpn/releases/tag/v0.6.1).
 
 Before choosing the defaults, review the guide's
 [configuration options](DEPLOYMENT.md#choose-your-access-policy): explicit group
