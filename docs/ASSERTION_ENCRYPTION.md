@@ -3,8 +3,9 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
-**Availability:** implemented on this development branch; not included in v0.6.1.
-Install a release containing this feature before adding its configuration.
+**Availability:** supported since
+[v0.7.0](https://github.com/SupiVPN/supivpn/releases/tag/v0.7.0).
+Upgrade from v0.6.1 or earlier before adding its configuration.
 
 Encryption hides assertion contents from the browser and intermediaries that
 terminate HTTPS before the controller. It does not replace HTTPS, IdP signatures,
