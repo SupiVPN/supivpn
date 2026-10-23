@@ -23,6 +23,6 @@ func controllerPolicy(c config) controller.Policy {
 
 func newController(a *agent, sp *saml.ServiceProvider) (*controller.Controller, error) {
 	return controller.New(controller.Config{Policy: controllerPolicy(a.config),
-		PendingSeconds: a.config.PendingSeconds, SessionSeconds: a.config.SessionSeconds},
+		PendingSeconds: a.config.PendingSeconds, SessionSeconds: a.config.SessionSeconds, VPNLoginConfirmation: a.config.VPNLoginConfirmation},
 		a.origin, sp, a, func() time.Time { return a.now() })
 }

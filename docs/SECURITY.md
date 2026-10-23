@@ -82,6 +82,16 @@ This is a restricted Web SSO profile, not a general replacement for a SAML/XMLDS
 - The controller additionally checks bearer confirmation, assertion/session
   deadlines, browser binding, groups, one-time pending login, and replay.
   PostgreSQL preserves these guarantees across controller processes.
+- VPN login defaults to explicit browser confirmation before SAML starts. A separate
+  host-only Secure/HttpOnly SameSite=Strict cookie and an exact same-origin form
+  POST bind this confirmation to the browser. With it enabled, opening a login
+  URL alone cannot authorize a tunnel through an existing IdP session. Setting
+  `vpn_login_confirmation=false` disables this check and reintroduces the
+  [relayed-login-link risk](IDENTITY_PROVIDER.md#vpn-login-confirmation).
+  Omitted/null/true keeps the safe default; profile downloads are unaffected.
+  This is user-intent confirmation, not cryptographic binding between the browser and VPN client;
+  deliberate approval of a relayed login remains a phishing risk. MFA and
+  assertion encryption do not provide that binding.
 
 After replacing libraries, repeat live target-IdP login, group checks, and profile
 download: synthetic fixtures do not prove compatibility with every assertion

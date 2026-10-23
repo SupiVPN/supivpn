@@ -131,8 +131,10 @@ func (a *Adapter) Handle(ctx context.Context, e events.APIGatewayV2HTTPRequest) 
 			if rc.RouteKey != route {
 				return reject(403)
 			}
-		case strings.HasPrefix(publicPath, "/login/") && rc.HTTP.Method == "GET":
-			if rc.RouteKey != "GET "+a.origin.Path+"/login/{ticket}" {
+		case strings.HasPrefix(publicPath, "/login/") && (rc.HTTP.Method == "GET" || rc.HTTP.Method == "POST"):
+			ticket := strings.TrimPrefix(publicPath, "/login/")
+			if rc.RouteKey != rc.HTTP.Method+" "+a.origin.Path+"/login/{ticket}" ||
+				e.RawPath != path || ticket == "" || strings.Contains(ticket, "/") {
 				return reject(403)
 			}
 		default:

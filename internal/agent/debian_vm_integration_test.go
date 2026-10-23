@@ -329,10 +329,44 @@ func vmLoginUntil(t *testing.T, client *http.Client, signer *saml.ServiceProvide
 	if err != nil {
 		t.Fatal("test browser login failed")
 	}
+	if strings.HasPrefix(path, "/login/") {
+		page, readErr := io.ReadAll(io.LimitReader(resp.Body, 8193))
+		resp.Body.Close()
+		ticket := strings.TrimPrefix(path, "/login/")
+		if readErr != nil || len(page) > 8192 || resp.StatusCode != http.StatusOK || resp.Header.Get("Location") != "" || len(resp.Cookies()) != 1 {
+			t.Fatal("test browser confirmation unavailable")
+		}
+		confirmation := resp.Cookies()[0]
+		if confirmation.Name != controller.ConfirmationCookieName(ticket) || confirmation.SameSite != http.SameSiteStrictMode ||
+			!bytes.Contains(page, []byte(`name="confirmation" value="`+confirmation.Value+`"`)) {
+			t.Fatal("test browser confirmation form invalid")
+		}
+		form := url.Values{"confirmation": {confirmation.Value}}.Encode()
+		confirm, requestErr := http.NewRequest(http.MethodPost, "https://localhost:8443"+path, strings.NewReader(form))
+		if requestErr != nil {
+			t.Fatal("cannot construct test confirmation")
+		}
+		confirm.Header.Set("Origin", "https://localhost:8443")
+		confirm.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		confirm.AddCookie(confirmation)
+		resp, err = client.Do(confirm)
+		if err != nil {
+			t.Fatal("test browser confirmation failed")
+		}
+	}
 	resp.Body.Close()
 	location, err := url.Parse(resp.Header.Get("Location"))
-	if err != nil || location.Host != "idp.example.test" || resp.StatusCode != http.StatusFound || len(resp.Cookies()) != 1 {
+	if err != nil || location.Host != "idp.example.test" || resp.StatusCode != http.StatusFound {
 		t.Fatal("login did not initiate SAML with the configured test IdP")
+	}
+	var cookie *http.Cookie
+	if strings.HasPrefix(path, "/login/") {
+		cookie = samlLoginCookie(t, resp, strings.TrimPrefix(path, "/login/"))
+	} else {
+		if len(resp.Cookies()) != 1 {
+			t.Fatal("profile browser binding missing")
+		}
+		cookie = resp.Cookies()[0]
 	}
 	compressed, err := base64.StdEncoding.DecodeString(location.Query().Get("SAMLRequest"))
 	if err != nil {
@@ -361,7 +395,7 @@ func vmLoginUntil(t *testing.T, client *http.Client, signer *saml.ServiceProvide
 	body := profileSAMLBody(t, fixture, signer, pending, assertion, true)
 	post, _ := http.NewRequest("POST", origin.String()+"/saml/acs", strings.NewReader(body))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	post.AddCookie(resp.Cookies()[0])
+	post.AddCookie(cookie)
 	callback, err := client.Do(post)
 	if err != nil {
 		t.Fatal("signed SAML callback failed")

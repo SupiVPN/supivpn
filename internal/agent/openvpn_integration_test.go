@@ -390,9 +390,8 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				t.Fatal("missing pending login")
 			}
 			handler := a.handler()
-			login := httptest.NewRecorder()
-			handler.ServeHTTP(login, httptest.NewRequest("GET", a.origin.String()+"/login/"+c.ticket, nil))
-			if login.Code != http.StatusFound || len(login.Result().Cookies()) != 1 {
+			login := confirmVPNLogin(t, handler, a.origin, c.ticket)
+			if login.Code != http.StatusFound || len(login.Result().Cookies()) != 2 {
 				t.Fatalf("browser SAML login failed: status=%d cookies=%d ready=%v pending=%v", login.Code, len(login.Result().Cookies()), a.Ready(context.Background()), a.now().Before(c.expires))
 			}
 			assertion := groupAssertionFor(a, tc.groups...)
@@ -418,7 +417,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			body := url.Values{"RelayState": {c.ticket}, "SAMLResponse": {base64.StdEncoding.EncodeToString(data)}}.Encode()
 			request := httptest.NewRequest("POST", a.sp.AcsURL.String(), strings.NewReader(body))
 			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			request.AddCookie(login.Result().Cookies()[0])
+			request.AddCookie(samlLoginCookie(t, login.Result(), c.ticket))
 			result := httptest.NewRecorder()
 			handler.ServeHTTP(result, request)
 			if tc.address == "" {

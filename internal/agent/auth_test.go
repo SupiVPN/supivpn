@@ -261,24 +261,18 @@ func TestLoginCreatesBrowserBindingAndRequest(t *testing.T) {
 	_, md := testIdP(t)
 	a, _ := testApp(t, md)
 	a.tickets["test-ticket"].requestID = ""
-	r := httptest.NewRequest(http.MethodGet, a.origin.String()+"/login/test-ticket", nil)
-	w := httptest.NewRecorder()
-	a.handler().ServeHTTP(w, r)
+	w := confirmVPNLogin(t, a.handler(), a.origin, "test-ticket")
 	if w.Code != http.StatusFound {
 		t.Fatalf("HTTP %d", w.Code)
 	}
-	cookies := w.Result().Cookies()
-	if len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly ||
-		cookies[0].SameSite != http.SameSiteNoneMode {
-		t.Fatal("browser binding cookie missing")
-	}
+	cookie := samlLoginCookie(t, w.Result(), "test-ticket")
 	destination, err := url.Parse(w.Header().Get("Location"))
 	if err != nil || destination.Host != "idp.example.test" ||
 		destination.Query().Get("RelayState") != "test-ticket" ||
 		destination.Query().Get("SAMLRequest") == "" {
 		t.Fatal("invalid SSO redirect")
 	}
-	if _, err := a.Lookup(context.Background(), "test-ticket", sha256.Sum256([]byte(cookies[0].Value))); err != nil {
+	if _, err := a.Lookup(context.Background(), "test-ticket", sha256.Sum256([]byte(cookie.Value))); err != nil {
 		t.Fatal(err)
 	}
 }
