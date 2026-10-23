@@ -24,7 +24,7 @@ SKIP_DIRS = {
 }
 TEXT_SUFFIXES = {
     ".md", ".go", ".py", ".sh", ".tf", ".hcl", ".tftpl", ".service",
-    ".sql", ".yaml", ".yml", ".toml", ".txt", ".example", ".tfvars", ".nft",
+    ".sql", ".yaml", ".yml", ".toml", ".txt", ".example", ".tfvars", ".nft", ".cjs",
 }
 TEXT_NAMES = {"Makefile", "LICENSE", ".gitignore", "go.mod", "go.sum", "Dockerfile"}
 TEXT_NAMES |= {"control", "changelog", "rules", "copyright", "format"}

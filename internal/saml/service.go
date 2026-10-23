@@ -25,6 +25,7 @@ type ServiceProvider struct {
 	IDPMetadata         *EntityDescriptor
 	AuthnNameIDFormat   string
 	AllowIDPInitiated   bool
+	AssertionEncryption *AssertionEncryption
 	// Synthetic IdP fixtures only; SupiVPN never needs an SP signing key.
 	Key             crypto.Signer
 	Certificate     *x509.Certificate
@@ -100,10 +101,17 @@ func (sp *ServiceProvider) GetSSOBindingLocation(binding string) string {
 	return ""
 }
 func (sp *ServiceProvider) Metadata() *EntityDescriptor {
-	return &EntityDescriptor{EntityID: sp.EntityID, SPSSODescriptors: []SPSSODescriptor{{
+	md := &EntityDescriptor{EntityID: sp.EntityID, SPSSODescriptors: []SPSSODescriptor{{
 		ProtocolSupportEnumeration: ProtocolNamespace, WantAssertionsSigned: true,
 		AssertionConsumerServices: []IndexedEndpoint{{Binding: HTTPPostBinding, Location: sp.AcsURL.String(), Index: 1}},
 	}}}
+	if state := sp.AssertionEncryption; state != nil {
+		md.SPSSODescriptors[0].KeyDescriptors = []KeyDescriptor{{Use: "encryption",
+			KeyInfo:           KeyInfo{X509Data: X509Data{X509Certificates: []X509Certificate{{Data: base64.StdEncoding.EncodeToString(state.certificate.Raw)}}}},
+			EncryptionMethods: []EncryptionMethod{{Algorithm: aes256GCM}, {Algorithm: aes128GCM}},
+		}}
+	}
+	return md
 }
 
 type AuthnRequest struct {
@@ -168,6 +176,11 @@ func (r *AuthnRequest) Redirect(relay string, sp *ServiceProvider) (*url.URL, er
 	return u, nil
 }
 func (sp *ServiceProvider) ParseXMLResponse(data []byte, requestIDs []string, acs url.URL) (*Assertion, error) {
+	switch sp.encryptionMode() {
+	case EncryptionDisabled, EncryptionOptional, EncryptionRequired:
+	default:
+		return nil, errSAML
+	}
 	if sp.AllowIDPInitiated || len(requestIDs) != 1 || requestIDs[0] == "" || acs.String() != sp.AcsURL.String() || sp.IDPMetadata == nil {
 		return nil, errSAML
 	}
@@ -181,33 +194,31 @@ func (sp *ServiceProvider) ParseXMLResponse(data []byte, requestIDs []string, ac
 	a := allowed(ProtocolNamespace, "Status")
 	a[AssertionNamespace+"|Issuer"] = 1
 	a[AssertionNamespace+"|Assertion"] = 1
+	a[AssertionNamespace+"|EncryptedAssertion"] = 1
 	a[dsNamespace+"|Signature"] = 1
 	if err := onlyChildren(root, a); err != nil {
 		return nil, err
 	}
-	assertion, err := one(root, AssertionNamespace, "Assertion")
-	if err != nil {
-		return nil, err
-	}
-	// No hidden assertions or signatures anywhere in extension/key structures.
-	var countAssertions, countSignatures int
-	var walk func(*etree.Element)
-	walk = func(e *etree.Element) {
-		if e.Tag == "Assertion" {
-			countAssertions++
-		}
-		if e.Tag == "Signature" {
-			countSignatures++
-		}
-		for _, c := range e.ChildElements() {
-			walk(c)
-		}
-	}
-	walk(root)
-	expectedSignatures := len(children(root, dsNamespace, "Signature")) + len(children(assertion, dsNamespace, "Signature"))
-	if countAssertions != 1 || countSignatures != expectedSignatures || expectedSignatures == 0 || expectedSignatures > 2 {
+	plain := children(root, AssertionNamespace, "Assertion")
+	encrypted := children(root, AssertionNamespace, "EncryptedAssertion")
+	if len(plain)+len(encrypted) != 1 ||
+		(len(encrypted) == 1 && sp.encryptionMode() == EncryptionDisabled) ||
+		(len(plain) == 1 && sp.encryptionMode() == EncryptionRequired) {
 		return nil, errSAML
 	}
+	assertionName := "Assertion"
+	expectedSignatures := len(children(root, dsNamespace, "Signature"))
+	if len(plain) == 1 {
+		expectedSignatures += len(children(plain[0], dsNamespace, "Signature"))
+	} else {
+		assertionName = "EncryptedAssertion"
+	}
+	// No hidden assertions or signatures anywhere in extension/key structures.
+	if countLocal(root, "Assertion") != len(plain) || countLocal(root, "EncryptedAssertion") != len(encrypted) ||
+		countLocal(root, "Signature") != expectedSignatures || expectedSignatures > 2 {
+		return nil, errSAML
+	}
+	original := root
 	certs, err := sp.certificates()
 	if err != nil || len(certs) == 0 {
 		return nil, errSAML
@@ -218,9 +229,19 @@ func (sp *ServiceProvider) ParseXMLResponse(data []byte, requestIDs []string, ac
 		if err != nil {
 			return nil, err
 		}
-		assertion, err = one(root, AssertionNamespace, "Assertion")
-		if err != nil {
-			return nil, err
+	}
+	assertion, err := one(root, AssertionNamespace, assertionName)
+	if err != nil {
+		return nil, errSAML
+	}
+	if len(encrypted) == 1 {
+		// Verify an outer signature over the original ciphertext before decryption.
+		// Encryption alone never authenticates the assertion's sender.
+		assertion, err = sp.decryptAssertion(assertion)
+		if err != nil || countLocal(assertion, "Assertion") != 1 || countLocal(assertion, "EncryptedAssertion") != 0 ||
+			countLocal(assertion, "Signature") != len(children(assertion, dsNamespace, "Signature")) ||
+			!disjointIDs(original, assertion) {
+			return nil, errSAML
 		}
 	}
 	if len(children(assertion, dsNamespace, "Signature")) == 1 {

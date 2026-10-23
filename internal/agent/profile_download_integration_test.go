@@ -32,7 +32,7 @@ import (
 	"supivpn/internal/tracecontext"
 )
 
-func profileSAMLBody(t *testing.T, fixture *testApplication, signer *saml.ServiceProvider, pending controller.Pending, assertion *saml.Assertion, sign bool) string {
+func profileSAMLBody(t *testing.T, fixture *testApplication, signer *saml.ServiceProvider, pending controller.Pending, assertion *saml.Assertion, sign bool, encrypt ...func(*etree.Element) *etree.Element) string {
 	t.Helper()
 	response := saml.Response{
 		ID: "response-" + pending.RequestID, InResponseTo: pending.RequestID,
@@ -42,6 +42,9 @@ func profileSAMLBody(t *testing.T, fixture *testApplication, signer *saml.Servic
 		Assertion: assertion,
 	}
 	element := response.Element()
+	if len(encrypt) == 1 && encrypt[0] != nil {
+		element = encrypt[0](element)
+	}
 	if sign {
 		signing, err := saml.GetSigningContext(signer)
 		if err != nil {
@@ -62,10 +65,24 @@ func profileSAMLBody(t *testing.T, fixture *testApplication, signer *saml.Servic
 }
 
 func TestProfileDownloadPostgresSAML(t *testing.T) {
+	for _, encrypted := range []bool{false, true} {
+		name := "plaintext"
+		if encrypted {
+			name = "encrypted"
+		}
+		t.Run(name, func(t *testing.T) { testProfileDownloadPostgresSAML(t, encrypted) })
+	}
+}
+
+func testProfileDownloadPostgresSAML(t *testing.T, encrypted bool) {
 	pool, other := integrationDatabase(t)
 	ctx := context.Background()
 	signer, metadata := testIdP(t)
 	fixture, commands := testApp(t, metadata)
+	var encrypt func(*etree.Element) *etree.Element
+	if encrypted {
+		encrypt = enableAssertionEncryption(t, fixture.sp)
+	}
 	enableTestGroups(fixture)
 	fixture.origin.Path = "/supivpn"
 	fixture.sp.EntityID = fixture.origin.String() + "/saml/metadata"
@@ -205,7 +222,7 @@ func TestProfileDownloadPostgresSAML(t *testing.T) {
 			if name == "wrong-destination" {
 				bodySP.AcsURL.Path = "/supivpn/saml/launch"
 			}
-			body := profileSAMLBody(t, &bodyFixture, signer, pending, assertion, name != "unsigned")
+			body := profileSAMLBody(t, &bodyFixture, signer, pending, assertion, name != "unsigned", encrypt)
 			before := calls.Load()
 			if name == "valid" {
 				// Even a valid signed callback with its cookie is not consumed

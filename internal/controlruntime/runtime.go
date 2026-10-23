@@ -37,6 +37,7 @@ type Group struct {
 	Priority int    `json:"priority"`
 }
 type Config struct {
+	AssertionEncryption *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
     Logging *logging.Config `json:"logging,omitempty"`
 	DatabaseTLS *postgres.TLSConfig `json:"database_tls,omitempty"`
 	MaxConnectionsPerUser int            `json:"max_connections_per_user,omitempty"`
@@ -89,12 +90,21 @@ func ParseConfig(value string) (Config, error) {
     component := "controller"
     if c.Gateway != nil { component = "public" }
     if err := c.Logging.Validate(component); err != nil { return c, err }
+	if err := c.AssertionEncryption.Validate(); err != nil {
+		return c, err
+	}
 	if err := c.DatabaseTLS.Validate(); err != nil {
 		return c, err
 	}
 	return c, nil
 }
 func (c Config) Policy() (controller.Config, *url.URL, error) {
+	if err := c.AssertionEncryption.Validate(); err != nil {
+		return controller.Config{}, nil, err
+	}
+	if c.AssertionEncryption != nil && c.VM != nil && c.AssertionEncryption.PrivateKeyFile != "" && c.AssertionEncryption.PrivateKeyFile == c.VM.TLSPrivateKey {
+		return controller.Config{}, nil, errors.New("use a dedicated SAML encryption key separate from TLS")
+	}
 	if err := c.DatabaseTLS.Validate(); err != nil {
 		return controller.Config{}, nil, err
 	}
@@ -174,6 +184,10 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 	sp := &saml.ServiceProvider{EntityID: origin.String() + "/saml/metadata",
 		MetadataURL: *origin.JoinPath("saml/metadata"), AcsURL: *origin.JoinPath("saml/acs"),
 		IDPMetadata: md, AuthnNameIDFormat: saml.UnspecifiedNameIDFormat, AllowIDPInitiated: false}
+	sp.AssertionEncryption, err = c.AssertionEncryption.Load()
+	if err != nil {
+		return nil, err
+	}
 	idp, err := url.Parse(sp.GetSSOBindingLocation(saml.HTTPRedirectBinding))
 	if err != nil || idp.Scheme != "https" || idp.Host == "" || idp.User != nil {
 		return nil, errors.New("IdP requires HTTPS Redirect SSO")

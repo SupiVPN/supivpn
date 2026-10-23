@@ -41,6 +41,7 @@ opening access to private resources:
 | Let different groups reach different private services | Client routes plus firewall/ACL rules based on the assigned group CIDRs. [Worked routed-network example](docs/DEPLOYMENT_MANUAL.md#10-add-access-to-a-private-network). A route alone does not grant access. |
 | Send Internet traffic or DNS through the VPN | Configure OpenVPN, forwarding/SNAT and a DNS forwarder separately. [Full tunnel](docs/HOST.md#full-tunnel) and [client DNS](docs/HOST.md#client-dns-through-the-local-node). The helper configures neither. |
 | Use your SAML IdP and a convenient profile download entry | Set the groups claim and metadata; optionally add an IdP dashboard tile. [IdP requirements](docs/IDENTITY_PROVIDER.md#groups-claim) and [profile downloads](docs/PROFILES.md). Okta is the documented example, not the only SAML provider. |
+| Require encrypted SAML assertions | [RSA-OAEP + AES-GCM modes, key provisioning and rollout](docs/ASSERTION_ENCRYPTION.md). Disabled by default; check the feature's release availability before configuring it. |
 | Put PostgreSQL on a separate host | [Private endpoint, verified TLS, setup and existing-data cutover](docs/REMOTE_DATABASE.md). The controller supports this now; the helper extension is pending release. |
 | Customize logging or grow beyond one VM | [Logging](docs/LOGGING.md#destinations-and-defaults) and [active-active architecture](docs/HA.md). The one-host helper does not provision an HA deployment. |
 

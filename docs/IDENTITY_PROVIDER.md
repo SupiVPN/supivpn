@@ -22,7 +22,7 @@ for example `https://login.example.test/supivpn`.
 | Default RelayState | Empty |
 | Response / Assertion Signature | Signed / Signed |
 | Signature / Digest Algorithm | RSA-SHA256 / SHA256 |
-| Assertion Encryption | Unencrypted |
+| Assertion Encryption | Unencrypted by default; [optional/required RSA-OAEP + AES-GCM](ASSERTION_ENCRYPTION.md) |
 | Signed Requests / Single Logout | Disabled in this example |
 
 NameID does not have to be an email address; signed group membership determines

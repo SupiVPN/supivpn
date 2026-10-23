@@ -134,7 +134,19 @@ func TestRuntimeSAMLAcrossVMAndREST(t *testing.T) {
 	testRuntimeSAML(t, true, "/supivpn")
 }
 
-func testRuntimeSAML(t *testing.T, rest bool, prefix string) {
+func TestEncryptedRuntimeSAMLAcrossVMAndLambda(t *testing.T) {
+	for _, rest := range []bool{false, true} {
+		name := "http-api"
+		prefix := ""
+		if rest {
+			name = "rest-api"
+			prefix = "/supivpn"
+		}
+		t.Run(name, func(t *testing.T) { testRuntimeSAML(t, rest, prefix, true) })
+	}
+}
+
+func testRuntimeSAML(t *testing.T, rest bool, prefix string, encrypted ...bool) {
 	p, _ := integrationDatabase(t)
 	ctx := context.Background()
 	if _, err := p.Exec(ctx, "TRUNCATE supivpn.logins,supivpn.assertions,supivpn.nodes RESTART IDENTITY CASCADE"); err != nil {
@@ -156,6 +168,11 @@ func testRuntimeSAML(t *testing.T, rest bool, prefix string) {
 	}
 	cfg := controlruntime.Config{PublicURL: fixture.origin.String(), IDPMetadata: metadataPath, SAMLGroupsAttribute: "groups",
 		Groups: []controlruntime.Group{{Name: "admins-vpn", Priority: 10}, {Name: "engineers-production-vpn", Priority: 20}}, PendingSeconds: 180, SessionSeconds: 900}
+	var encrypt func(*etree.Element) *etree.Element
+	if len(encrypted) == 1 && encrypted[0] {
+		cfg.AssertionEncryption = &saml.EncryptionConfig{}
+		encrypt = enableAssertionEncryption(t, fixture.sp, cfg.AssertionEncryption)
+	}
 	open := func() *controlruntime.Application {
 		a, e := controlruntime.Open(ctx, cfg, os.Getenv("SUPIVPN_TEST_POSTGRES_URL"))
 		if e != nil {
@@ -256,7 +273,11 @@ func testRuntimeSAML(t *testing.T, rest bool, prefix string) {
 			if e != nil {
 				t.Fatal("signer unavailable")
 			}
-			signed, e := signing.SignEnveloped(sr.Element())
+			element := sr.Element()
+			if encrypt != nil {
+				element = encrypt(element)
+			}
+			signed, e := signing.SignEnveloped(element)
 			if e != nil {
 				t.Fatal("cannot sign SAML fixture")
 			}

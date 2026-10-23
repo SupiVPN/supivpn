@@ -134,8 +134,12 @@ type KeyInfo struct {
 	X509Data X509Data `xml:"http://www.w3.org/2000/09/xmldsig# X509Data"`
 }
 type KeyDescriptor struct {
-	Use     string  `xml:"use,attr,omitempty"`
-	KeyInfo KeyInfo `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
+	Use               string             `xml:"use,attr,omitempty"`
+	KeyInfo           KeyInfo            `xml:"http://www.w3.org/2000/09/xmldsig# KeyInfo"`
+	EncryptionMethods []EncryptionMethod `xml:"urn:oasis:names:tc:SAML:2.0:metadata EncryptionMethod,omitempty"`
+}
+type EncryptionMethod struct {
+	Algorithm string `xml:"Algorithm,attr"`
 }
 type IDPSSODescriptor struct {
 	ProtocolSupportEnumeration string          `xml:"protocolSupportEnumeration,attr"`
@@ -146,6 +150,7 @@ type SPSSODescriptor struct {
 	ProtocolSupportEnumeration string            `xml:"protocolSupportEnumeration,attr"`
 	AuthnRequestsSigned        bool              `xml:"AuthnRequestsSigned,attr"`
 	WantAssertionsSigned       bool              `xml:"WantAssertionsSigned,attr"`
+	KeyDescriptors             []KeyDescriptor   `xml:"urn:oasis:names:tc:SAML:2.0:metadata KeyDescriptor,omitempty"`
 	AssertionConsumerServices  []IndexedEndpoint `xml:"urn:oasis:names:tc:SAML:2.0:metadata AssertionConsumerService"`
 }
 type EntityDescriptor struct {

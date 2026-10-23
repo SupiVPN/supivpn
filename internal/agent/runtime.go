@@ -31,6 +31,7 @@ import (
 )
 
 type config struct {
+	AssertionEncryption *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
     Logging *logging.Config `json:"logging,omitempty"`
 	MaxConnectionsPerUser int         `json:"max_connections_per_user,omitempty"`
 	PublicURL           string        `json:"public_url"`
@@ -66,6 +67,15 @@ func readConfig(path string) (config, *url.URL, error) {
 		return c, nil, errors.New("configuration must contain one JSON object")
 	}
     if err := c.Logging.Validate("agent"); err != nil { return c, nil, err }
+	if err := c.AssertionEncryption.Validate(); err != nil {
+		return c, nil, err
+	}
+	if c.RemoteController != nil && c.AssertionEncryption != nil {
+		return c, nil, errors.New("assertion encryption belongs to the remote controller")
+	}
+	if c.AssertionEncryption != nil && c.AssertionEncryption.PrivateKeyFile != "" && c.AssertionEncryption.PrivateKeyFile == c.TLSPrivateKey {
+		return c, nil, errors.New("use a dedicated SAML encryption key separate from TLS")
+	}
 	u, err := url.Parse(c.PublicURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
 		u.Path != "" || u.RawQuery != "" || u.Fragment != "" ||
@@ -142,7 +152,10 @@ func run(ctx context.Context, path string) error {
 			AllowIDPInitiated: false,
 		}
 		// The SP sends unsigned AuthnRequests and requires signed responses/assertions.
-		// No SP signing/encryption key or additional PKI is needed for this SupiVPN.
+		sp.AssertionEncryption, err = c.AssertionEncryption.Load()
+		if err != nil {
+			return err
+		}
 		idpURL, err := url.Parse(sp.GetSSOBindingLocation(saml.HTTPRedirectBinding))
 		if err != nil || idpURL.Scheme != "https" || idpURL.Host == "" {
 			return errors.New("IdP metadata must offer HTTPS HTTP-Redirect SSO")

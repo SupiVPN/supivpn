@@ -17,6 +17,8 @@ client profile. The node agent allocates the IP address.
 Replace every example hostname, account/instance ID, and group.
 Public URLs, SAML policy, metadata, and database settings must agree across replicas.
 See [parameters, API, and agent authentication](CONTROLLER_API.md).
+Optional [assertion encryption](ASSERTION_ENCRYPTION.md) uses a dedicated
+controller key and explicit disabled/optional/required modes.
 
 The VM process opens HTTPS and a private agent Unix socket with peer UID checks.
 It can run next to OpenVPN but does not own its management socket.

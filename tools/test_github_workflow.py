@@ -112,6 +112,32 @@ class WorkflowTests(unittest.TestCase):
                                  "candidate-${{ github.ref_name }}-${{ matrix.arch }}-${{ github.sha }}")
         self.assertNotIn("secrets.", str(jobs))
 
+    def test_real_okta_credentials_are_confined_to_trusted_acceptance(self):
+        config = self.workflow("okta.yml")
+        self.assertEqual(set(config["on"]), {"schedule", "workflow_dispatch", "push"})
+        self.assertEqual(config["on"]["push"]["branches"], ["main"])
+        self.assertEqual(config["permissions"], {"contents": "read"})
+        job = config["jobs"]["acceptance"]
+        for condition in ("github.repository == 'SupiVPN/supivpn'",
+                          "github.ref == 'refs/heads/main'",
+                          "vars.OKTA_LIVE_TESTS_ENABLED == 'true'"):
+            self.assertIn(condition, job["if"])
+        self.assertEqual(job["environment"], "okta-tests")
+        self.assertNotIn("env", job)
+        self.assertNotIn("env", config)
+        self.assertEqual(job["services"]["postgres"]["ports"], ["127.0.0.1:55432:5432"])
+        credential_steps = [step for step in job["steps"] if "secrets." in str(step)]
+        self.assertEqual(len(credential_steps), 1)
+        execution = credential_steps[0]
+        self.assertEqual(execution["run"], "node ci/okta/run.cjs")
+        self.assertEqual({value for value in execution["env"].values() if "secrets." in value},
+                         {"${{ secrets.OKTA_TEST_USERNAME }}", "${{ secrets.OKTA_TEST_PASSWORD }}"})
+        for step in job["steps"]:
+            self.assertNotIn("upload-artifact", step.get("uses", ""))
+            if step.get("uses", "").startswith("actions/checkout@"):
+                self.assertEqual(step["with"]["persist-credentials"], "false")
+        self.assertEqual(job["steps"][-1]["if"], "always()")
+
     def test_only_canonical_tag_artifacts_can_be_attested(self):
         job = self.workflow("checks.yml")["jobs"]["attest"]
         self.assertEqual(job["if"], "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')"

@@ -6,8 +6,12 @@ are tested natively; local Make commands default to the host architecture.
 
 ## Create a release
 
-Select a reviewed commit on main. From a clean checkout with your authorized
-OpenPGP tag-signing key configured:
+Select a reviewed commit on main. Run the manual
+[real Okta acceptance check](OKTA_TESTS.md#before-a-release) for that exact
+commit and retain its result with the release evidence. A disabled or skipped
+job is not a live-test pass.
+
+From a clean checkout with your authorized OpenPGP tag-signing key configured:
 
 ```bash
 make tag VERSION=v0.4.0
