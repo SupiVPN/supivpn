@@ -86,6 +86,9 @@ func runHTTP(public bool) error {
 	if !public && os.Getenv("SUPIVPN_TLS_CRYPT_V2_SECRET_ARN") != "" {
 		return errors.New("agent must not receive a profile key")
 	}
+	if !public && c.AssertionEncryption != nil {
+		return errors.New("agent must not receive SAML encryption configuration")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	user := "supivpn_agent"
@@ -107,7 +110,7 @@ func runHTTP(public bool) error {
 			}
 			key = func(ctx context.Context) ([]byte, error) { return store.Get(ctx, arn) }
 		}
-		app, err = controlruntime.OpenPublic(ctx, c, dsn, password, key)
+		app, err = controlruntime.OpenPublicWithEncryptionKey(ctx, c, dsn, password, key, awsruntime.SAMLPrivateKey)
 	} else {
 		app, err = controlruntime.OpenAgent(ctx, c, dsn, password)
 	}

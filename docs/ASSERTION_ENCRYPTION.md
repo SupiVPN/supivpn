@@ -88,11 +88,56 @@ The process loads the files once at startup; restart after provisioning changes.
 Invalid modes, missing or mismatched files, unsafe permissions and invalid
 certificates fail startup. Certificate expiry also stops encrypted logins.
 
-VM and Lambda share the decryption implementation. For Lambda, the deployment
-must securely provision readable private files before runtime initialization;
-this change does not add a Secrets Manager loader for the SAML key. Never place
-the key in the Lambda package or environment JSON. Only the public component
-needs it; agent and recovery components must not receive it.
+## Public Lambda: Secrets Manager
+
+Secrets Manager delivery requires **v0.7.1 or later**; v0.7.0 only supports files.
+VM and Lambda share the same PEM, certificate and decryption validation.
+For public Lambda, replace `private_key_file` with `private_key_secret_arn`:
+
+```json
+{
+  "assertion_encryption": {
+    "mode": "required",
+    "certificate_file": "/opt/saml-encryption.crt",
+    "private_key_secret_arn": "arn:aws:secretsmanager:eu-west-1:123456789012:secret:saml-recipient-Ab12Cd"
+  }
+}
+```
+
+Merge this block into the public controller configuration. Use the **complete
+ARN**, including the generated six-character suffix. The adapter selects the
+secret's region from the ARN. Exactly one private-key source is allowed.
+The certificate is public and may be delivered in a Lambda layer at the path
+above. Never include the private key in a layer, ZIP, image or environment value.
+
+Provision a dedicated secret through your existing secure deployment process.
+Its **SecretString must be the raw, multiline PEM**, containing one unencrypted
+PKCS#8 or PKCS#1 RSA private key (at most 64 KiB). JSON key/value wrappers,
+base64-wrapped strings and SecretBinary are not accepted. Do not reuse the
+database credential or OpenVPN wrapping-key secret.
+
+Only the **public execution role** needs `secretsmanager:GetSecretValue` on the
+exact secret ARN. With a customer-managed KMS key, also grant `kms:Decrypt` on
+that exact key, with the corresponding key policy and Secrets Manager service
+conditions. Agent and recovery roles must not receive these grants or the SAML
+configuration. The runtime does not need create, update, list or rotation rights.
+See [AWS GetSecretValue permissions](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html)
+and [Lambda isolation](LAMBDA_ISOLATION.md).
+
+The public function reads **AWSCURRENT once during initialization**, with a
+five-second load budget inside the existing 20-second initialization deadline
+and at most two SDK request attempts. Keep a reachable Secrets Manager endpoint
+(for example a VPC interface endpoint) when the function runs in a VPC.
+The parsed key stays in memory; it is never written to `/tmp`. Caller-owned PEM
+buffers are cleared after parsing, but this is not a guarantee that Go or SDK
+memory contains no residual copies. An unavailable secret, invalid payload,
+certificate mismatch or expired certificate fails initialization with a generic
+error. There is no fallback to a file, plaintext policy or previous secret version.
+
+Warm execution environments retain their initialized key. Updating AWSCURRENT
+does **not** reload them. Coordinate a new Lambda version/deployment, certificate
+and IdP change, and retire old environments; do not rotate only the secret label.
+The single-key rotation limitations below apply to Lambda as well as VM.
 
 ## IdP configuration and rollout
 
@@ -113,7 +158,8 @@ needs it; agent and recovery components must not receive it.
    still permits plaintext.
 
 For rollback, switch controllers to `optional` **before** disabling encryption
-in the IdP. To return to `disabled`, remove both key-file settings as well.
+in the IdP. To return to `disabled`, remove the certificate and private-key
+file/secret settings as well.
 Do not silently relax `required` in response to a login error.
 
 All replicas need the same intended mode and recipient key. Only one recipient
@@ -162,6 +208,11 @@ Authentication failures remain generic and reveal no key, ciphertext or assertio
 
 `make test` covers modes, metadata, key loading, malformed ciphertext,
 authentication tags, unsupported algorithms, signatures and wrapping attacks.
+It also checks Secrets Manager requests and failures with a mock client, plus
+decryption and mode enforcement with synthetic keys delivered by a loader.
+These tests do not establish deployed IAM/KMS or VPC endpoint connectivity;
+verify public startup, metadata and encrypted login/profile issuance in the
+target deployment, along with denied secret access for agent/recovery roles.
 `make test-xmlsec` uses independent XMLSec encryption/signing plus OpenSSL for
 OAEP-SHA256/MGF1-SHA256 (Debian's XMLSec lacks that XML Encryption 1.1 URI).
 `make integration` covers encrypted profile downloads and replay/group/browser

@@ -6,6 +6,7 @@ package saml
 
 import (
 	"bytes"
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -16,12 +17,17 @@ import (
 	"syscall"
 )
 
-// EncryptionConfig contains file references only, never key material.
+// EncryptionConfig contains deployment references only, never key material.
 type EncryptionConfig struct {
-	Mode            string `json:"mode"`
-	CertificateFile string `json:"certificate_file,omitempty"`
-	PrivateKeyFile  string `json:"private_key_file,omitempty"`
+	Mode                string `json:"mode"`
+	CertificateFile     string `json:"certificate_file,omitempty"`
+	PrivateKeyFile      string `json:"private_key_file,omitempty"`
+	PrivateKeySecretARN string `json:"private_key_secret_arn,omitempty"`
 }
+
+// EncryptionKeyLoader is supplied by a deployment adapter. It returns a
+// caller-owned PEM buffer, which LoadWithKey clears even on failure.
+type EncryptionKeyLoader func(context.Context, string) ([]byte, error)
 
 func (c *EncryptionConfig) Validate() error {
 	if c == nil {
@@ -29,12 +35,13 @@ func (c *EncryptionConfig) Validate() error {
 	}
 	switch c.Mode {
 	case "", EncryptionDisabled:
-		if c.CertificateFile != "" || c.PrivateKeyFile != "" {
-			return errors.New("disabled assertion encryption must not configure key files")
+		if c.CertificateFile != "" || c.PrivateKeyFile != "" || c.PrivateKeySecretARN != "" {
+			return errors.New("disabled assertion encryption must not configure keys")
 		}
 	case EncryptionOptional, EncryptionRequired:
-		if !filepath.IsAbs(c.CertificateFile) || !filepath.IsAbs(c.PrivateKeyFile) || c.CertificateFile == c.PrivateKeyFile {
-			return errors.New("assertion encryption requires separate absolute certificate_file and private_key_file paths")
+		if !filepath.IsAbs(c.CertificateFile) || (c.PrivateKeyFile == "") == (c.PrivateKeySecretARN == "") ||
+			(c.PrivateKeyFile != "" && (!filepath.IsAbs(c.PrivateKeyFile) || c.CertificateFile == c.PrivateKeyFile)) {
+			return errors.New("assertion encryption requires an absolute certificate_file and exactly one private_key_file or private_key_secret_arn")
 		}
 	default:
 		return errors.New("assertion encryption mode must be disabled, optional or required")
@@ -43,18 +50,33 @@ func (c *EncryptionConfig) Validate() error {
 }
 
 func (c *EncryptionConfig) Load() (*AssertionEncryption, error) {
+	return c.LoadWithKey(context.Background(), nil)
+}
+
+// LoadWithKey loads once at initialization. A secret reference requires an
+// explicit adapter; it never falls back to a file or weaker encryption mode.
+func (c *EncryptionConfig) LoadWithKey(ctx context.Context, loader EncryptionKeyLoader) (*AssertionEncryption, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	if c == nil || c.Mode == "" || c.Mode == EncryptionDisabled {
 		return nil, nil
 	}
-	// These are operator-provisioned files. Never log paths, PEM or parse errors.
-	keyPEM, err := encryptionPEMFile(c.PrivateKeyFile, true)
-	if err != nil {
-		return nil, errors.New("cannot load SAML encryption private key")
+	// Never log paths, secret references, PEM or provider/parse errors.
+	var keyPEM []byte
+	var err error
+	if c.PrivateKeySecretARN != "" {
+		if loader == nil || ctx.Err() != nil {
+			return nil, errors.New("SAML encryption secret loader unavailable")
+		}
+		keyPEM, err = loader(ctx, c.PrivateKeySecretARN)
+	} else {
+		keyPEM, err = encryptionPEMFile(c.PrivateKeyFile, true)
 	}
 	defer clear(keyPEM)
+	if err != nil || ctx.Err() != nil || len(keyPEM) == 0 || len(keyPEM) > 64<<10 {
+		return nil, errors.New("cannot load SAML encryption private key")
+	}
 	block, rest := pem.Decode(keyPEM)
 	if !singleEncryptionPEM(keyPEM, block, rest) {
 		return nil, errSAML

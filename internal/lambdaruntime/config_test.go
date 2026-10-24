@@ -6,6 +6,13 @@ package lambdaruntime
 
 import "testing"
 
+func TestAgentRejectsSAMLSecretBeforeConnecting(t *testing.T) {
+	t.Setenv("SUPIVPN_CONTROLLER_JSON", `{"gateway":{},"assertion_encryption":{"mode":"required","certificate_file":"/not/read.crt","private_key_secret_arn":"arn:aws:secretsmanager:eu-west-1:123456789012:secret:saml-recipient-Ab12Cd"}}`)
+	if err := runHTTP(false); err == nil || err.Error() != "agent must not receive SAML encryption configuration" {
+		t.Fatal("agent did not refuse SAML key configuration before initialization")
+	}
+}
+
 func TestHTTPRejectsLegacyPowerCapabilitiesBeforeConnecting(t *testing.T) {
 	for _, key := range []string{"SUPIVPN_EC2_FENCING", "SUPIVPN_EC2_RECOVERY", "SUPIVPN_PRUNE_RULE_ARN", "SUPIVPN_OPERATOR_CONTROL"} {
 		t.Run(key, func(t *testing.T) {
@@ -21,6 +28,7 @@ func TestHTTPRejectsLegacyPowerCapabilitiesBeforeConnecting(t *testing.T) {
 
 func TestRecoveryConfigurationDoesNotAcceptHTTPConfiguration(t *testing.T) {
 	for _, raw := range []string{`{"public_url":"https://example.test"}`, `{"node_ids":[]} {}`, `{"database_tls":{"mode":"disable"}}`,
+		`{"assertion_encryption":{"mode":"required","private_key_secret_arn":"not-for-recovery"}}`,
         `{"logging":{"output":"file"}}`, `{"logging":{"output":"stderr","retention_days":7}}`,
         `{"logging":{"unknown":true}}`} {
 		if _, err := parseRecovery(raw); err == nil {

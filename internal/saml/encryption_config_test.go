@@ -5,15 +5,124 @@
 package saml
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestEncryptionSecretLoading(t *testing.T) {
+	key, cert := encryptionFixture(t)
+	certPath := filepath.Join(t.TempDir(), "recipient.crt")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0644); err != nil {
+		t.Fatal(err)
+	}
+	private := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	defer clear(private)
+	const reference = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:saml-recipient-Ab12Cd"
+	for _, mode := range []string{EncryptionOptional, EncryptionRequired} {
+		for _, name := range []string{"pkcs1", "pkcs8", "provider-error", "empty", "oversized", "junk", "prefix", "suffix", "multiple", "headers", "non-rsa", "wrong-key", "cancelled"} {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				c := &EncryptionConfig{Mode: mode, CertificateFile: certPath, PrivateKeySecretARN: reference}
+				var supplied []byte
+				calls := 0
+				load := func(ctx context.Context, id string) ([]byte, error) {
+					calls++
+					if id != reference {
+						t.Fatal("secret reference changed")
+					}
+					supplied = bytes.Clone(private)
+					switch name {
+					case "pkcs8":
+						der, err := x509.MarshalPKCS8PrivateKey(key)
+						if err != nil {
+							t.Fatal(err)
+						}
+						supplied = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+					case "provider-error":
+						return supplied, errors.New("provider-sensitive-details")
+					case "empty":
+						supplied = nil
+					case "oversized":
+						supplied = bytes.Repeat([]byte("x"), (64<<10)+1)
+					case "junk":
+						supplied = []byte("not a private key")
+					case "prefix":
+						supplied = append([]byte("junk\n"), supplied...)
+					case "suffix":
+						supplied = append(supplied, []byte("junk")...)
+					case "multiple":
+						supplied = append(supplied, private...)
+					case "headers":
+						supplied = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Headers: map[string]string{"X-Test": "refuse"}, Bytes: x509.MarshalPKCS1PrivateKey(key)})
+					case "non-rsa":
+						supplied = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+					case "wrong-key":
+						other, _ := encryptionFixture(t)
+						supplied = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(other)})
+					case "cancelled":
+						cancel()
+					}
+					return supplied, nil
+				}
+				state, err := c.LoadWithKey(ctx, load)
+				valid := name == "pkcs1" || name == "pkcs8"
+				if calls != 1 || (err == nil) != valid || (state != nil) != valid {
+					t.Fatal("secret key validation failed")
+				}
+				if !bytes.Equal(supplied, make([]byte, len(supplied))) {
+					t.Fatal("caller-owned PEM was not cleared")
+				}
+				if err != nil && strings.Contains(err.Error(), "sensitive") {
+					t.Fatal("provider details escaped")
+				}
+				if !valid {
+					return
+				}
+				sp, signer, base := fixture(t)
+				sp.AssertionEncryption = state
+				encrypted := encryptedResponse(t, signer, base, &key.PublicKey, "both")
+				if _, err := sp.ParseXMLResponse(document(t, encrypted), []string{"_request"}, sp.AcsURL); err != nil {
+					t.Fatal("loaded key cannot decrypt signed assertion")
+				}
+				plaintext := signedFixture(t, signer, base.Copy(), "both")
+				_, err = sp.ParseXMLResponse(document(t, plaintext), []string{"_request"}, sp.AcsURL)
+				if (err == nil) != (mode == EncryptionOptional) || calls != 1 {
+					t.Fatal("mode changed or secret reloaded during request")
+				}
+			})
+		}
+	}
+	load := func(context.Context, string) ([]byte, error) { t.Fatal("unconfigured secret read"); return nil, nil }
+	for _, c := range []*EncryptionConfig{nil, {}, {Mode: EncryptionDisabled}} {
+		if state, err := c.LoadWithKey(context.Background(), load); err != nil || state != nil {
+			t.Fatal("disabled behavior changed")
+		}
+	}
+	for _, c := range []*EncryptionConfig{
+		{Mode: EncryptionDisabled, PrivateKeySecretARN: reference},
+		{Mode: EncryptionRequired, CertificateFile: certPath, PrivateKeyFile: "/not/read", PrivateKeySecretARN: reference},
+		{Mode: EncryptionRequired, PrivateKeySecretARN: reference},
+	} {
+		if _, err := c.LoadWithKey(context.Background(), load); err == nil {
+			t.Fatal("conflicting or incomplete source accepted")
+		}
+	}
+	c := &EncryptionConfig{Mode: EncryptionRequired, CertificateFile: certPath, PrivateKeySecretARN: reference}
+	if _, err := c.Load(); err == nil {
+		t.Fatal("secret reference silently fell back to filesystem")
+	}
+}
 
 func TestEncryptionConfiguration(t *testing.T) {
 	dir := t.TempDir()
@@ -62,6 +171,12 @@ func TestEncryptionConfiguration(t *testing.T) {
 		}
 	}
 	write(keyPath, private, 0600)
+	if _, err := c.LoadWithKey(context.Background(), func(context.Context, string) ([]byte, error) {
+		t.Fatal("file source invoked cloud loader")
+		return nil, nil
+	}); err != nil {
+		t.Fatal("explicit file source changed when a cloud adapter is available")
+	}
 	for _, name := range []string{"symlink", "directory", "missing", "oversized", "multiple-blocks", "junk", "wrong-key", "pkcs8"} {
 		t.Run(name, func(t *testing.T) {
 			copy := *c
