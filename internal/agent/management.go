@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"supivpn/internal/profile"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,7 @@ import (
 var errManagementRejected = errors.New("OpenVPN rejected command")
 
 type clientEvent struct {
+	proof   profile.Credential
 	kind    string
 	cid     uint64
 	kid     uint64
@@ -31,16 +33,16 @@ type clientEvent struct {
 }
 
 type management struct {
-	conn      net.Conn
-	events    chan clientEvent
-	replies   chan bool
-	done      chan struct{}
-	version   chan int
-	closeOnce sync.Once
-	writeMu   sync.Mutex
-	initialized atomic.Bool
-	probeMu sync.Mutex
-	healthUntil atomic.Int64
+	conn            net.Conn
+	events          chan clientEvent
+	replies         chan bool
+	done            chan struct{}
+	version         chan int
+	closeOnce       sync.Once
+	writeMu         sync.Mutex
+	initialized     atomic.Bool
+	probeMu         sync.Mutex
+	healthUntil     atomic.Int64
 	statusRequested atomic.Bool
 }
 
@@ -163,6 +165,7 @@ func (m *management) read() {
 	var pending *clientEvent
 	var peer peerEnvironment
 	var session sessionEnvironment
+	var proof proofEnvironment
 	seenHold := false
 	var status managementStatus
 	for scanner.Scan() {
@@ -225,6 +228,7 @@ func (m *management) read() {
 			}
 		case line == ">CLIENT:ENV,END":
 			if pending != nil {
+				pending.proof = proof.credential()
 				pending.peer = peer.endpoint()
 				pending.client, pending.metrics = session.client, session.metrics
 				select {
@@ -234,6 +238,7 @@ func (m *management) read() {
 				}
 			}
 			pending = nil
+			proof = proofEnvironment{}
 		case strings.HasPrefix(line, ">CLIENT:ENV,"):
 			if pending != nil {
 				if strings.HasPrefix(line, ">CLIENT:ENV,IV_SSO=") {
@@ -241,6 +246,7 @@ func (m *management) read() {
 				}
 				peer.add(pending.kind, strings.TrimPrefix(line, ">CLIENT:ENV,"))
 				session.add(pending.kind, strings.TrimPrefix(line, ">CLIENT:ENV,"))
+				proof.add(pending.kind, strings.TrimPrefix(line, ">CLIENT:ENV,"))
 			}
 		case strings.HasPrefix(line, ">CLIENT:"):
 			e, err := parseClientHeader(line)
@@ -250,6 +256,7 @@ func (m *management) read() {
 			pending = &e
 			peer = peerEnvironment{}
 			session = sessionEnvironment{}
+			proof = proofEnvironment{}
 		}
 	}
 }

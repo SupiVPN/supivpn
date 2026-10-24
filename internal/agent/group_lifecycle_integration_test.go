@@ -24,6 +24,7 @@ import (
 	"supivpn/internal/agentclient"
 	"supivpn/internal/controller"
 	"supivpn/internal/postgres"
+	"supivpn/internal/profile"
 	"supivpn/internal/saml"
 	"supivpn/internal/logging"
 )
@@ -114,9 +115,13 @@ func lifecycleCommand(t *testing.T, ch chan string) string {
 }
 
 func (f *groupLifecycleFixture) begin(t *testing.T, node int, cid uint64, subject string, members ...string) groupLifecycleLogin {
+	return f.beginWithProof(t, node, cid, subject, profile.Credential{}, members...)
+}
+
+func (f *groupLifecycleFixture) beginWithProof(t *testing.T, node int, cid uint64, subject string, proof profile.Credential, members ...string) groupLifecycleLogin {
 	t.Helper()
 	a := f.agents[node]
-	a.handleEvent(clientEvent{kind: "CONNECT", cid: cid, kid: 2, sso: "webauth"})
+	a.handleEvent(clientEvent{kind: "CONNECT", cid: cid, kid: 2, sso: "webauth", proof: proof})
 	if command := f.nextCommand(t, node); !strings.Contains(command, "WEB_AUTH:external:") {
 		t.Fatalf("expected browser challenge, got %s", command)
 	}

@@ -12,7 +12,7 @@ import (
 	"supivpn/internal/logging"
 )
 
-type clientInfo struct{ version, platform string }
+type clientInfo struct{ version, platform, deviceID, deviceIDSource string }
 
 type auditCounter struct {
 	value         uint64
@@ -38,6 +38,8 @@ type disconnectMetrics struct{ duration, received, sent auditCounter }
 type sessionEnvironment struct {
 	client                    clientInfo
 	seenVersion, seenPlatform bool
+	seenUUID, seenHWAddr      bool
+	uuid, hwAddr              string
 	metrics                   disconnectMetrics
 }
 
@@ -62,6 +64,30 @@ func (s *sessionEnvironment) add(kind, env string) {
 				s.client.platform = ""
 			}
 			s.seenPlatform = true
+		case "UV_UUID":
+			if !s.seenUUID && logging.ValidClientDeviceID(value) {
+				s.uuid = value
+			} else {
+				s.uuid = ""
+			}
+			s.seenUUID = true
+		case "IV_HWADDR":
+			if !s.seenHWAddr && logging.ValidClientDeviceID(value) {
+				s.hwAddr = value
+			} else {
+				s.hwAddr = ""
+			}
+			s.seenHWAddr = true
+		}
+		// Connect reports UV_UUID; OpenVPN 3 Linux reports IV_HWADDR.
+		// Preserve the source: neither value is proof of device possession.
+		s.client.deviceID, s.client.deviceIDSource = "", ""
+		if s.seenUUID {
+			if s.uuid != "" {
+				s.client.deviceID, s.client.deviceIDSource = s.uuid, "UV_UUID"
+			}
+		} else if s.hwAddr != "" {
+			s.client.deviceID, s.client.deviceIDSource = s.hwAddr, "IV_HWADDR"
 		}
 	} else if kind == "DISCONNECT" {
 		switch name {

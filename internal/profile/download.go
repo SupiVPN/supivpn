@@ -28,23 +28,29 @@ func GenerateClientKey(serverPEM []byte, now time.Time) ([]byte, error) {
 }
 
 func generateClientKey(serverPEM []byte, now time.Time, random io.Reader) ([]byte, error) {
-	if err := validateKey(serverPEM, serverType); err != nil {
-		return nil, err
-	}
 	if now.Unix() < 0 {
 		return nil, errors.New("invalid key creation time")
+	}
+	metadata := make([]byte, 9)
+	metadata[0] = 1
+	binary.BigEndian.PutUint64(metadata[1:], uint64(now.Unix()))
+	return generateClientKeyWithMetadata(serverPEM, metadata, random)
+}
+
+func generateClientKeyWithMetadata(serverPEM, metadata []byte, random io.Reader) ([]byte, error) {
+	if err := validateKey(serverPEM, serverType); err != nil {
+		return nil, err
 	}
 	server, _ := pem.Decode(serverPEM)
 	defer clear(server.Bytes)
 	// Each direction has 64 bytes of cipher material and 64 bytes of HMAC
 	// material. AES-256 and HMAC-SHA256 use the first 32 bytes of their slots.
-	plaintext := make([]byte, 256+9)
+	plaintext := make([]byte, 256+len(metadata))
 	defer clear(plaintext)
 	if _, err := io.ReadFull(random, plaintext[:256]); err != nil {
 		return nil, errors.New("client key randomness unavailable")
 	}
-	plaintext[256] = 1
-	binary.BigEndian.PutUint64(plaintext[257:], uint64(now.Unix()))
+	copy(plaintext[256:], metadata)
 
 	size := make([]byte, 2)
 	binary.BigEndian.PutUint16(size, uint16(sha256.Size+len(plaintext)+len(size)))

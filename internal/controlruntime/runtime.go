@@ -21,39 +21,42 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"supivpn/internal/agentapi"
 	"supivpn/internal/controller"
-    "supivpn/internal/logging"
 	"supivpn/internal/gateway"
-	"supivpn/internal/postgres"
+	"supivpn/internal/logging"
 	"supivpn/internal/operatorapi"
+	"supivpn/internal/postgres"
 	"supivpn/internal/profile"
 	"supivpn/internal/saml"
 	"supivpn/internal/vm"
 )
 
 type Group struct {
-	SessionSeconds *int `json:"session_seconds,omitempty"`
-	MaxConnectionsPerUser int `json:"max_connections_per_user,omitempty"`
-	Name     string `json:"name"`
-	Priority int    `json:"priority"`
+	SessionSeconds        *int   `json:"session_seconds,omitempty"`
+	MaxConnectionsPerUser int    `json:"max_connections_per_user,omitempty"`
+	Name                  string `json:"name"`
+	Priority              int    `json:"priority"`
 }
 type Config struct {
-	VPNLoginConfirmation *bool `json:"vpn_login_confirmation,omitempty"`
-	AssertionEncryption *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
-    Logging *logging.Config `json:"logging,omitempty"`
-	DatabaseTLS *postgres.TLSConfig `json:"database_tls,omitempty"`
-	MaxConnectionsPerUser int            `json:"max_connections_per_user,omitempty"`
-	PublicURL           string          `json:"public_url"`
-	IDPMetadata         string          `json:"idp_metadata"`
-	SAMLGroupsAttribute string          `json:"saml_groups_attribute"`
-	Groups              []Group         `json:"groups"`
-	PendingSeconds      int             `json:"pending_seconds"`
-	SessionSeconds      int             `json:"session_seconds"`
-	VM                  *vm.Config      `json:"vm,omitempty"`
-	Gateway             *gateway.Config `json:"gateway,omitempty"`
-	Profile             *ProfileConfig  `json:"profile,omitempty"`
+	VPNLoginConfirmation  *bool                  `json:"vpn_login_confirmation,omitempty"`
+	AssertionEncryption   *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
+	Logging               *logging.Config        `json:"logging,omitempty"`
+	DatabaseTLS           *postgres.TLSConfig    `json:"database_tls,omitempty"`
+	MaxConnectionsPerUser int                    `json:"max_connections_per_user,omitempty"`
+	PublicURL             string                 `json:"public_url"`
+	IDPMetadata           string                 `json:"idp_metadata"`
+	SAMLGroupsAttribute   string                 `json:"saml_groups_attribute"`
+	Groups                []Group                `json:"groups"`
+	PendingSeconds        int                    `json:"pending_seconds"`
+	SessionSeconds        int                    `json:"session_seconds"`
+	VM                    *vm.Config             `json:"vm,omitempty"`
+	Gateway               *gateway.Config        `json:"gateway,omitempty"`
+	Profile               *ProfileConfig         `json:"profile,omitempty"`
 }
 
 type ProfileConfig struct {
+	Binding      string `json:"binding,omitempty"`
+	Port         uint16 `json:"port,omitempty"`
+	ServerURL    bool   `json:"server_url,omitempty"`
 	Endpoint     string `json:"endpoint"`
 	TemplateFile string `json:"template_file"`
 	// VM mode reads the provisioned local key. Lambda supplies a loader instead.
@@ -88,9 +91,13 @@ func ParseConfig(value string) (Config, error) {
 	if d.Decode(&extra) != io.EOF {
 		return c, errors.New("trailing controller configuration")
 	}
-    component := "controller"
-    if c.Gateway != nil { component = "public" }
-    if err := c.Logging.Validate(component); err != nil { return c, err }
+	component := "controller"
+	if c.Gateway != nil {
+		component = "public"
+	}
+	if err := c.Logging.Validate(component); err != nil {
+		return c, err
+	}
 	if err := c.AssertionEncryption.Validate(); err != nil {
 		return c, err
 	}
@@ -133,7 +140,7 @@ func (c Config) Policy() (controller.Config, *url.URL, error) {
 
 type Application struct {
 	Public, Agents http.Handler
-	Operations func(context.Context,json.RawMessage)(any,error)
+	Operations     func(context.Context, json.RawMessage) (any, error)
 	Origin         *url.URL
 	pool           *pgxpool.Pool
 	store          *postgres.Store
@@ -144,7 +151,9 @@ func (a *Application) Prune(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	_, err := a.store.Prune(ctx, 500)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return a.store.FenceExpired(ctx)
 }
 func Open(ctx context.Context, c Config, dsn string) (*Application, error) {
@@ -158,12 +167,12 @@ func OpenWithPassword(ctx context.Context, c Config, dsn string, password func(c
 // Profile key loaders return a caller-owned buffer and are invoked only after a
 // successful, consumed SAML login. Cloud-specific loaders belong to adapters.
 func OpenWithProfileKey(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error), key func(context.Context) ([]byte, error), fencing ...postgres.Fencer) (*Application, error) {
-    return openPublic(ctx,c,dsn,password,key,nil,"",fencing...)
+	return openPublic(ctx, c, dsn, password, key, nil, "", fencing...)
 }
 
 // OpenPublic constructs only browser/profile handlers with restricted DB access.
-func OpenPublic(ctx context.Context,c Config,dsn string,password func(context.Context)(string,error),key func(context.Context)([]byte,error))(*Application,error){
-    return OpenPublicWithEncryptionKey(ctx,c,dsn,password,key,nil)
+func OpenPublic(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error), key func(context.Context) ([]byte, error)) (*Application, error) {
+	return OpenPublicWithEncryptionKey(ctx, c, dsn, password, key, nil)
 }
 
 // OpenPublicWithEncryptionKey adds initialization-time SAML key delivery. The
@@ -173,7 +182,9 @@ func OpenPublicWithEncryptionKey(ctx context.Context, c Config, dsn string, pass
 }
 
 func openPublic(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error), key func(context.Context) ([]byte, error), encryptionKey saml.EncryptionKeyLoader, component postgres.Component, fencing ...postgres.Fencer) (*Application, error) {
-	if len(fencing) > 1 { return nil, errors.New("multiple fencing providers") }
+	if len(fencing) > 1 {
+		return nil, errors.New("multiple fencing providers")
+	}
 	policy, origin, err := c.Policy()
 	if err != nil {
 		return nil, err
@@ -207,55 +218,65 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 		return nil, err
 	}
 	store := postgres.New(pool)
-	if len(fencing) == 1 { store = postgres.NewWithFencer(pool, fencing[0]) }
-    if component != "" {
-        store,err=postgres.NewIsolated(ctx,pool,component,nil)
-        if err!=nil{pool.Close();return nil,err}
-    }
+	if len(fencing) == 1 {
+		store = postgres.NewWithFencer(pool, fencing[0])
+	}
+	if component != "" {
+		store, err = postgres.NewIsolated(ctx, pool, component, nil)
+		if err != nil {
+			pool.Close()
+			return nil, err
+		}
+	}
 	var downloads []controller.ProfileDownloads
 	if c.Profile != nil {
-		issue, profileErr := profileIssuer(c.Profile, key)
+		if (c.Profile.Binding == "required" || c.Profile.ServerURL) && !store.ProfileSchemaReady(ctx) {
+			pool.Close()
+			return nil, errors.New("profile ownership and Server URL require schema 11")
+		}
+		download, profileErr := profileDownload(c.Profile, key, store)
 		if profileErr != nil {
 			pool.Close()
 			return nil, profileErr
 		}
-		downloads = append(downloads, controller.ProfileDownloads{
-			Backend: postgres.NewProfileBackend(store, time.Duration(c.PendingSeconds)*time.Second),
-			Issue:   issue,
-		})
+		download.Backend = postgres.NewProfileBackend(store, time.Duration(c.PendingSeconds)*time.Second)
+		downloads = append(downloads, download)
 	}
 	control, err := controller.New(policy, origin, sp, store, time.Now, downloads...)
 	if err != nil {
 		pool.Close()
 		return nil, err
 	}
-    app:=&Application{Public: Bounded(control.Handler()), Origin: origin, pool: pool, store: store}
-    if component==""{app.Agents=agentapi.New(store,time.Duration(c.PendingSeconds)*time.Second);app.Operations=operatorapi.Handler(store)}
-	return app,nil
+	app := &Application{Public: Bounded(control.Handler()), Origin: origin, pool: pool, store: store}
+	if component == "" {
+		app.Agents = agentapi.New(store, time.Duration(c.PendingSeconds)*time.Second)
+		app.Operations = operatorapi.Handler(store)
+	}
+	return app, nil
 }
 
-func profileIssuer(c *ProfileConfig, key func(context.Context) ([]byte, error)) (func(context.Context) ([]byte, error), error) {
+func profileMaterial(c *ProfileConfig, key func(context.Context) ([]byte, error)) ([]byte, func(context.Context) ([]byte, error), error) {
 	if !filepath.IsAbs(c.TemplateFile) {
-		return nil, errors.New("profile template must be an absolute path")
+		return nil, nil, errors.New("profile template must be an absolute path")
 	}
 	if key == nil {
 		if !filepath.IsAbs(c.ServerKeyFile) {
-			return nil, errors.New("profile downloads require a wrapping-key source")
+			return nil, nil, errors.New("profile downloads require a wrapping-key source")
 		}
 		key = profile.KeyFile(c.ServerKeyFile)
 	} else if c.ServerKeyFile != "" {
-		return nil, errors.New("configure only one profile wrapping-key source")
+		return nil, nil, errors.New("configure only one profile wrapping-key source")
 	}
 	f, err := os.Open(c.TemplateFile)
 	if err != nil {
-		return nil, errors.New("profile template unavailable")
+		return nil, nil, errors.New("profile template unavailable")
 	}
 	defer f.Close()
 	template, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
 	if err != nil || len(template) > 64<<10 {
-		return nil, errors.New("profile template unavailable")
+		return nil, nil, errors.New("profile template unavailable")
 	}
-	return profile.DownloadIssuer(template, c.Endpoint, key)
+	return template, key, nil
 }
 
 // Request work is synchronous. Driver calls inherit the invocation deadline
@@ -266,4 +287,37 @@ func Bounded(h http.Handler) http.Handler {
 		defer cancel()
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func profileIssuer(c *ProfileConfig, key func(context.Context) ([]byte, error)) (func(context.Context) ([]byte, error), error) {
+	template, load, err := profileMaterial(c, key)
+	if err != nil {
+		return nil, err
+	}
+	return profile.DownloadIssuer(template, c.Endpoint, load)
+}
+func profileDownload(c *ProfileConfig, key func(context.Context) ([]byte, error), s *postgres.Store) (controller.ProfileDownloads, error) {
+	var d controller.ProfileDownloads
+	if c.Binding != "" && c.Binding != "legacy" && c.Binding != "required" {
+		return d, errors.New("profile binding must be legacy or required")
+	}
+	if c.Binding != "required" && c.Port != 0 && c.Port != 1194 {
+		return d, errors.New("legacy profiles use port 1194")
+	}
+	template, load, err := profileMaterial(c, key)
+	if err != nil {
+		return d, err
+	}
+	if c.Binding == "required" {
+		if c.Port == 0 {
+			return d, errors.New("bound profiles require an explicit port")
+		}
+		d.IssueForSubject, err = profile.BoundDownloadIssuer(template, c.Endpoint, c.Port, load, s.CreateProfile)
+	} else {
+		d.Issue, err = profile.DownloadIssuer(template, c.Endpoint, load)
+	}
+	if c.ServerURL {
+		d.Imports = s
+	}
+	return d, err
 }

@@ -64,6 +64,9 @@ See the [detailed architecture](docs/ARCHITECTURE.md) for deployment modes,
 state ownership and trust boundaries, and [IdP configuration](docs/IDENTITY_PROVIDER.md)
 for the current SAML integration requirements.
 
+See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the **unreleased** account-bound profile format,
+active/blocked controls, Server URL import and Linux file-import support.
+
 ## Features
 
 - SP-initiated SAML login from an existing OpenVPN client and browser profile downloads.

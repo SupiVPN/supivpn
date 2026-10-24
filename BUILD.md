@@ -61,8 +61,9 @@ generate disposable keys, and the built-bundle test requires the existing
 
 Before a release, run `make prepare`: source audit -> unit/race -> vet -> full build.
 `make build` also creates `local/<arch>/release.json` with SHA-256 hashes of all
-components and compatible VM SQL digests for schemas 7/8/9/10. Isolated Lambda
-components explicitly require schema 10 in `lambda_components`. Building one component
+components and compatible VM SQL digests for schemas 7/8/9/10/11. Isolated Lambda
+components explicitly require schema 11 in `lambda_components`. Profile ownership
+and Server URL also require schema 11 on a VM. Building one component
 does not update this contract: repeat prepare/build before a full deployment. CI runs `make security-binaries` on each native architecture;
 both jobs must pass before a release candidate can be used.
 Prefer compatible migrations; new online migrations require an explicit
@@ -267,3 +268,12 @@ add `-tags=integration` and the disposable local PostgreSQL environment from
 the integration section above. Never point it at an operational database.
 To build the agent, select package `supivpn/cmd/supivpn`; the other command
 packages retain their names.
+
+### OpenVPN 3 Linux interoperability
+
+`make openvpn-image linux-client-image test-linux-client` runs the official
+OpenVPN 3 Linux client in a disposable network namespace against unmodified
+OpenVPN, signed synthetic SAML, inline profile credentials and disjoint format
+gates. It creates only a synthetic container machine ID. No desktop installation
+or real IdP credentials are required. The Linux importer uses downloaded `.ovpn`
+files; Server URL acceptance in OpenVPN Connect is a separate UI check.

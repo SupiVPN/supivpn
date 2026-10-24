@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"supivpn/internal/controller"
 	"supivpn/internal/postgres"
+	"supivpn/internal/profile"
 )
 
 type isolatedPower struct {
@@ -94,7 +95,7 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 		if err := admin.QueryRow(ctx, `SELECT md5(jsonb_agg(jsonb_build_array(
 			p.proname,p.proowner,p.prosecdef,p.proconfig,p.proacl) ORDER BY p.proname)::text)
 			FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-			WHERE n.nspname='supivpn'`).Scan(&metadata); err != nil {
+			WHERE n.nspname='supivpn' AND p.proname NOT LIKE 'profile_%'`).Scan(&metadata); err != nil {
 			t.Fatal("cannot inspect disposable function ownership and grants")
 		}
 		return metadata
@@ -116,6 +117,9 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 		if securityMetadata() != beforeUpgrade {
 			t.Fatal("function upgrade changed owners, security mode, search path or runtime grants")
 		}
+	}
+	if err := postgres.GrantRuntimeRoles(ctx, admin, roles); err != nil {
+		t.Fatal(err)
 	}
 	f := &isolatedPower{recoveryStub: &recoveryStub{power: map[string]string{"node-a": "running", "node-b": "running"}, starts: map[string]int{}, stops: map[string]int{}}}
 	pub, err := postgres.NewIsolated(ctx, public, postgres.Public, nil)
@@ -168,6 +172,33 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 	for _, q := range []string{"UPDATE supivpn.nodes SET lease_expires_at=clock_timestamp()+interval '1 hour'", "UPDATE supivpn.logins SET group_name='forged'", "DELETE FROM supivpn.assertions", "SELECT supivpn.agent_heartbeat('node-a','g',true)"} {
 		denied(recovery, q)
 	}
+	t.Run("profile-role-boundaries", func(t *testing.T) {
+		proof, e := profile.NewCredential()
+		if e != nil {
+			t.Fatal(e)
+		}
+		owner := sha256.Sum256([]byte("profile-owner"))
+		if e = pub.CreateProfile(ctx, proof, owner); e != nil {
+			t.Fatal("public issuance", e)
+		}
+		denied(agent, "SELECT secret_hash FROM supivpn.issued_profiles")
+		denied(public, "UPDATE supivpn.issued_profiles SET state='blocked'")
+		denied(recovery, "UPDATE supivpn.issued_profiles SET subject_hash=decode(repeat('00',32),'hex')")
+		digest, _ := proof.Digest()
+		var valid bool
+		if e = agent.QueryRow(ctx, "SELECT supivpn.profile_proof_valid($1,$2)", proof.ID, digest[:]).Scan(&valid); e != nil || !valid {
+			t.Fatal("restricted proof check", e)
+		}
+		if e = public.QueryRow(ctx, "SELECT supivpn.profile_owner_active($1,$2)", proof.ID, owner[:]).Scan(&valid); e != nil || !valid {
+			t.Fatal("restricted owner check", e)
+		}
+		if _, e = rec.SetProfileState(ctx, proof.ID, "blocked", 1); e != nil {
+			t.Fatal("operator block", e)
+		}
+		if e = agent.QueryRow(ctx, "SELECT supivpn.profile_is_active($1)", proof.ID).Scan(&valid); e != nil || valid {
+			t.Fatal("blocked profile admitted", e)
+		}
+	})
 	actor := postgres.Agent{NodeID: "node-a", Generation: "g1"}
 	conn := postgres.Connection{CID: 1, KID: 1}
 	ticket := strings.Repeat("a", 43)

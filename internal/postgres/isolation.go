@@ -39,19 +39,25 @@ func componentPrivileges(c Component) (privileges, bool) {
 		p.tables["supivpn.logins"] = []string{"SELECT"}
 		p.tables["supivpn.assertions"] = []string{"SELECT", "INSERT"}
 		p.tables["supivpn.profile_logins"] = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}
+		p.tables["supivpn.issued_profiles"] = []string{"SELECT", "INSERT"}
+		p.tables["supivpn.profile_bindings"] = []string{"SELECT"}
+		p.tables["supivpn.profile_imports"] = []string{"SELECT", "INSERT", "DELETE"}
 		p.columns["supivpn.logins"] = map[string][]string{"UPDATE": {
 			"request_id", "browser_hash", "state", "decision_id", "group_name", "denial_reason",
 			"not_before", "not_after", "session_expires_at", "subject_hash", "session_unlimited", "username"}}
-		p.functions = []string{"supivpn.lock_node(text)"}
+		p.functions = []string{"supivpn.lock_node(text)", "supivpn.profile_owner_active(text,bytea)"}
 	case AgentAPI:
+		p.tables["supivpn.profile_bindings"] = []string{"SELECT", "INSERT"}
 		p.tables["supivpn.nodes"] = []string{"SELECT"}
 		p.tables["supivpn.logins"] = []string{"SELECT"}
 		p.columns["supivpn.logins"] = map[string][]string{
 			"INSERT": {"ticket_hash", "node_id", "generation", "cid", "kid", "expires_at"},
 			"UPDATE": {"state", "ack_result"}}
-		p.functions = []string{"supivpn.lock_node(text)", "supivpn.agent_rotate(text,text,text)", "supivpn.agent_heartbeat(text,text,boolean)"}
+		p.functions = []string{"supivpn.lock_node(text)", "supivpn.agent_rotate(text,text,text)", "supivpn.agent_heartbeat(text,text,boolean)", "supivpn.profile_proof_valid(text,bytea)", "supivpn.profile_is_active(text)"}
 		p.sequences = []string{"supivpn.logins_revision_seq"}
 	case Recovery:
+		p.tables["supivpn.issued_profiles"] = []string{"SELECT"}
+		p.columns["supivpn.issued_profiles"] = map[string][]string{"UPDATE": {"state", "revision"}}
 		p.tables["supivpn.nodes"] = []string{"SELECT"}
 		p.columns["supivpn.nodes"] = map[string][]string{"UPDATE": {"fence_state", "fence_retry_at", "healthy_since"}}
 		for _, table := range []string{"node_recovery", "node_recovery_stops", "node_recovery_starts", "node_maintenance", "operator_requests"} {
@@ -76,13 +82,13 @@ func NewIsolated(ctx context.Context, pool *pgxpool.Pool, c Component, f Fencer)
 }
 
 func CheckPrivileges(ctx context.Context, pool *pgxpool.Pool, c Component) error {
-	refused := errors.New("database component privileges invalid; require schema 10 and separate restricted roles")
+	refused := errors.New("database component privileges invalid; require schema 11 and separate restricted roles")
 	policy, ok := componentPrivileges(c)
 	if !ok || pool == nil {
 		return refused
 	}
 	var version int
-	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 10 {
+	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 11 {
 		return refused
 	}
 	var unsafe bool

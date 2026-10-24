@@ -24,31 +24,33 @@ import (
 	"syscall"
 	"time"
 
+	"supivpn/internal/controller"
+	"supivpn/internal/logging"
+	"supivpn/internal/profile"
 	"supivpn/internal/saml"
 	"supivpn/internal/servicenotify"
-	"supivpn/internal/logging"
-    "supivpn/internal/controller"
 )
 
 type config struct {
-	VPNLoginConfirmation *bool `json:"vpn_login_confirmation,omitempty"`
-	AssertionEncryption *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
-    Logging *logging.Config `json:"logging,omitempty"`
-	MaxConnectionsPerUser int         `json:"max_connections_per_user,omitempty"`
-	PublicURL           string        `json:"public_url"`
-	Listen              string        `json:"listen"`
-	TLSCertificate      string        `json:"tls_certificate"`
-	TLSChain            string        `json:"tls_chain"`
-	TLSPrivateKey       string        `json:"tls_private_key"`
-	IDPMetadata         string        `json:"idp_metadata"`
-	ManagementSocket    string        `json:"management_socket"`
-	AllowedSubjects     []string      `json:"allowed_subjects"`
-	PendingSeconds      int           `json:"pending_seconds"`
-	SessionSeconds      int           `json:"session_seconds"`
-	SAMLGroupsAttribute string        `json:"saml_groups_attribute,omitempty"`
-	VPNNetwork          string        `json:"vpn_network,omitempty"`
-	GroupPools          []groupPool   `json:"group_pools,omitempty"`
-	RemoteController    *remoteConfig `json:"remote_controller,omitempty"`
+	ProfileBinding        string                 `json:"profile_binding,omitempty"`
+	VPNLoginConfirmation  *bool                  `json:"vpn_login_confirmation,omitempty"`
+	AssertionEncryption   *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
+	Logging               *logging.Config        `json:"logging,omitempty"`
+	MaxConnectionsPerUser int                    `json:"max_connections_per_user,omitempty"`
+	PublicURL             string                 `json:"public_url"`
+	Listen                string                 `json:"listen"`
+	TLSCertificate        string                 `json:"tls_certificate"`
+	TLSChain              string                 `json:"tls_chain"`
+	TLSPrivateKey         string                 `json:"tls_private_key"`
+	IDPMetadata           string                 `json:"idp_metadata"`
+	ManagementSocket      string                 `json:"management_socket"`
+	AllowedSubjects       []string               `json:"allowed_subjects"`
+	PendingSeconds        int                    `json:"pending_seconds"`
+	SessionSeconds        int                    `json:"session_seconds"`
+	SAMLGroupsAttribute   string                 `json:"saml_groups_attribute,omitempty"`
+	VPNNetwork            string                 `json:"vpn_network,omitempty"`
+	GroupPools            []groupPool            `json:"group_pools,omitempty"`
+	RemoteController      *remoteConfig          `json:"remote_controller,omitempty"`
 }
 
 func readConfig(path string) (config, *url.URL, error) {
@@ -67,7 +69,9 @@ func readConfig(path string) (config, *url.URL, error) {
 	if d.Decode(&extra) != io.EOF {
 		return c, nil, errors.New("configuration must contain one JSON object")
 	}
-    if err := c.Logging.Validate("agent"); err != nil { return c, nil, err }
+	if err := c.Logging.Validate("agent"); err != nil {
+		return c, nil, err
+	}
 	if err := c.AssertionEncryption.Validate(); err != nil {
 		return c, nil, err
 	}
@@ -81,6 +85,9 @@ func readConfig(path string) (config, *url.URL, error) {
 		return c, nil, errors.New("use a dedicated SAML encryption key separate from TLS")
 	}
 	u, err := url.Parse(c.PublicURL)
+	if c.ProfileBinding != "" && c.ProfileBinding != "legacy" && c.ProfileBinding != "required" || c.ProfileBinding == "required" && c.RemoteController == nil {
+		return c, nil, errors.New("profile_binding must be legacy or required; required needs a remote controller")
+	}
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
 		u.Path != "" || u.RawQuery != "" || u.Fragment != "" ||
 		strings.ContainsAny(c.PublicURL, " \t\r\n\\\"") || len(c.PublicURL) > 300 {
@@ -118,9 +125,11 @@ func run(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-    closeLogs, err := logging.Setup("agent", c.Logging)
-    if err != nil { return err }
-    defer closeLogs()
+	closeLogs, err := logging.Setup("agent", c.Logging)
+	if err != nil {
+		return err
+	}
+	defer closeLogs()
 	keyPair, err := tls.LoadX509KeyPair(c.TLSCertificate, c.TLSPrivateKey)
 	if err != nil {
 		return errors.New("cannot load server TLS certificate and key")
@@ -138,14 +147,14 @@ func run(ctx context.Context, path string) error {
 		chain = rest
 	}
 	var sp *saml.ServiceProvider
-		metadataBytes, err := os.ReadFile(c.IDPMetadata)
-		if err != nil || len(metadataBytes) > 1<<20 {
-			return errors.New("cannot read IdP metadata (maximum 1 MiB)")
-		}
-		metadata, err := saml.ParseMetadata(metadataBytes)
-		if err != nil || metadata.EntityID == "" || len(metadata.IDPSSODescriptors) == 0 {
-			return errors.New("invalid IdP metadata")
-		}
+	metadataBytes, err := os.ReadFile(c.IDPMetadata)
+	if err != nil || len(metadataBytes) > 1<<20 {
+		return errors.New("cannot read IdP metadata (maximum 1 MiB)")
+	}
+	metadata, err := saml.ParseMetadata(metadataBytes)
+	if err != nil || metadata.EntityID == "" || len(metadata.IDPSSODescriptors) == 0 {
+		return errors.New("invalid IdP metadata")
+	}
 	if c.RemoteController == nil {
 		sp = &saml.ServiceProvider{
 			EntityID:          origin.String() + "/saml/metadata",
@@ -182,7 +191,9 @@ func run(ctx context.Context, path string) error {
 	}
 	a := newAgent(c, origin)
 	operator, operatorStopped, err := a.listenOperator(metadata.EntityID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer operator.Close()
 	if c.SAMLGroupsAttribute != "" {
 		a.pools = newPoolAllocator(c)
@@ -291,11 +302,30 @@ func Main() {
 	learn := flag.Bool("learn-address", false, "validate an OpenVPN learned source address")
 	check := flag.Bool("check-config", false, "validate configuration without starting services")
 	operator := flag.Bool("operator-request", false, "send a local user-session request from stdin")
+	metadataMode := flag.String("verify-profile-metadata", "", "OpenVPN tls-crypt-v2-verify mode: legacy or required")
+	metadataAge := flag.Duration("profile-max-age", 0, "maximum profile age; zero disables age expiry")
 	flag.Parse()
+	if *metadataMode != "" {
+		f, err := os.Open(os.Getenv("metadata_file"))
+		if err != nil {
+			os.Exit(1)
+		}
+		b, err := io.ReadAll(io.LimitReader(f, 256))
+		f.Close()
+		if err != nil || !profile.VerifyClientMetadata(*metadataMode, os.Getenv("metadata_type"), b, time.Now(), *metadataAge) {
+			os.Exit(1)
+		}
+		return
+	}
 	if *operator {
 		c, _, err := readConfig(*path)
-		if err == nil { err = requestUserSessions(context.Background(), operatorSocket(c.ManagementSocket), os.Stdin, os.Stdout) }
-		if err != nil { logging.Emit(context.Background(), "operator.request_failed"); os.Exit(1) }
+		if err == nil {
+			err = requestUserSessions(context.Background(), operatorSocket(c.ManagementSocket), os.Stdin, os.Stdout)
+		}
+		if err != nil {
+			logging.Emit(context.Background(), "operator.request_failed")
+			os.Exit(1)
+		}
 		return
 	}
 	if *learn {

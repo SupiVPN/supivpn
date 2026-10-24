@@ -45,8 +45,10 @@ type Controller struct {
 // ProfileDownloads uses separate pending state; it never authorizes an agent
 // connection or embeds a SAML login/session credential in a client profile.
 type ProfileDownloads struct {
-	Backend Backend
-	Issue   func(context.Context) ([]byte, error)
+	Backend         Backend
+	Imports         ProfileImports
+	Issue           func(context.Context) ([]byte, error)
+	IssueForSubject func(context.Context, [32]byte) ([]byte, error)
 }
 
 func New(c Config, origin *url.URL, sp *saml.ServiceProvider, backend Backend, now func() time.Time, downloads ...ProfileDownloads) (*Controller, error) {
@@ -88,7 +90,7 @@ func New(c Config, origin *url.URL, sp *saml.ServiceProvider, backend Backend, n
 	}
 	if len(downloads) == 1 {
 		d := downloads[0]
-		if d.Backend == nil || d.Issue == nil || c.SAMLGroupsAttribute == "" {
+		if d.Backend == nil || (d.Issue == nil) == (d.IssueForSubject == nil) || c.SAMLGroupsAttribute == "" {
 			return nil, errors.New("profile downloads require a backend, issuer and group authorization")
 		}
 		a.downloads = &d
@@ -115,6 +117,9 @@ func (a *Controller) Handler() http.Handler {
 	mux.HandleFunc(a.origin.Path+"/saml/acs", a.acs)
 	mux.HandleFunc(a.origin.Path+"/saml/launch", a.launchProfile)
 	mux.HandleFunc(a.origin.Path+"/profile", a.profile)
+	mux.HandleFunc(a.origin.Path+"/openvpn-api/profile", a.discoverProfile)
+	mux.HandleFunc(a.origin.Path+"/profile/connect", a.connectProfile)
+	mux.HandleFunc(a.origin.Path+"/profile/import/", a.importProfile)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(tracecontext.New(r.Context()))
 		w.Header().Set("Cache-Control", "no-store")
@@ -311,20 +316,11 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isProfile {
-		// The one-use login is consumed before accessing the wrapping key.
-		// An interrupted download requires a new SAML flow, never a replay.
-		data, err := a.downloads.Issue(r.Context())
-		if err != nil || len(data) == 0 || len(data) > 64<<10 {
-			logging.Emit(r.Context(), "profile.issue_failed")
-			http.Error(w, "Profile unavailable. Open the profile link to sign in again.", http.StatusServiceUnavailable)
-			return
+		if strings.HasPrefix(ticket, "profile_url_") {
+			a.handoffProfile(w, r, decision.SubjectHash)
+		} else {
+			a.issueProfile(w, r, decision.SubjectHash)
 		}
-		defer clear(data)
-		logging.Emit(r.Context(), "profile.issued")
-		w.Header().Set("Content-Type", "application/x-openvpn-profile")
-		w.Header().Set("Content-Disposition", `attachment; filename="supivpn.ovpn"`)
-		w.Header().Set("Cache-Control", "no-store, private")
-		w.Write(data)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

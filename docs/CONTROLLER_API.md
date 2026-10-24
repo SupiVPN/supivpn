@@ -40,9 +40,10 @@ a URL with the `/supivpn` prefix; Entity ID and ACS are derived from it.
   The same block is supported in migration JSON. See [TLS configuration and
   precedence](POSTGRES.md#configurable-database-tls).
 - Run migrations separately as described in [POSTGRES.md](POSTGRES.md).
-  Startup does not perform DDL. Isolated Lambdas first require schema-10 privilege
+  Startup does not perform DDL. Isolated Lambdas first require schema-11 privilege
   validation; VM processes can start without database access,
-  but readiness/new logins fail until connectivity recovers.
+  but readiness/new logins fail until connectivity recovers. Opting into profile
+  ownership or Server URL requires schema 11 to be reachable at VM startup too.
 - One process/warm Lambda shares a pool of at most 4 connections.
   Requests have a 10-second timeout, or the shorter Lambda deadline.
 - Group mode is mandatory. IP pools remain agent configuration;
@@ -260,3 +261,6 @@ Lambda layer. To bundle XML, pass `-metadata /path/to/idp-metadata.xml` explicit
 and configure `/var/task/idp-metadata.xml`.
 AWS deployment may supply JSON through environment variables.
 Passwords, DSNs, and private keys are not included in the ZIP.
+
+Unreleased profile binding, additional VM agent listeners and Server URL routes are
+described in [PROFILE_BINDING.md](PROFILE_BINDING.md).

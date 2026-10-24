@@ -27,6 +27,9 @@ The short path below establishes a split tunnel and a ping to the VPN gateway.
 Private-network access is an explicit follow-up. Client Internet traffic and DNS
 continue through the client's normal connection.
 
+See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the **unreleased** account-bound profile format,
+active/blocked controls, Server URL import and Linux file-import support.
+
 ## Choose your access policy
 
 The setup file is a starting point, not the full runtime configuration.

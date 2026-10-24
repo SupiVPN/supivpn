@@ -26,6 +26,7 @@ FUZZ_SAML_TIME ?= $(FUZZ_TIME)
 GOVULNCHECK_VERSION := v1.9.0
 VULNCHECK := $(LOCAL)/tools/$(GOVULNCHECK_VERSION)/govulncheck
 OPENVPN_IMAGE ?= supivpn-openvpn-test:2.7.8-$(ARCH)
+LINUX_CLIENT_IMAGE ?= supivpn-linux-client-test:$(ARCH)
 XMLSEC_IMAGE ?= supivpn-xmlsec-test:$(ARCH)
 POSTGRES_IMAGE ?= postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
 POSTGRES_CONTAINER ?= supivpn-pg18-test
@@ -253,6 +254,19 @@ test-openvpn: agent
 	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/supivpn,target=/test/supivpn,readonly" \
 	 --env SUPIVPN_TEST_OPENVPN=/usr/sbin/openvpn --env SUPIVPN_TEST_AGENT=/test/supivpn \
 	 "$(OPENVPN_IMAGE)" /test/openvpn.test -test.run TestOpenVPN -test.v -test.timeout 300s
+
+.PHONY: linux-client-image test-linux-client
+linux-client-image:
+	@$(DOCKER) build --platform linux/$(ARCH) --build-arg "BASE_IMAGE=$(OPENVPN_IMAGE)" -t "$(LINUX_CLIENT_IMAGE)" "$(ROOT)/ci/linux-client"
+
+test-linux-client: agent
+	@cd "$(ROOT)" && $(LINUX) $(GO) test -c -o "$(BUILD_DIR)/openvpn.test" ./internal/agent
+	@$(DOCKER) run --rm --platform linux/$(ARCH) --network none --cap-add NET_ADMIN --device /dev/net/tun \
+	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/openvpn.test,target=/test/openvpn.test,readonly" \
+	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/supivpn,target=/test/supivpn,readonly" \
+	 --mount "type=bind,source=$(ROOT)/ci/linux-client,target=/runner,readonly" \
+	 --env SUPIVPN_TEST_OPENVPN=/usr/sbin/openvpn --env SUPIVPN_TEST_AGENT=/test/supivpn \
+	 --env SUPIVPN_TEST_OPENVPN3=/usr/bin/openvpn3 "$(LINUX_CLIENT_IMAGE)" python3 /runner/run.py
 
 test-connect: agent
 	@mkdir -p "$(LOCAL)/connect-test"

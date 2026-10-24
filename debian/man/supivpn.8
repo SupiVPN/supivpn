@@ -28,6 +28,14 @@ operator socket selected by the configuration. Requires local authorization.
 Validate the source address supplied by the OpenVPN learn-address hook.
 This mode is intended for invocation by OpenVPN.
 .TP
+.BI \-verify-profile-metadata " legacy|required"
+Validate authenticated tls-crypt-v2 metadata for the selected listener format.
+Intended for OpenVPN's tls-crypt-v2-verify hook; starts no services.
+.TP
+.BI \-profile-max-age " duration"
+Optional maximum key age for the metadata hook, such as 2160h.
+The default zero does not impose an age limit.
+.TP
 .B \-h
 Show command-line help.
 .SH FILES

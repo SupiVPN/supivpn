@@ -16,6 +16,11 @@ supivpn-controller system account.
 .BI \-config " file"
 Read JSON configuration. The standalone default is /etc/supivpn/controller.json.
 .TP
+.B \-operator-request
+Read a privileged profile status, block or activate request from standard input.
+Uses the configured database credentials and TLS; starts no listeners.
+State changes require the operator/recovery database role and a current revision.
+.TP
 .B \-h
 Show command-line help.
 .SH ENVIRONMENT

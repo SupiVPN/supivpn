@@ -253,6 +253,7 @@ func (a *agent) remoteStep(ctx context.Context) {
 		q.CID, q.KID = &cid, &kid
 		if phase == "register" {
 			q.Ticket = c.ticket
+			q.ProfileID, q.ProfileSecret = c.proof.ID, c.proof.Secret
 		}
 	}
 	a.mu.Unlock()
@@ -310,6 +311,7 @@ func (a *agent) remoteStep(ctx context.Context) {
 	}
 	switch phase {
 	case "register":
+		c.proof.Secret = ""
 		remaining := int(c.expires.Sub(a.now()).Seconds())
 		if remaining <= 0 {
 			a.refuseRemoteLocked(c)
@@ -371,7 +373,7 @@ func (a *agent) validRemoteDecision(c *connection, d *agentapi.Decision) bool {
 	switch d.DenialReason {
 	case "":
 		return agentapi.ValidNode(d.GroupName)
-	case "invalid_groups_claim", "no_vpn_group", "connection_limit":
+	case "invalid_groups_claim", "no_vpn_group", "connection_limit", "profile_refused":
 		return d.GroupName == ""
 	default:
 		return false

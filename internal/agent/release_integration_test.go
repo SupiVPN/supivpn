@@ -21,9 +21,21 @@ import (
 	"supivpn/internal/postgres"
 )
 
+// Reconstruct old deployed schema in the disposable test database only.
+func removeProfileSchema(t *testing.T, p *pgxpool.Pool) {
+	t.Helper()
+	_, err := p.Exec(context.Background(), `DROP TABLE IF EXISTS supivpn.profile_bindings,supivpn.issued_profiles,supivpn.profile_imports;
+ DROP FUNCTION IF EXISTS supivpn.profile_proof_valid(text,bytea),supivpn.profile_is_active(text),supivpn.profile_owner_active(text,bytea);
+ DELETE FROM public.supivpn_schema_migrations WHERE version=11`)
+	if err != nil {
+		t.Fatal("cannot restore disposable pre-profile schema")
+	}
+}
+
 // Restore the deployed functions too, not just their ledger version. Replacing
 // only their bodies preserves owners and runtime grants for upgrade tests.
 func restoreSchema9Functions(t *testing.T, pool *pgxpool.Pool) {
+	removeProfileSchema(t, pool)
 	t.Helper()
 	data, err := os.ReadFile("../postgres/migrations/009_component_isolation.sql")
 	if err != nil {
@@ -53,6 +65,7 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 	p, _ := integrationDatabase(t)
 	ctx := context.Background()
 	s := postgres.New(p)
+	removeProfileSchema(t, p)
 	if _, err := p.Exec(ctx, `TRUNCATE supivpn.nodes,supivpn.assertions CASCADE;
 		ALTER TABLE supivpn.logins DROP COLUMN username;
         DROP FUNCTION supivpn.lock_node(text),supivpn.agent_rotate(text,text,text),supivpn.agent_heartbeat(text,text,boolean),supivpn.prune_auth(integer);
@@ -64,9 +77,12 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 			t.Error("cannot restore test schema", err)
 		}
 	})
-	for _, version := range []int{7, 8, 9, 10} {
+	for _, version := range []int{7, 8, 9, 10, 11} {
 		if !s.Ready(ctx) {
 			t.Fatalf("schema %d rejected by bridge", version)
+		}
+		if s.ProfileSchemaReady(ctx) != (version == 11) {
+			t.Fatal("profile feature schema gate mismatch")
 		}
 		actor := postgres.Agent{NodeID: fmt.Sprintf("bridge-%d", version), Generation: "generation-a"}
 		conn := postgres.Connection{CID: int64(version), KID: 1}
@@ -131,6 +147,7 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 			if err != nil || old.ID != decision.ID || old.SubjectHash != decision.SubjectHash {
 				t.Fatal("upgrade lost pending decision")
 			}
+			removeProfileSchema(t, p)
 			if _, err = p.Exec(ctx, `DROP FUNCTION supivpn.lock_node(text),supivpn.agent_rotate(text,text,text),supivpn.agent_heartbeat(text,text,boolean),supivpn.prune_auth(integer);
                 DELETE FROM public.supivpn_schema_migrations WHERE version>=9`); err != nil {
 				t.Fatal("cannot prepare disposable schema 8")
@@ -179,13 +196,23 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 			if err != nil || old != decision {
 				t.Fatal("schema 10 upgrade lost live decision")
 			}
+			removeProfileSchema(t, p)
+		}
+		if version == 10 {
+			if err := postgres.Migrate(ctx, p); err != nil {
+				t.Fatal("schema 10 to 11 upgrade failed", err)
+			}
+			old, err := s.Fetch(ctx, actor, conn)
+			if err != nil || old != decision {
+				t.Fatal("profile migration changed an existing authorization")
+			}
 		}
 	}
-	if _, err := p.Exec(ctx, "INSERT INTO public.supivpn_schema_migrations(version,checksum) VALUES(11,''::bytea)"); err != nil {
+	if _, err := p.Exec(ctx, "INSERT INTO public.supivpn_schema_migrations(version,checksum) VALUES(12,''::bytea)"); err != nil {
 		t.Fatal("cannot prepare future schema")
 	}
 	ready := s.Ready(ctx)
-	if _, err := p.Exec(ctx, "DELETE FROM public.supivpn_schema_migrations WHERE version=11"); err != nil {
+	if _, err := p.Exec(ctx, "DELETE FROM public.supivpn_schema_migrations WHERE version=12"); err != nil {
 		t.Fatal("cannot remove future schema fixture")
 	}
 	if ready {

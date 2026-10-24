@@ -18,8 +18,8 @@ import (
 	"regexp"
 	"strings"
 
-	"supivpn/internal/agentapi"
 	"github.com/aws/aws-lambda-go/events"
+	"supivpn/internal/agentapi"
 )
 
 type Config struct {
@@ -33,14 +33,23 @@ type Adapter struct {
 	config         Config
 	origin         *url.URL
 	public, agents http.Handler
-	only string
+	only           string
 }
+
 // Isolated adapters refuse the other surface even if API Gateway is miswired.
-func NewPublic(c Config,origin *url.URL,h http.Handler)(*Adapter,error){
-    a,err:=New(c,origin,h,http.NotFoundHandler());if err==nil{a.only="public"};return a,err
+func NewPublic(c Config, origin *url.URL, h http.Handler) (*Adapter, error) {
+	a, err := New(c, origin, h, http.NotFoundHandler())
+	if err == nil {
+		a.only = "public"
+	}
+	return a, err
 }
-func NewAgent(c Config,origin *url.URL,h http.Handler)(*Adapter,error){
-    a,err:=New(c,origin,http.NotFoundHandler(),h);if err==nil{a.only="agent"};return a,err
+func NewAgent(c Config, origin *url.URL, h http.Handler) (*Adapter, error) {
+	a, err := New(c, origin, http.NotFoundHandler(), h)
+	if err == nil {
+		a.only = "agent"
+	}
+	return a, err
 }
 
 var principalPattern = regexp.MustCompile(`^arn:aws:sts::([0-9]{12}):assumed-role/[A-Za-z0-9_+=,.@-]+/i-[0-9a-f]{17}$`)
@@ -99,7 +108,9 @@ func (a *Adapter) Handle(ctx context.Context, e events.APIGatewayV2HTTPRequest) 
 	}
 	route := rc.HTTP.Method + " " + path
 	handler := a.public
-	if a.only=="public" && strings.HasPrefix(path,"/agent/") || a.only=="agent" && !strings.HasPrefix(path,"/agent/") { return reject(403) }
+	if a.only == "public" && strings.HasPrefix(path, "/agent/") || a.only == "agent" && !strings.HasPrefix(path, "/agent/") {
+		return reject(403)
+	}
 	if strings.HasPrefix(path, "/agent/") {
 		if !agentapi.IsPath(path) || e.RawPath != path || rc.RouteKey != route || rc.HTTP.Method != "POST" {
 			return reject(403)
@@ -129,6 +140,15 @@ func (a *Adapter) Handle(ctx context.Context, e events.APIGatewayV2HTTPRequest) 
 			}
 		case publicPath == "/healthz" && rc.HTTP.Method == "GET", publicPath == "/saml/metadata" && rc.HTTP.Method == "GET", publicPath == "/saml/acs" && rc.HTTP.Method == "POST", publicPath == "/profile" && rc.HTTP.Method == "GET":
 			if rc.RouteKey != route {
+				return reject(403)
+			}
+		case publicPath == "/openvpn-api/profile" && (rc.HTTP.Method == "GET" || rc.HTTP.Method == "HEAD"), publicPath == "/profile/connect" && rc.HTTP.Method == "GET":
+			if rc.RouteKey != route || e.RawPath != path {
+				return reject(403)
+			}
+		case strings.HasPrefix(publicPath, "/profile/import/") && rc.HTTP.Method == "GET":
+			token := strings.TrimPrefix(publicPath, "/profile/import/")
+			if rc.RouteKey != "GET "+a.origin.Path+"/profile/import/{token}" || e.RawPath != path || len(token) != 43 || strings.Trim(token, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") != "" {
 				return reject(403)
 			}
 		case strings.HasPrefix(publicPath, "/login/") && (rc.HTTP.Method == "GET" || rc.HTTP.Method == "POST"):

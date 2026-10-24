@@ -239,8 +239,20 @@ committed DDL or restore an older database snapshot that could revive stale gran
 or fencing generations. An incompatible change needs explicit maintenance and a
 reviewed recovery procedure.
 
-The VM runtime supports schemas 7/8/9/10; isolated Lambda components require 10.
+The development VM runtime supports schemas 7/8/9/10/11 for legacy authorization;
+isolated Lambda components and opt-in profile features require 11.
 Previously applied SQL migration files remain unchanged.
+
+### Schema 10 to 11 (unreleased)
+
+Migration 011 adds issued-profile ownership/state, login bindings and bounded
+one-use import grants. Existing logins, decisions and replay state are retained;
+old profiles are not assigned an owner retroactively. Upgrade controllers and
+agents, migrate explicitly, and reapply isolated-role grants before enabling the
+new profile mode. Profile ownership and Server URL refuse startup without schema
+11. Follow the [two-port transition](PROFILE_BINDING.md) before issuing bound
+profiles. v0.7.1 cannot be used for runtime rollback after migration; use a
+verified schema-11-compatible build and keep committed authorization state.
 
 ### Schema 9 to 10
 
@@ -255,8 +267,8 @@ Migration 010 is transactional and preserves logins, decisions, replay entries,
 generation history and recovery budgets. Its function replacement uses the
 existing migration lock/statement timeouts; if it cannot complete, stop the
 deployment and retry the same migrator after resolving contention. Do not
-increase timeouts automatically. This release is the first runtime compatible
-with schema 10; v0.4.5 cannot be used for rollback after migration. Keep schema 10
+increase timeouts automatically. v0.5.0 was the first runtime compatible
+with schema 10; v0.4.5 cannot be used for rollback after that migration. Keep schema 10
 and restore only a verified compatible runtime, without deleting migration
 metadata or restoring old authorization state.
 

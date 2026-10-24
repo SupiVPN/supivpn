@@ -6,23 +6,35 @@ package main
 
 import (
 	"context"
-	"supivpn/internal/controlruntime"
-	"supivpn/internal/vm"
-	"supivpn/internal/logging"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"supivpn/internal/controlruntime"
+	"supivpn/internal/logging"
+	"supivpn/internal/operatorapi"
+	"supivpn/internal/postgres"
+	"supivpn/internal/vm"
 	"syscall"
 )
 
 func main() {
 	logging.Configure("controller")
 	path := flag.String("config", "/etc/supivpn/controller.json", "controller configuration")
+	operator := flag.Bool("operator-request", false, "send an operator request from stdin using the configured database")
 	flag.Parse()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, *path); err != nil {
+	var err error
+	if *operator {
+		err = operate(ctx, *path)
+	} else {
+		err = run(ctx, *path)
+	}
+	if err != nil {
 		logging.Emit(ctx, "component.stopped")
 		os.Exit(1)
 	}
@@ -38,13 +50,46 @@ func run(ctx context.Context, path string) error {
 	if err = c.VM.Validate(); err != nil {
 		return err
 	}
-    closeLogs, err := logging.Setup("controller", c.Logging)
-    if err != nil { return err }
-    defer closeLogs()
+	closeLogs, err := logging.Setup("controller", c.Logging)
+	if err != nil {
+		return err
+	}
+	defer closeLogs()
 	app, err := controlruntime.Open(ctx, c, os.Getenv("SUPIVPN_DATABASE_URL"))
 	if err != nil {
 		return err
 	}
 	defer app.Close()
 	return vm.Serve(ctx, *c.VM, app.Public, app.Agents)
+}
+
+func operate(ctx context.Context, path string) error {
+	c, err := controlruntime.ReadConfig(path)
+	if err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
+	if err != nil || len(raw) > 8192 {
+		return errors.New("invalid operator request")
+	}
+	q, err := operatorapi.Decode(raw)
+	if err != nil || q.ProfileID == "" {
+		return errors.New("only profile operations are available through this VM command")
+	}
+	pool, err := postgres.OpenWithTLS(ctx, os.Getenv("SUPIVPN_DATABASE_URL"), nil, c.DatabaseTLS)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	reply, err := operatorapi.Handler(postgres.New(pool))(ctx, raw)
+	if err != nil {
+		return err
+	}
+	if err = json.NewEncoder(os.Stdout).Encode(reply); err != nil {
+		return errors.New("cannot write operator response")
+	}
+	if r, ok := reply.(operatorapi.Reply); !ok || !r.OK {
+		return errors.New("operator request refused")
+	}
+	return nil
 }

@@ -20,21 +20,36 @@ import (
 	"time"
 
 	"supivpn/internal/agentapi"
-	"supivpn/internal/unixpeer"
 	"supivpn/internal/servicenotify"
+	"supivpn/internal/unixpeer"
 )
 
+type AgentEndpoint struct {
+	Socket string  `json:"socket"`
+	UID    *uint32 `json:"uid"`
+	NodeID string  `json:"node_id"`
+}
+
 type Config struct {
-	Listen         string  `json:"listen"`
-	TLSCertificate string  `json:"tls_certificate"`
-	TLSChain       string  `json:"tls_chain"`
-	TLSPrivateKey  string  `json:"tls_private_key"`
-	AgentSocket    string  `json:"agent_socket"`
-	AgentUID       *uint32 `json:"agent_uid"`
-	NodeID         string  `json:"node_id"`
+	AdditionalAgents []AgentEndpoint `json:"additional_agents,omitempty"`
+	Listen           string          `json:"listen"`
+	TLSCertificate   string          `json:"tls_certificate"`
+	TLSChain         string          `json:"tls_chain"`
+	TLSPrivateKey    string          `json:"tls_private_key"`
+	AgentSocket      string          `json:"agent_socket"`
+	AgentUID         *uint32         `json:"agent_uid"`
+	NodeID           string          `json:"node_id"`
 }
 
 func (c Config) Validate() error {
+	if len(c.AdditionalAgents) > 1 {
+		return errors.New("at most one additional migration listener is supported")
+	}
+	for _, a := range c.AdditionalAgents {
+		if a.UID == nil || !filepath.IsAbs(a.Socket) || a.Socket == c.AgentSocket || !agentapi.ValidNode(a.NodeID) || a.NodeID == c.NodeID {
+			return errors.New("additional agent requires an explicit UID, distinct socket and node identity")
+		}
+	}
 	if c.Listen == "" || c.AgentUID == nil || !agentapi.ValidNode(c.NodeID) {
 		return errors.New("invalid VM listener or agent identity")
 	}
@@ -145,22 +160,42 @@ func Serve(ctx context.Context, c Config, public, agents http.Handler) error {
 		return err
 	}
 	defer local.Close()
+	locals := []net.Listener{local}
+	for _, endpoint := range c.AdditionalAgents {
+		listener, e := ListenAgent(endpoint.Socket, *endpoint.UID, endpoint.NodeID)
+		if e != nil {
+			return e
+		}
+		defer listener.Close()
+		locals = append(locals, listener)
+	}
 	if _, err := servicenotify.Ready(); err != nil {
 		return err
 	}
-	return ServeListeners(ctx, web, local, public, agents)
+	return serveListeners(ctx, web, locals, public, agents)
 }
 
 // ServeListeners owns only controller listeners. Shutdown has no management
 // socket, signal or lifecycle relationship with OpenVPN.
 func ServeListeners(ctx context.Context, web, local net.Listener, public, agents http.Handler) error {
-	webServer, agentServer := httpServer(public), httpServer(agents)
-	agentServer.ConnContext = AgentContext
-	stopped := make(chan error, 2)
+	return serveListeners(ctx, web, []net.Listener{local}, public, agents)
+}
+func serveListeners(ctx context.Context, web net.Listener, locals []net.Listener, public, agents http.Handler) error {
+	servers := []*http.Server{httpServer(public)}
+	stopped := make(chan error, len(locals)+1)
+	webServer := servers[0]
 	go func() { stopped <- webServer.Serve(web) }()
-	go func() { stopped <- agentServer.Serve(local) }()
-	defer webServer.Close()
-	defer agentServer.Close()
+	for _, local := range locals {
+		server := httpServer(agents)
+		server.ConnContext = AgentContext
+		servers = append(servers, server)
+		go func() { stopped <- server.Serve(local) }()
+	}
+	defer func() {
+		for _, server := range servers {
+			server.Close()
+		}
+	}()
 	var err error
 	select {
 	case <-ctx.Done():
@@ -168,8 +203,9 @@ func ServeListeners(ctx context.Context, web, local net.Listener, public, agents
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	webServer.Shutdown(shutdown)
-	agentServer.Shutdown(shutdown)
+	for _, server := range servers {
+		server.Shutdown(shutdown)
+	}
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return errors.New("controller listener stopped")
 	}

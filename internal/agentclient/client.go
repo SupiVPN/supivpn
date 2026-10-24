@@ -25,6 +25,8 @@ import (
 )
 
 type Request struct {
+	ProfileID       string `json:"profile_id,omitempty"`
+	ProfileSecret   string `json:"profile_secret,omitempty"`
 	IncludeUsername *bool  `json:"include_username,omitempty"`
 	IncludeSubject  *bool  `json:"include_subject,omitempty"`
 	Ready           *bool  `json:"ready,omitempty"`

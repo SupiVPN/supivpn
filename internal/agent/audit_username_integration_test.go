@@ -48,6 +48,7 @@ func TestAuditUsernameMigrationPreservesGrant(t *testing.T) {
 	f.deliver(t, login, coreGroup)
 	ctx := context.Background()
 	// Restore schema 7 in the disposable database, preserving the active grant.
+ removeProfileSchema(t,f.pool)
 	if _, err := f.pool.Exec(ctx, `ALTER TABLE supivpn.logins DROP COLUMN username;
         DROP FUNCTION supivpn.lock_node(text),supivpn.agent_rotate(text,text,text),supivpn.agent_heartbeat(text,text,boolean),supivpn.prune_auth(integer);
 		DELETE FROM public.supivpn_schema_migrations WHERE version>=8`); err != nil { t.Fatal("cannot prepare previous schema") }

@@ -342,6 +342,7 @@ func TestProfileMigrationUpgradeAndExpiry(t *testing.T) {
 		t.Fatal("missing v1 migration")
 	}
 	// Recreate the already deployed v1 state, preserving its node and checksum.
+ removeProfileSchema(t,pool)
 	if _, err := pool.Exec(ctx, `DROP FUNCTION supivpn.lock_node(text),supivpn.agent_heartbeat(text,text,boolean),supivpn.agent_rotate(text,text,text),supivpn.prune_auth(integer);
         DROP TABLE supivpn.profile_logins;
         DROP TABLE supivpn.node_recovery, supivpn.node_recovery_starts,supivpn.node_recovery_stops,

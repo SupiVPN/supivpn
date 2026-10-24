@@ -53,6 +53,11 @@ func (s *Store) fetchRecord(ctx context.Context, a Agent, c Connection, hash []b
 		if !r.deliverable(now) {
 			return ErrNoDecision
 		}
+		if r.denial == "" {
+			if err := activeLoginProfile(ctx, tx, hash); err != nil {
+				return err
+			}
+		}
 		expiry := r.expires
 		if r.notAfter.Before(expiry) {
 			expiry = r.notAfter
@@ -107,6 +112,11 @@ func (s *Store) Acknowledge(ctx context.Context, a Agent, id string, outcome Out
 		}
 		if r.denial != "" && outcome == Applied {
 			return ErrConflict
+		}
+		if outcome == Applied {
+			if err := activeLoginProfile(ctx, tx, hash); err != nil {
+				return err
+			}
 		}
 		tag, err := tx.Exec(ctx, `UPDATE supivpn.logins SET state='acknowledged',ack_result=$2
             WHERE ticket_hash=$1 AND expires_at>clock_timestamp()

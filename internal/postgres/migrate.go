@@ -85,7 +85,7 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, asOwner bool) error {
     `); err != nil {
 		return errors.New("cannot initialize migration metadata")
 	}
-	files := []string{"001_auth.sql", "002_profiles.sql", "003_sessions.sql", "004_renewals.sql", "005_recovery.sql", "006_session_expiry.sql", "007_safe_recovery.sql", "008_audit_username.sql", "009_component_isolation.sql", "010_runtime_queries.sql"}
+	files := []string{"001_auth.sql", "002_profiles.sql", "003_sessions.sql", "004_renewals.sql", "005_recovery.sql", "006_session_expiry.sql", "007_safe_recovery.sql", "008_audit_username.sql", "009_component_isolation.sql", "010_runtime_queries.sql", "011_profile_binding.sql"}
 	rows, err := tx.Query(ctx, "SELECT version, checksum FROM public.supivpn_schema_migrations ORDER BY version")
 	if err != nil {
 		return errors.New("cannot read migration metadata")
