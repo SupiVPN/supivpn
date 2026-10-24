@@ -21,8 +21,8 @@ implementation and automated acceptance.
 | --- | --- | --- |
 | `supivpn-node` | Agent, profile/key bootstrap CLI, dedicated agent and OpenVPN units | OpenVPN Community 2.7.8, CA certificates, systemd |
 | `supivpn-controller` | Controller, explicit migration CLI, matching SQL and profile example | CA certificates, systemd, a reachable PostgreSQL 18 database |
-| `supivpn-cli` (unreleased, next minor series) | Local root-only operator frontend; no daemon | Matching node and controller on the same host, systemd; PostgreSQL may be external |
-| `supivpn` | Matching components, `supivpn-setup` and its configuration templates | Both components, Python 3, OpenSSL, curl; PostgreSQL 18 for setup |
+| `supivpn-cli` (from v0.8.0) | Local root-only operator frontend; no daemon | Matching node and controller on the same host, systemd; PostgreSQL may be external |
+| `supivpn` | Matching node, controller and CLI, `supivpn-setup` and its configuration templates | All three component packages, Python 3, OpenSSL, curl; PostgreSQL 18 for setup |
 
 The controller package does not install OpenVPN or PostgreSQL. The node package
 does not require a local controller; AWS transport remains available. The local
@@ -45,7 +45,7 @@ A deterministic changelog entry uses the tagged commit timestamp. The repository
 `UNRELEASED` changelog remains the default for local development builds.
 
 Published 0.6/0.7 sets contain five `.deb` files: node/controller for each
-architecture and one `supivpn_<version>_all.deb`. From the planned 0.8 series,
+architecture and one `supivpn_<version>_all.deb`. From v0.8.0,
 the set contains seven, adding `supivpn-cli` for both architectures; the
 metapackage pins all three component packages to its exact version. See
 [CLI usage and security boundaries](CLI.md). Each set also includes `supivpn_<version>.dsc` and

@@ -245,8 +245,8 @@ Starting with v0.4.5, `vpn.tunnel_established` can include:
 | --- | --- |
 | `client_version` | Initial CONNECT's `IV_VER`, a bounded printable ASCII label |
 | `client_platform` | Initial CONNECT's `IV_PLAT`, a bounded platform identifier |
-| `client_device_id` | Unreleased: optional client-reported device label, up to 128 ASCII characters |
-| `client_device_id_source` | Unreleased: `UV_UUID` (Connect), otherwise `IV_HWADDR` (including OpenVPN 3 Linux) |
+| `client_device_id` | From v0.8.0: optional client-reported device label, up to 128 ASCII characters |
+| `client_device_id_source` | From v0.8.0: `UV_UUID` (Connect), otherwise `IV_HWADDR` (including OpenVPN 3 Linux) |
 | `establishment_ms` | Agent-observed elapsed milliseconds from handling CONNECT to the first ESTABLISHED |
 
 Client version/platform are self-reported diagnostics, not verified device
@@ -406,7 +406,7 @@ is required for logging or flow correlation. Binaries older than v0.2.0 reject
 the `logging` configuration field, so a rollback to those versions must restore
 the corresponding old configuration as well.
 
-For unreleased bound profiles, `vpn.tunnel_established` and `vpn.disconnected`
+For bound profiles from v0.8.0, `vpn.tunnel_established` and `vpn.disconnected`
 also include the opaque `profile_id` after authorization. Correlate it with the
 optional device label to investigate sharing; neither field is a secret or a
 substitute for SAML. Protect their retention as user/device activity data.

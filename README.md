@@ -64,7 +64,7 @@ See the [detailed architecture](docs/ARCHITECTURE.md) for deployment modes,
 state ownership and trust boundaries, and [IdP configuration](docs/IDENTITY_PROVIDER.md)
 for the current SAML integration requirements.
 
-See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the **unreleased** account-bound profile format,
+See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
 
 ## Features
@@ -202,16 +202,21 @@ encrypts traffic without verifying server identity. See [database TLS](docs/DATA
 
 Bounded EC2 stop/start recovery is implemented. Automatic VM replacement, ASG,
 and rolling updates belong to the infrastructure deployment, not this checkout.
-Wrapping key rotation with overlap and individual profile revocation are not implemented.
+Wrapping key rotation with overlap is not implemented. From v0.8.0, bound profiles
+can be blocked to prevent new admission; blocking does not terminate established
+tunnels or revoke legacy profiles. See [local administration](docs/CLI.md) and
+[Lambda administration](docs/LAMBDA_PROFILE_ADMIN.md).
 Local tests do not guarantee the behavior of a specific load balancer, routing setup, or IdP.
 
 Findings R1-R3 are fixed; maintenance and controlled recovery from blocked
 are documented in [RECOVERY.md](docs/RECOVERY.md). Cloud acceptance tests and the
 blockers in [SECURITY_MODEL.md](docs/SECURITY_MODEL.md) remain before production.
 
-The current client template does not yet verify the VPN server name.
-It checks the CA, validity period, and certificate purpose. Server name
-verification must be added before production; `tls-crypt-v2` does not replace it.
+The default legacy client template checks the CA, validity period and certificate
+purpose, but does not verify the VPN server name. Bound profiles add an exact
+certificate common-name check against the configured endpoint; this is not DNS
+SAN or wildcard matching. See [certificate requirements](docs/PROFILE_BINDING.md#vm-and-systemd-configuration).
+`tls-crypt-v2` does not replace server identity verification.
 
 ## License and new files
 
