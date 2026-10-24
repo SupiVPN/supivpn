@@ -103,6 +103,9 @@ func (c Config) Policy() (controller.Config, *url.URL, error) {
 	if err := c.AssertionEncryption.Validate(); err != nil {
 		return controller.Config{}, nil, err
 	}
+	if c.AssertionEncryption != nil && c.AssertionEncryption.PrivateKeySecretARN != "" && (c.Gateway == nil || c.VM != nil) {
+		return controller.Config{}, nil, errors.New("SAML encryption secrets require the public Lambda adapter")
+	}
 	if c.AssertionEncryption != nil && c.VM != nil && c.AssertionEncryption.PrivateKeyFile != "" && c.AssertionEncryption.PrivateKeyFile == c.VM.TLSPrivateKey {
 		return controller.Config{}, nil, errors.New("use a dedicated SAML encryption key separate from TLS")
 	}
@@ -152,18 +155,24 @@ func OpenWithPassword(ctx context.Context, c Config, dsn string, password func(c
 	return OpenWithProfileKey(ctx, c, dsn, password, nil)
 }
 
-// Key loaders return a caller-owned buffer and are invoked only after a
+// Profile key loaders return a caller-owned buffer and are invoked only after a
 // successful, consumed SAML login. Cloud-specific loaders belong to adapters.
 func OpenWithProfileKey(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error), key func(context.Context) ([]byte, error), fencing ...postgres.Fencer) (*Application, error) {
-    return openPublic(ctx,c,dsn,password,key,"",fencing...)
+    return openPublic(ctx,c,dsn,password,key,nil,"",fencing...)
 }
 
 // OpenPublic constructs only browser/profile handlers with restricted DB access.
 func OpenPublic(ctx context.Context,c Config,dsn string,password func(context.Context)(string,error),key func(context.Context)([]byte,error))(*Application,error){
-    return openPublic(ctx,c,dsn,password,key,postgres.Public)
+    return OpenPublicWithEncryptionKey(ctx,c,dsn,password,key,nil)
 }
 
-func openPublic(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error), key func(context.Context) ([]byte, error), component postgres.Component, fencing ...postgres.Fencer) (*Application, error) {
+// OpenPublicWithEncryptionKey adds initialization-time SAML key delivery. The
+// profile wrapping-key callback remains deferred until authorized issuance.
+func OpenPublicWithEncryptionKey(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error), key func(context.Context) ([]byte, error), encryptionKey saml.EncryptionKeyLoader) (*Application, error) {
+	return openPublic(ctx, c, dsn, password, key, encryptionKey, postgres.Public)
+}
+
+func openPublic(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error), key func(context.Context) ([]byte, error), encryptionKey saml.EncryptionKeyLoader, component postgres.Component, fencing ...postgres.Fencer) (*Application, error) {
 	if len(fencing) > 1 { return nil, errors.New("multiple fencing providers") }
 	policy, origin, err := c.Policy()
 	if err != nil {
@@ -185,7 +194,7 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 	sp := &saml.ServiceProvider{EntityID: origin.String() + "/saml/metadata",
 		MetadataURL: *origin.JoinPath("saml/metadata"), AcsURL: *origin.JoinPath("saml/acs"),
 		IDPMetadata: md, AuthnNameIDFormat: saml.UnspecifiedNameIDFormat, AllowIDPInitiated: false}
-	sp.AssertionEncryption, err = c.AssertionEncryption.Load()
+	sp.AssertionEncryption, err = c.AssertionEncryption.LoadWithKey(ctx, encryptionKey)
 	if err != nil {
 		return nil, err
 	}

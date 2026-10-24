@@ -27,6 +27,9 @@ must have **no EC2 power permissions, no permission to invoke recovery, no
 permission to assume its role, and no access to its database secret**. Restrict
 their Secrets Manager and KMS access to their own secrets. Only public profile
 issuance needs the wrapping key; agent/recovery must not receive it or IdP metadata.
+When assertion encryption is enabled, only public may read its separate SAML
+recipient-key secret. Do not grant agent/recovery access to that secret or its
+KMS key; they reject assertion-encryption configuration.
 
 Route public API methods only to public, IAM agent methods only to agent.
 Restrict each function's resource policy to the exact API, stage and methods
@@ -58,6 +61,13 @@ HTTP API payload v2 is also supported. Keep their public_url/pending_seconds
 consistent; agent needs public_url to validate the gateway contract, not to
 perform SAML. The agent configuration must omit profile, IdP metadata and groups.
 It alone needs the exact EC2 session principal-to-node mapping.
+
+For encrypted assertions, public Lambda supports
+`assertion_encryption.private_key_secret_arn` in v0.7.1 and later. It reads
+AWSCURRENT at initialization and keeps the key in memory, with no disk copy or
+automatic refresh in warm environments. Deliver only the matching public
+certificate as a file. See the complete
+[Secrets Manager configuration and rotation requirements](ASSERTION_ENCRYPTION.md#public-lambda-secrets-manager).
 
 Recovery uses `SUPIVPN_RECOVERY_JSON`, with this structure:
 
