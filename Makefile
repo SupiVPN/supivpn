@@ -57,7 +57,7 @@ tag: export SUPIVPN_TAG_COMMIT := $(value COMMIT)
  xmlsec-image openvpn-image postgres-start postgres-stop test-db-restart \
   security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag deb deb-test deb-vm-test test-setup-db
 
-.PHONY: okta-probe
+.PHONY: okta-probe cli
 okta-probe: | $(LOCAL)/go.mod
 	@mkdir -p "$(LOCAL)/okta-ci"
 	@$(GO) build -race -o "$(LOCAL)/okta-ci/profile-probe" ./testdata/okta
@@ -141,6 +141,9 @@ audit:
 	@$(PYTHON) -B tools/repository_audit.py
 	@$(PYTHON) -B tools/check_language.py
 
+cli:
+	@cd "$(ROOT)" && $(LINUX) $(GO) build $(BUILD_FLAGS) -o "$(BUILD_DIR)/supivpn-cli" ./cmd/supivpn-cli
+
 build: agent controller profile migrate lambda
 	@cd "$(ROOT)" && $(GO) run ./cmd/supivpn-release-manifest -artifact-dir "$(BUILD_DIR)"
 
@@ -214,7 +217,8 @@ security-source: $(VULNCHECK)
 	@cd "$(ROOT)" && env CGO_ENABLED=0 GOOS=linux GOARCH=arm64 "$(VULNCHECK)" -test -tags=integration -show=verbose ./...
 	@cd "$(ROOT)" && env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "$(VULNCHECK)" -test -tags=integration -show=verbose ./...
 
-security-binaries: build $(VULNCHECK)
+security-binaries: build cli $(VULNCHECK)
+	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn-cli"
 	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn"
 	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn-controller"
 	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn-profile"

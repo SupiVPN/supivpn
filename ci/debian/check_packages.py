@@ -19,7 +19,7 @@ def check(packages):
         raise RuntimeError("This check requires the disposable root test container")
     arch = run("dpkg", "--print-architecture").strip()
     files = {name: next(packages.glob(name + "_*.deb")) for name in
-             ("supivpn", "supivpn-node", "supivpn-controller")}
+             ("supivpn", "supivpn-node", "supivpn-controller", "supivpn-cli")}
     version = run("dpkg-deb", "-f", str(files["supivpn"]), "Version").strip()
     # Go's static runtime is documented by narrowly scoped package overrides.
     # All other binary-package lintian warnings and errors must be addressed.
@@ -60,7 +60,7 @@ def check(packages):
     assert "openvpn" not in controller_deps and "postgresql" not in controller_deps
     assert "supivpn-controller" not in run("dpkg-deb", "-f", str(files["supivpn-node"]), "Depends")
     deps = run("dpkg-deb", "-f", str(files["supivpn"]), "Depends")
-    for name in ("supivpn-node", "supivpn-controller"):
+    for name in ("supivpn-node", "supivpn-controller", "supivpn-cli"):
         assert f"{name} (= {version})" in deps
 
     # Debian helpers run against real dpkg state. No systemd manager or network
@@ -101,7 +101,8 @@ def check(packages):
                               capture_output=True, text=True)
     assert disabled.returncode == 1 and disabled.stdout.strip() == "disabled"
     assert not list(Path("/etc/systemd/system").glob("*.wants/supivpn*.service"))
-    run("dpkg", "-i", "/opt/openvpn-test.deb", str(files["supivpn-node"]), str(files["supivpn"]))
+    run("dpkg", "-i", "/opt/openvpn-test.deb", str(files["supivpn-node"]), str(files["supivpn-cli"]), str(files["supivpn"]))
+    run("/usr/sbin/supivpn-cli", "--help")
     no_lifecycle_requests()
     run("supivpn-setup", "plan", "--config", "/usr/share/supivpn/examples/setup.example.json")
     assert not Path("/etc/supivpn").exists(), "plan changed the host"
@@ -141,7 +142,7 @@ def check(packages):
     run("dpkg", "-r", "supivpn")
     no_lifecycle_requests()
     assert Path("/usr/sbin/supivpn").exists() and Path("/usr/sbin/supivpn-controller").exists()
-    run("dpkg", "--purge", "supivpn-node", "supivpn-controller", "supivpn")
+    run("dpkg", "--purge", "supivpn-node", "supivpn-controller", "supivpn-cli", "supivpn")
     stopped = [line for line in calls.read_text().splitlines() if line.startswith("deb-systemd-invoke")]
     assert len(stopped) == 4, stopped
     assert any("stop supivpn-controller.service" in line for line in stopped), stopped

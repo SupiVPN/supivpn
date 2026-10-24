@@ -181,6 +181,17 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 		if e = pub.CreateProfile(ctx, proof, owner); e != nil {
 			t.Fatal("public issuance", e)
 		}
+		importToken := strings.Repeat("u", 43)
+		if e = pub.CreateImport(ctx, importToken, owner); e != nil {
+			t.Fatal("restricted import creation", e)
+		}
+		if got, e := pub.ConsumeImport(ctx, importToken); e != nil || got != owner {
+			t.Fatal("restricted single-use import consumption", e)
+		}
+		if _, e = pub.ConsumeImport(ctx, importToken); !errors.Is(e, controller.ErrLoginExpired) {
+			t.Fatal("restricted import replay accepted")
+		}
+		denied(public, "UPDATE supivpn.profile_imports SET expires_at=clock_timestamp()+interval '1 day'")
 		denied(agent, "SELECT secret_hash FROM supivpn.issued_profiles")
 		denied(public, "UPDATE supivpn.issued_profiles SET state='blocked'")
 		denied(recovery, "UPDATE supivpn.issued_profiles SET subject_hash=decode(repeat('00',32),'hex')")

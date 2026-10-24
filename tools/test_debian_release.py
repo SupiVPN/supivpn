@@ -52,13 +52,20 @@ class DebianReleaseTests(unittest.TestCase):
         value = deb.version(V)
         path = Path(f"supivpn_{value}_all.deb")
         fields = {"Package": "supivpn", "Version": value, "Architecture": "all",
-                  "Depends": f"supivpn-node (= {value}), supivpn-controller (= {value}), python3"}
+                  "Depends": f"supivpn-node (= {value}), supivpn-controller (= {value}), supivpn-cli (= {value}), python3"}
         def reply(changes):
             text = "".join(f"{key}: {value}\n" for key, value in dict(fields, **changes).items())
             return subprocess.CompletedProcess([], 0, text, "")
         with patch.object(deb.subprocess, "run", return_value=reply({})):
             deb.verify_package(path, V, "arm64")
         for changes in ({"Package": "openvpn"}, {"Version": "9.9.9"}, {"Architecture": "amd64"},
-                        {"Depends": "supivpn-node, supivpn-controller"}):
+                        {"Depends": "supivpn-node, supivpn-controller"},
+                        {"Depends": f"supivpn-node (= {value}), supivpn-controller (= {value})"}):
             with patch.object(deb.subprocess, "run", return_value=reply(changes)), self.assertRaises(a.ValidationError):
                 deb.verify_package(path, V, "arm64")
+
+    def test_cli_delivery_preserves_existing_minor_series(self):
+        for tag in ("v0.6.1", "v0.7.1", "v0.7.2"):
+            self.assertEqual(len(deb.filenames(tag, "arm64")), 5)
+        for tag in ("v0.8.0-rc.1", "v0.8.0", "v1.0.0"):
+            self.assertIn(f"supivpn-cli_{deb.version(tag)}_arm64.deb", deb.filenames(tag, "arm64"))

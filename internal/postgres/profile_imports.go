@@ -10,6 +10,7 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"supivpn/internal/controller"
+	"time"
 )
 
 func (s *Store) CreateImport(ctx context.Context, token string, subject [32]byte) error {
@@ -51,12 +52,31 @@ func (s *Store) ConsumeImport(ctx context.Context, token string) ([32]byte, erro
 		return subject, controller.ErrLoginExpired
 	}
 	hash := sha256.Sum256([]byte(token))
+	tx, err := s.begin(ctx)
+	if err != nil {
+		return subject, publicError(err)
+	}
+	defer tx.Rollback(context.Background())
 	var raw []byte
-	err := s.pool.QueryRow(ctx, `DELETE FROM supivpn.profile_imports WHERE token_hash=$1 AND expires_at>clock_timestamp() RETURNING subject_hash`, hash[:]).Scan(&raw)
+	var expires time.Time
+	// DELETE acquires the row lock without expanding the public role's grants.
+	// Its predicate may be evaluated before a lock wait: check a fresh database
+	// clock afterwards, then commit before disclosing the subject to the issuer.
+	err = tx.QueryRow(ctx, `DELETE FROM supivpn.profile_imports WHERE token_hash=$1 RETURNING subject_hash,expires_at`, hash[:]).Scan(&raw, &expires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return subject, controller.ErrLoginExpired
 	}
 	if err != nil || len(raw) != 32 {
+		return subject, controller.ErrUnavailable
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return subject, controller.ErrUnavailable
+	}
+	if !now.Before(expires) {
+		return subject, controller.ErrLoginExpired
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return subject, controller.ErrUnavailable
 	}
 	copy(subject[:], raw)

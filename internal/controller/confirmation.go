@@ -9,7 +9,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
-	"html/template"
 	"mime"
 	"net"
 	"net/http"
@@ -20,13 +19,6 @@ import (
 
 	"supivpn/internal/saml"
 )
-
-var confirmationPage = template.Must(template.New("vpn-confirmation").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Confirm VPN sign-in — SupiVPN</title></head>
-<body><main><h1>Confirm VPN sign-in</h1>
-<p>Approve this VPN sign-in only if you just started connecting in OpenVPN Connect. This page authorizes the connection that requested it. Do not continue from a link sent by someone else.</p>
-<form method="post" action="{{.Action}}"><input type="hidden" name="confirmation" value="{{.Token}}"><button type="submit">Continue to sign in</button></form>
-</main></body></html>`))
 
 // ConfirmationCookieName is separate from the cookie used for the SAML return.
 // The host prefix prevents sibling domains from injecting a chosen token.
@@ -129,7 +121,7 @@ func (a *Controller) login(w http.ResponseWriter, r *http.Request) {
 	}
 	csp, ok := a.confirmationCSP()
 	if !ok {
-		http.Error(w, "Cannot start SSO", http.StatusServiceUnavailable)
+		browserMessage(w, r, "Cannot start SSO", http.StatusServiceUnavailable)
 		return
 	}
 	if enabled := a.config.VPNLoginConfirmation; enabled != nil && !*enabled {
@@ -150,28 +142,32 @@ func (a *Controller) login(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		token, err := randomToken()
 		if err != nil {
-			http.Error(w, "Cannot start SSO", http.StatusInternalServerError)
+			browserMessage(w, r, "Cannot start SSO", http.StatusInternalServerError)
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: name, Value: token, Path: "/", HttpOnly: true,
 			Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: a.config.PendingSeconds})
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = confirmationPage.Execute(w, struct{ Action, Token string }{r.URL.Path, token})
+		renderBrowserPage(w, http.StatusOK, browserPageData{
+			Kind: "confirmation", Title: "Did you start this connection?", Eyebrow: "Confirm VPN sign-in",
+			Message: "Continue only if you just started connecting in your VPN client. Your organization will verify your identity next.",
+			Notice:  "This page authorizes the connection that requested it. Do not continue from a link sent by someone else.",
+			Action:  r.URL.Path, Token: token,
+		})
 	case http.MethodPost:
 		origins := r.Header.Values("Origin")
 		expectedOrigin := serializedHTTPSOrigin(a.origin)
 		if expectedOrigin == "" || len(origins) != 1 || origins[0] != expectedOrigin {
-			http.Error(w, "VPN sign-in confirmation refused", http.StatusForbidden)
+			browserMessage(w, r, "VPN sign-in confirmation refused", http.StatusForbidden)
 			return
 		}
 		media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || media != "application/x-www-form-urlencoded" {
-			http.Error(w, "Invalid VPN sign-in confirmation", http.StatusBadRequest)
+			browserMessage(w, r, "Invalid VPN sign-in confirmation", http.StatusBadRequest)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 		if r.ParseForm() != nil || len(r.PostForm) != 1 || len(r.PostForm["confirmation"]) != 1 {
-			http.Error(w, "Invalid VPN sign-in confirmation", http.StatusBadRequest)
+			browserMessage(w, r, "Invalid VPN sign-in confirmation", http.StatusBadRequest)
 			return
 		}
 		token := r.PostForm.Get("confirmation")
@@ -185,7 +181,7 @@ func (a *Controller) login(w http.ResponseWriter, r *http.Request) {
 		}
 		if count != 1 || !validConfirmationToken(token) || !validConfirmationToken(cookieValue) ||
 			subtle.ConstantTimeCompare([]byte(token), []byte(cookieValue)) != 1 {
-			http.Error(w, "VPN sign-in confirmation refused", http.StatusForbidden)
+			browserMessage(w, r, "VPN sign-in confirmation refused", http.StatusForbidden)
 			return
 		}
 		// Start atomically consumes the pending connection's unstarted state.

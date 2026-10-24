@@ -9,6 +9,10 @@ lease. Manual termination of current tunnels by username is implemented.
 
 ## Manual tunnel termination
 
+The upcoming Debian [supivpn-cli](CLI.md) wraps this existing local operation
+on combined node/controller hosts, including named migration listeners. It also
+supports persistent profile blocking, which separately prevents new admission.
+
 Username is the exact, case-sensitive SAML NameID. With Okta username prefix,
 supply that prefix; do not convert email/displayName. Identity is scoped to the
 issuer in metadata loaded by the agent at startup:

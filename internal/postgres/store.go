@@ -241,7 +241,15 @@ func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket stri
 			return ErrConflict
 		}
 		var valid bool
-		if err = tx.QueryRow(ctx, "SELECT supivpn.profile_proof_valid($1,$2)", proof.ID, digest[:]).Scan(&valid); err != nil {
+		query := "SELECT state='active' AND secret_hash=$2 FROM supivpn.issued_profiles WHERE profile_id=$1 FOR SHARE"
+		if s.component != "" {
+			query = "SELECT supivpn.profile_proof_valid($1,$2)"
+		}
+		err = tx.QueryRow(ctx, query, proof.ID, digest[:]).Scan(&valid)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return controller.ErrLoginExpired
+		}
+		if err != nil {
 			return publicError(err)
 		}
 		if !valid {
@@ -485,7 +493,7 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if id, err := loginProfile(ctx, tx, hash); err != nil {
 			return err
 		} else if id != "" {
-			ok, err := profileOwnerActive(ctx, tx, id, d.SubjectHash)
+			ok, err := s.profileOwnerActive(ctx, tx, id, d.SubjectHash)
 			if err != nil {
 				return err
 			}

@@ -11,6 +11,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"supivpn/internal/controller"
 	"supivpn/internal/operatorapi"
@@ -123,8 +125,33 @@ func TestRequiredProfileRemoteSAMLAdmission(t *testing.T) {
 func TestProfileBindingAdmission(t *testing.T) {
 	pool, _ := integrationDatabase(t)
 	ctx := context.Background()
-	s := postgres.New(pool)
-	for _, scenario := range []string{"owner", "wrong-owner", "bad-secret", "blocked-register", "blocked-complete", "blocked-fetch", "blocked-ack", "legacy", "downgrade", "upgrade"} {
+	// Match the combined VM runtime role: table DML, no owner membership and
+	// no EXECUTE grant on the isolated Lambda components' security-definer API.
+	sql, err := os.ReadFile("../postgres/testdata/runtime-role.sql")
+	if err != nil {
+		t.Fatal("runtime bootstrap missing")
+	}
+	if _, err = pool.Exec(ctx, string(sql)); err != nil {
+		t.Fatal("runtime role bootstrap failed")
+	}
+	defer func() {
+		if _, e := pool.Exec(ctx, "DROP OWNED BY supivpn_runtime; DROP ROLE supivpn_runtime"); e != nil {
+			t.Error("runtime role cleanup failed")
+		}
+	}()
+	u, _ := url.Parse(os.Getenv("SUPIVPN_TEST_POSTGRES_URL"))
+	u.User = url.User("supivpn_runtime")
+	runtime, err := postgres.Open(ctx, u.String())
+	if err != nil {
+		t.Fatal("restricted runtime pool unavailable")
+	}
+	defer runtime.Close()
+	var canExecute bool
+	if runtime.QueryRow(ctx, "SELECT has_function_privilege(current_user,'supivpn.profile_proof_valid(text,bytea)','EXECUTE')").Scan(&canExecute) != nil || canExecute {
+		t.Fatal("combined VM fixture unexpectedly has isolated function privileges")
+	}
+	s := postgres.New(runtime)
+	for _, scenario := range []string{"owner", "wrong-owner", "bad-secret", "unknown-profile", "blocked-register", "blocked-complete", "blocked-fetch", "blocked-ack", "legacy", "downgrade", "upgrade"} {
 		t.Run(scenario, func(t *testing.T) {
 			if _, err := pool.Exec(ctx, "TRUNCATE supivpn.nodes,supivpn.assertions,supivpn.issued_profiles CASCADE"); err != nil {
 				t.Fatal("reset")
@@ -155,6 +182,10 @@ func TestProfileBindingAdmission(t *testing.T) {
 				other, _ := profile.NewCredential()
 				proof.Secret = other.Secret
 			}
+			if scenario == "unknown-profile" {
+				other, _ := profile.NewCredential()
+				proof.ID = other.ID
+			}
 			ticket := strings.Repeat("x", 43)
 			browser := sha256.Sum256([]byte("browser"))
 			if scenario == "legacy" || scenario == "upgrade" {
@@ -162,9 +193,9 @@ func TestProfileBindingAdmission(t *testing.T) {
 			} else {
 				err = s.RegisterProfile(ctx, actor, conn, ticket, time.Minute, proof)
 			}
-			if scenario == "bad-secret" || scenario == "blocked-register" {
-				if err == nil {
-					t.Fatal("invalid proof admitted")
+			if scenario == "bad-secret" || scenario == "unknown-profile" || scenario == "blocked-register" {
+				if !errors.Is(err, controller.ErrLoginExpired) {
+					t.Fatal("invalid proof was not rejected by the credential check", err)
 				}
 				return
 			}
@@ -278,5 +309,71 @@ func TestProfileImportSingleUseAndExpiry(t *testing.T) {
 	}
 	if _, e := s.ConsumeImport(ctx, token); e == nil {
 		t.Fatal("expired handoff admitted")
+	}
+}
+
+// Expiry must be checked after waiting for a database row lock, not merely
+// against the snapshot seen before that wait.
+func TestProfileImportExpiryAfterRowLock(t *testing.T) {
+	pool, other := integrationDatabase(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s := postgres.New(pool)
+	token := strings.Repeat("l", 43)
+	owner := sha256.Sum256([]byte("locked-import-owner"))
+	if s.CreateImport(ctx, token, owner) != nil {
+		t.Fatal("import fixture unavailable")
+	}
+	hash := sha256.Sum256([]byte(token))
+	var expiry time.Time
+	if err := pool.QueryRow(ctx, "UPDATE supivpn.profile_imports SET expires_at=clock_timestamp()+interval '1 second' WHERE token_hash=$1 RETURNING expires_at", hash[:]).Scan(&expiry); err != nil {
+		t.Fatal("fixture expiry unavailable")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal("fixture lock transaction failed")
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT token_hash FROM supivpn.profile_imports WHERE token_hash=$1 FOR UPDATE", hash[:]); err != nil {
+		t.Fatal("fixture row lock failed")
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, e := postgres.New(other).ConsumeImport(ctx, token)
+		result <- e
+	}()
+	// Confirm the consumer actually reached the row lock before expiry.
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for _, query := range []string{
+		"SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))",
+		"SELECT clock_timestamp()>=$1",
+	} {
+		var arg any = int32(tx.Conn().PgConn().PID())
+		if strings.Contains(query, "clock_timestamp") {
+			arg = expiry
+		}
+		for {
+			var ready bool
+			if pool.QueryRow(ctx, query, arg).Scan(&ready) != nil {
+				t.Fatal("cannot observe disposable lock or expiry")
+			}
+			if ready {
+				break
+			}
+			select {
+			case <-result:
+				t.Fatal("consumer returned before lock release")
+			case <-ctx.Done():
+				t.Fatal("fixture did not reach lock or expiry")
+			case <-tick.C:
+			}
+		}
+	}
+	if tx.Commit(ctx) != nil {
+		t.Fatal("fixture unlock failed")
+	}
+	if err = <-result; !errors.Is(err, controller.ErrLoginExpired) {
+		t.Fatal("expired import accepted after a database lock wait")
 	}
 }

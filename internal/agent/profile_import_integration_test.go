@@ -79,6 +79,7 @@ func TestServerURLSAMLProfileImport(t *testing.T) {
 	submit := func(cookie *http.Cookie) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", fixture.sp.AcsURL.String(), strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Accept", "text/html")
 		if cookie != nil {
 			r.AddCookie(cookie)
 		}
@@ -90,7 +91,9 @@ func TestServerURLSAMLProfileImport(t *testing.T) {
 		t.Fatal("unbound browser imported")
 	}
 	w = submit(cookie)
-	if w.Code != 200 || loads != 0 || w.Header().Get("Referrer-Policy") != "no-referrer" {
+	if w.Code != 200 || loads != 0 || w.Header().Get("Referrer-Policy") != "no-referrer" ||
+		!strings.Contains(w.Header().Get("Content-Security-Policy"), "style-src 'sha256-") ||
+		!strings.Contains(w.Body.String(), "Your profile is ready.") {
 		t.Fatal("handoff failed or prematurely loaded key")
 	}
 	match := regexp.MustCompile(`openvpn://import-profile/(https://[^"<>]+)`).FindStringSubmatch(w.Body.String())

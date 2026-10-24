@@ -51,3 +51,53 @@ UDP/11194 and HTTPS/18443 are published only on loopback; the Mac default route
 and DNS are unchanged. The container is removed on completion or after the
 20-minute timeout. Remove the test profile from Connect afterward.
 This interactive test is not part of `make test-all`.
+
+## Server URL import
+
+`TestConnectServerURLManual` is a separate, opt-in native Connect acceptance
+fixture. It runs the product controller, PostgreSQL profile registry and signed
+SAML flow with a synthetic IdP. It does not use a real IdP account or establish
+a VPN tunnel. The Debian VM test checks both VPN listeners separately.
+
+Use a disposable `supivpn_test` PostgreSQL database as described in
+[BUILD.md](../BUILD.md). Choose a test hostname resolving to `127.0.0.1` and a
+matching HTTPS certificate already trusted by Connect and the browser. The
+fixture binds only `127.0.0.1:18443`; it never changes DNS or system trust. Do not
+disable certificate verification to obtain a successful result.
+
+```sh
+make integration PKG=./internal/agent RUN='^TestConnectServerURLManual$' \
+  TEST_VERBOSE=-v TIMEOUT=22m \
+  SUPIVPN_TEST_POSTGRES_URL='postgres://postgres@127.0.0.1:55432/supivpn_test?sslmode=disable' \
+  SUPIVPN_TEST_POSTGRES_ALLOW_RESET=1 \
+  SUPIVPN_TEST_CONNECT_IMPORT=1 \
+  SUPIVPN_TEST_CONNECT_ORIGIN='https://vpn.example.test:18443' \
+  SUPIVPN_TEST_CONNECT_CERT=/absolute/path/to/test-fullchain.pem \
+  SUPIVPN_TEST_CONNECT_KEY=/absolute/path/to/test-key.pem
+```
+
+1. After `READY_FOR_CONNECT_SERVER_URL`, enter that base URL in Connect's
+   **Server URL** field. Do not import a file or open the SAML page manually.
+2. Confirm that Connect opens the browser. Follow **Continue with SAML** when
+   displayed, then **Authorize test identity** on the isolated IdP page.
+3. Use **Open in OpenVPN Connect** on the result page and approve the browser's
+   request to open the application. Finish importing the new test profile.
+4. Record the Connect version/platform and whether the native UI shows a
+   successfully imported profile. Remove only that newly created test profile.
+
+`SERVER_FLOW_COMPLETE` proves discovery, signed SAML, grant redemption and a
+persisted active profile. It does **not** prove that the native client accepted
+the profile: the UI observation is a separate required result. An unattended
+run skips this test unless explicitly enabled; a skipped run is not acceptance.
+The fixture times out after 20 minutes and closes its HTTPS listener. Stop the
+disposable database after checking the result.
+
+Do not capture or publish SAML form contents, the one-use import URL, or the
+profile's secret. Server logs deliberately omit those values.
+
+**Manual macOS arm64 check on 2026-10-24: PASS**, Connect 3.9.0 (6050).
+Connect discovered the service and opened the browser. The operator completed
+the synthetic SAML and application handoff and confirmed successful import.
+The fixture reported `SERVER_FLOW_COMPLETE` and exited successfully. HTTPS
+certificate verification remained enabled. This is an import result only;
+it does not establish a native Connect tunnel or real-IdP acceptance.

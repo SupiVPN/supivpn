@@ -194,15 +194,26 @@ this Server URL/SAML flow. No separate SupiVPN import helper is required.
 The automated compatibility fixture uses unmodified OpenVPN 2.7.8 and OpenVPN 3
 Linux 27.1: file import, browser challenge, delayed signed SAML, tunnel traffic,
 proof transport and cross-port format rejection. Connect 3.9.0 on macOS accepted
-the generated bound file through its CLI importer. The interactive Connect
-Server URL handoff and native Connect tunnels on each desktop/mobile platform
-remain acceptance checks; API/protocol tests alone do not establish those results.
+the generated bound file through its CLI importer. On 2026-10-24, Connect 3.9.0
+(6050) on macOS arm64 also passed native Server URL import: discovery, browser
+handoff, signed synthetic SAML, the one-use HTTPS grant and successful UI import.
+The operator completed the browser steps and confirmed the imported profile;
+the fixture independently verified persistence as an active bound profile.
+See [the repeatable fixture](CONNECT_TEST.md#server-url-import). This check used
+a trusted test HTTPS certificate; certificate validation remained enabled.
+Native Connect tunnels, other desktop/mobile platforms, a prefixed Server URL,
+and this new flow with a real IdP remain separate acceptance checks.
 
 Sources: [OpenVPN web authentication/profile protocol](https://github.com/OpenVPN/openvpn-rfc/blob/master/webauth.md),
 [Connect profile import](https://openvpn.net/connect-docs/import-profile/),
 [OpenVPN 3 Linux import](https://openvpn.net/as-docs/v3/tutorials/tutorial--openvpn3-as-import-connection-profile/).
 
 ## Inspect, block and reactivate
+
+On a combined Debian host, prefer the new [local supivpn-cli](CLI.md), included
+in the upcoming metapackage. For Lambda, see the temporary
+[bounded SQL procedure and limitations](LAMBDA_PROFILE_ADMIN.md). Neither method
+turns a profile block into immediate tunnel termination or an account-wide ban.
 
 Use a privileged operator transport, never the browser or agent API. The recovery
 Lambda accepts these envelopes through its existing restricted invocation path.
@@ -224,9 +235,12 @@ Use the returned revision when mutating:
 `profile-activate` uses the same shape with the latest revision. A stale revision
 fails; after an ambiguous response read status before deciding whether to retry.
 Responses contain ID, state, revision and creation time, never the proof, digest
-or SAML owner hash. The public runtime can issue profiles but cannot change their
-state; agents can check proofs without selecting the registry. The recovery
-role can update only state/revision, not ownership or proof digests.
+or SAML owner hash. With separate component database roles, the public runtime
+can issue profiles but cannot change their state; agents can check proofs
+without selecting the registry. The recovery role can update only
+state/revision, not ownership or proof digests. The combined VM controller uses
+its existing shared runtime role and table privileges; the operator entry point
+must remain restricted to trusted administrators.
 
 ## Device diagnostics
 

@@ -240,6 +240,12 @@ func (a *agent) remoteStep(ctx context.Context) {
 		return
 	}
 	c, phase := j.conn, j.phase
+	previousRegistration := c.registrationMayExist
+	if phase == "register" {
+		// Set before releasing mu: a disconnect during the request must retain
+		// cancellation until its result is known. Retries may have committed.
+		c.registrationMayExist = true
+	}
 	cid, kid := int64(c.cid), int64(c.kid)
 	q := agentclient.Request{Generation: a.remote.generation}
 	if phase == "fetch" {
@@ -262,6 +268,15 @@ func (a *agent) remoteStep(ctx context.Context) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if phase == "register" && agentclient.Status(err) == http.StatusGone && !previousRegistration {
+		// A first, definitive rejection cannot have created a controller login.
+		// Do not infer this after a timeout/retry: an earlier attempt may exist.
+		c.registrationMayExist = false
+		if j.phase == "cancel" {
+			a.finishRemoteLocked(j)
+			return
+		}
+	}
 	if ctx.Err() != nil || !a.readyLocked() {
 		return
 	}
@@ -382,6 +397,12 @@ func (a *agent) validRemoteDecision(c *connection, d *agentapi.Decision) bool {
 
 // Called after DISCONNECT or confirmed CID absence, never just after client-kill.
 func (a *agent) cancelRemoteLocked(c *connection) {
+	if !c.registrationMayExist && !c.active {
+		// Never dispatched, or definitively refused before any uncertain retry.
+		// There is no authorization or reservation to cancel at the controller.
+		a.remote.jobs = slices.DeleteFunc(a.remote.jobs, func(j *remoteJob) bool { return j.conn == c })
+		return
+	}
 	for _, j := range a.remote.jobs {
 		if j.conn == c {
 			j.phase, j.due, j.deadline = "cancel", time.Time{}, a.now().Add(30*time.Second)

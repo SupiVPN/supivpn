@@ -47,6 +47,9 @@ func (s *Store) ProfileState(ctx context.Context, id string) (ProfileState, erro
 
 func (s *Store) operateProfile(ctx context.Context, q OperatorRequest) (OperatorState, error) {
 	var out OperatorState
+	if q.AfterID != "" || q.Limit != 0 {
+		return out, ErrConflict
+	}
 	if !profile.ValidProfileID(q.ProfileID) || q.NodeID != "" || q.ExpectedGeneration != "" || q.RecoveryID != "" || q.MaintenanceID != "" || q.RequestID != "" || q.Reason != "" {
 		return out, ErrConflict
 	}
@@ -74,6 +77,41 @@ func (s *Store) operateProfile(ctx context.Context, q OperatorRequest) (Operator
 	out.Exists = true
 	out.SchemaVersion = 11
 	return out, nil
+}
+
+// ListProfiles is a bounded local operator query. It deliberately excludes
+// ownership and proof hashes. The primary-key cursor avoids unbounded offsets.
+// It is not dispatched by Operate (the recovery Lambda protocol).
+func (s *Store) ListProfiles(ctx context.Context, q OperatorRequest) (OperatorState, error) {
+	var out OperatorState
+	if q.Action != "profile-list" || q.Limit < 1 || q.Limit > 100 ||
+		q.AfterID != "" && !profile.ValidProfileID(q.AfterID) || q.ProfileID != "" ||
+		q.NodeID != "" || q.ExpectedGeneration != "" || q.RecoveryID != "" ||
+		q.ExpectedRevision != 0 || q.MaintenanceID != "" || q.RequestID != "" || q.Reason != "" {
+		return out, ErrConflict
+	}
+	if s == nil || s.pool == nil {
+		return out, controller.ErrUnavailable
+	}
+	rows, err := s.pool.Query(ctx, `SELECT profile_id,state,revision,created_at
+		FROM supivpn.issued_profiles WHERE profile_id>$1 ORDER BY profile_id LIMIT $2`, q.AfterID, q.Limit+1)
+	if err != nil {
+		return out, publicError(err)
+	}
+	defer rows.Close()
+	out.SchemaVersion = 11
+	for rows.Next() {
+		var p ProfileState
+		if err = rows.Scan(&p.ID, &p.State, &p.Revision, &p.CreatedAt); err != nil {
+			return OperatorState{}, publicError(err)
+		}
+		if len(out.Profiles) == q.Limit {
+			out.NextCursor = out.Profiles[len(out.Profiles)-1].ID
+			break
+		}
+		out.Profiles = append(out.Profiles, p)
+	}
+	return out, publicError(rows.Err())
 }
 
 func (s *Store) CreateProfile(ctx context.Context, c profile.Credential, subject [32]byte) error {
@@ -111,13 +149,23 @@ func loginProfile(ctx context.Context, tx pgx.Tx, hash []byte) (string, error) {
 	return id, err
 }
 
-func activeLoginProfile(ctx context.Context, tx pgx.Tx, hash []byte) error {
+func (s *Store) activeLoginProfile(ctx context.Context, tx pgx.Tx, hash []byte) error {
 	id, err := loginProfile(ctx, tx, hash)
 	if err != nil || id == "" {
 		return err
 	}
 	var active bool
-	if err = tx.QueryRow(ctx, "SELECT supivpn.profile_is_active($1)", id).Scan(&active); err != nil {
+	// The combined VM role uses its existing table privileges. Isolated
+	// components retain the narrow security-definer API and its row locking.
+	query := "SELECT state='active' FROM supivpn.issued_profiles WHERE profile_id=$1 FOR SHARE"
+	if s.component != "" {
+		query = "SELECT supivpn.profile_is_active($1)"
+	}
+	err = tx.QueryRow(ctx, query, id).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return controller.ErrLoginExpired
+	}
+	if err != nil {
 		return err
 	}
 	if !active {
@@ -126,9 +174,16 @@ func activeLoginProfile(ctx context.Context, tx pgx.Tx, hash []byte) error {
 	return nil
 }
 
-func profileOwnerActive(ctx context.Context, tx pgx.Tx, id string, subject [32]byte) (bool, error) {
+func (s *Store) profileOwnerActive(ctx context.Context, tx pgx.Tx, id string, subject [32]byte) (bool, error) {
 	var active bool
-	err := tx.QueryRow(ctx, `SELECT supivpn.profile_owner_active($1,$2)`, id, subject[:]).Scan(&active)
+	query := "SELECT state='active' AND subject_hash=$2 FROM supivpn.issued_profiles WHERE profile_id=$1 FOR SHARE"
+	if s.component != "" {
+		query = "SELECT supivpn.profile_owner_active($1,$2)"
+	}
+	err := tx.QueryRow(ctx, query, id, subject[:]).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	return active, err
 }
 

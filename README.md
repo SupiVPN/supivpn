@@ -102,6 +102,7 @@ Run Go and Make commands from the repository root.
 | `local/`, `out/` | Caches, build and CI outputs |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [BUILD.md](BUILD.md) | Contributor setup and build/test commands |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Debian installation through packages, systemd, SAML and a working tunnel |
+| [Local operator CLI](docs/CLI.md) | Upcoming Debian CLI: service status, profile block/activate and local session termination; [temporary Lambda procedure](docs/LAMBDA_PROFILE_ADMIN.md) |
 | [DEVELOPERS.md](DEVELOPERS.md) | Maintainer and release-signing guide |
 
 Start with [architecture](docs/ARCHITECTURE.md), [runtime commands](docs/RUNTIME.md),

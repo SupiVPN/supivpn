@@ -3,7 +3,7 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](LICENSE) for copyright ownership and licensing terms.
 
-One Debian 13 VM, three `.deb` packages, one setup file. The `supivpn` package
+One Debian 13 VM, a `.deb` metapackage, one setup file. The `supivpn` package
 installs both components and provides `supivpn-setup` to configure the controller,
 node and local PostgreSQL 18 database. Services run directly under systemd.
 To keep PostgreSQL on another host, see the
@@ -79,6 +79,11 @@ on other VMs also needs the [appropriate authenticated transport](docs/CONTROLLE
   UDP load balancing does not account for individual group-pool exhaustion or
   guarantee retry on a node with free capacity. Size each group's surviving-node
   pools and connection limits for failover. See [address planning](docs/HA.md#node-count-and-group-expansion).
+
+The upcoming minor release also includes [supivpn-cli](docs/CLI.md) for local
+service status, profile administration and session termination. It is not in
+the currently published 0.7 packages. Lambda uses the temporary
+[profile database procedure](docs/LAMBDA_PROFILE_ADMIN.md).
 
 ## 1. Prepare the VM and packages
 

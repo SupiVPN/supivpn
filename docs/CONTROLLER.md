@@ -57,6 +57,15 @@ Disable caching and body tracing on SAML/profile endpoints.
 Never log assertions, cookies, tickets, credentials, or profile contents.
 The UDP OpenVPN endpoint is separate from the HTTP proxy.
 
+Browser pages use the SupiVPN website palette, system fonts and a small embedded
+stylesheet. They load no scripts, external fonts, images or analytics. The CSP
+allows only the exact stylesheet hash; preserve this header and do not inject or
+rewrite styles at the proxy. Confirmation keeps its restricted form destination
+and CSRF checks. Browser success/error pages require an explicit `Accept:
+text/html`; other clients retain text responses and the same HTTP status codes.
+Profile downloads remain attachments. A successful browser sign-in does not
+claim that a VPN tunnel is connected; the client confirms that separately.
+
 ## Build and review
 
 Run these commands from the repository root:

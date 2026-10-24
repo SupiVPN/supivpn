@@ -39,6 +39,60 @@ func cookieName(ticket string) string { return controller.CookieName(ticket) }
 
 const groupAttributeFormat = "urn:oasis:names:tc:SAML:2.0:attrname-format:unspecified"
 
+func TestBrowserSAMLAuthorizationPages(t *testing.T) {
+	signer, metadata := testIdP(t)
+	for _, tc := range []struct {
+		name, message string
+		status        int
+	}{
+		{"accepted", "Sign-in verified.", http.StatusOK},
+		{"no-group", "VPN group authorization refused. Contact your administrator.", http.StatusForbidden},
+		{"missing-groups", "VPN group authorization refused. Contact your administrator.", http.StatusForbidden},
+		{"expired", "Login expired", http.StatusGone},
+		{"missing-browser", "Login browser mismatch", http.StatusForbidden},
+		{"wrong-browser", "Login expired", http.StatusGone},
+		{"unsigned", "SSO refused.", http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := testApp(t, metadata)
+			enableTestGroups(a)
+			assertion := groupAssertionFor(a, coreGroup)
+			browser := "test-browser"
+			switch tc.name {
+			case "no-group":
+				assertion = groupAssertionFor(a, unrelatedGroup)
+			case "missing-groups":
+				assertion.AttributeStatements = nil
+			case "expired":
+				a.connections[7].expires = time.Now().Add(-time.Minute)
+			case "missing-browser":
+				browser = ""
+			case "wrong-browser":
+				browser = "other-browser"
+			}
+			body := responseBody(t, a, signer, assertion, tc.name != "unsigned", false)
+			handler := a.handler()
+			w := submitTo(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Header.Set("Accept", "text/html")
+				handler.ServeHTTP(w, r)
+			}), a, body, browser)
+			if w.Code != tc.status || w.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
+				!strings.Contains(w.Body.String(), tc.message) ||
+				!strings.Contains(w.Header().Get("Content-Security-Policy"), "style-src 'sha256-") {
+				t.Fatal("browser SAML outcome lost its status, guidance or protected presentation")
+			}
+			if a.connections[7].active != (tc.status == http.StatusOK) {
+				t.Fatal("presentation changed authorization outcome")
+			}
+			for _, private := range []string{assertion.Subject.NameID.Value, coreGroup, unrelatedGroup, "SAMLResponse"} {
+				if strings.Contains(w.Body.String(), private) {
+					t.Fatal("browser result disclosed identity, group or assertion data")
+				}
+			}
+		})
+	}
+}
+
 func TestLocalBackendRechecksCompletion(t *testing.T) {
 	for _, name := range []string{"expired-assertion", "expired-session", "not-yet-valid",
 		"expired-pending", "disconnected", "replaced-connection", "wrong-browser",

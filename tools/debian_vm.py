@@ -112,8 +112,8 @@ def run_vm(root, packages, arch, docker, go, *, database="local"):
     source = packages / "source"
     shutil.copyfile(source / "ci/debian/vm/setup.sh", work / "setup.sh")
     debs = sorted(packages.glob("supivpn*.deb"))
-    if len(debs) != 3 or any(p.is_symlink() for p in debs):
-        raise ValueError("Expected exactly three locally built Debian packages")
+    if len(debs) != 4 or any(p.is_symlink() for p in debs):
+        raise ValueError("Expected exactly four locally built Debian packages")
     for path in debs:
         shutil.copyfile(path, work / path.name)
     env = dict(os.environ, CGO_ENABLED="0", GOOS="linux", GOARCH=arch, GOTOOLCHAIN="local",
@@ -180,7 +180,7 @@ def run_vm(root, packages, arch, docker, go, *, database="local"):
             files = [database_fixtures / name for name in ("ca.pem", "runtime.password", "migration.password")]
             run(["scp", *options, "-P", port, *map(str, files), "root@127.0.0.1:/opt/supivpn-test/database/"])
         listed = run(ssh + ["/opt/supivpn-test/agent-vm.test -test.list='^TestDebianVM'"], capture_output=True, text=True)
-        if set(listed.stdout.splitlines()) != {"TestDebianVMPrepare", "TestDebianVMServices", "TestDebianVMAfterReboot", "TestDebianVMPackageLifecycle"}:
+        if set(listed.stdout.splitlines()) != {"TestDebianVMPrepare", "TestDebianVMServices", "TestDebianVMProfileBinding", "TestDebianVMAfterReboot", "TestDebianVMPackageLifecycle"}:
             raise ValueError("VM acceptance test binary is incomplete")
         print("VM: installing prerequisites and packages", flush=True)
         with (work / "install.log").open("w") as log:
@@ -188,6 +188,7 @@ def run_vm(root, packages, arch, docker, go, *, database="local"):
         test = ("SUPIVPN_TEST_DEBIAN_VM=1 SUPIVPN_TEST_VM_DATABASE=" + database +
                 " /opt/supivpn-test/agent-vm.test -test.v -test.timeout=10m -test.run=")
         run(ssh + [test + "'^TestDebianVM(Prepare|Services)$'"])
+        run(ssh + [test + "'^TestDebianVMProfileBinding$'"])
         print("VM: rebooting with services enabled", flush=True)
         run(ssh + ["systemctl reboot"])
         second_boot = wait_boot(first_boot)

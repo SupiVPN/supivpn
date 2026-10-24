@@ -76,10 +76,11 @@ def permitted(path):
             "debian/supivpn-node.postinst", "debian/supivpn-node.prerm", "debian/supivpn-controller.prerm",
             "debian/supivpn.docs", "debian/supivpn-node.docs", "debian/supivpn-controller.docs",
             "debian/supivpn.install", "debian/supivpn.manpages",
+            "debian/supivpn-cli.install", "debian/supivpn-cli.docs", "debian/supivpn-cli.manpages", "debian/supivpn-cli.lintian-overrides",
             "debian/supivpn-node.manpages", "debian/supivpn-controller.manpages",
             "debian/supivpn-node.lintian-overrides", "debian/supivpn-controller.lintian-overrides",
         } or (path.parent == Path("debian/man") and path.name in {
-            "supivpn.8", "supivpn-profile.8", "supivpn-controller.8", "supivpn-migrate.8", "supivpn-setup.8",
+            "supivpn.8", "supivpn-profile.8", "supivpn-controller.8", "supivpn-migrate.8", "supivpn-setup.8", "supivpn-cli.8",
         }) or (path.parent == Path("debian/units") and path.name in {
             "supivpn-node.service", "supivpn-openvpn.service", "supivpn-controller.service",
             "supivpn-node@.service", "supivpn-openvpn@.service",

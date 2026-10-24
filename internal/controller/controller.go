@@ -184,7 +184,7 @@ func (a *Controller) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	ticket, err := randomToken()
 	if err != nil {
-		http.Error(w, "Cannot start SSO", http.StatusInternalServerError)
+		browserMessage(w, r, "Cannot start SSO", http.StatusInternalServerError)
 		return
 	}
 	a.startLogin(w, r, "profile_"+ticket, a.downloads.Backend)
@@ -194,17 +194,17 @@ func (a *Controller) startLogin(w http.ResponseWriter, r *http.Request, ticket s
 	req, err := a.sp.MakeAuthenticationRequest(a.sp.GetSSOBindingLocation(saml.HTTPRedirectBinding),
 		saml.HTTPRedirectBinding, saml.HTTPPostBinding)
 	if err != nil {
-		http.Error(w, "Cannot start SSO", http.StatusInternalServerError)
+		browserMessage(w, r, "Cannot start SSO", http.StatusInternalServerError)
 		return
 	}
 	destination, err := req.Redirect(ticket, a.sp)
 	if err != nil {
-		http.Error(w, "Cannot start SSO", http.StatusInternalServerError)
+		browserMessage(w, r, "Cannot start SSO", http.StatusInternalServerError)
 		return
 	}
 	browser, err := randomToken()
 	if err != nil {
-		http.Error(w, "Cannot start SSO", http.StatusInternalServerError)
+		browserMessage(w, r, "Cannot start SSO", http.StatusInternalServerError)
 		return
 	}
 	if err := backend.Start(r.Context(), ticket, req.ID, sha256.Sum256([]byte(browser))); err != nil {
@@ -242,7 +242,7 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 	isProfile := strings.HasPrefix(ticket, "profile_")
 	if isProfile {
 		if a.downloads == nil {
-			http.Error(w, "Profile login unavailable", http.StatusGone)
+			browserMessage(w, r, "Profile login unavailable", http.StatusGone)
 			return
 		}
 		backend = a.downloads.Backend
@@ -267,7 +267,7 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !a.acceptableAssertion(assertion, pending.RequestID) {
 		// Library errors can embed the complete assertion. Do not log them.
 		logging.Emit(r.Context(), "saml.response_refused")
-		http.Error(w, "SSO refused. Check application assignment and test user.", http.StatusForbidden)
+		browserMessage(w, r, "SSO refused. Check application assignment and test user.", http.StatusForbidden)
 		return
 	}
 	var groupName, denialReason string
@@ -294,15 +294,15 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 	if err != nil && !awaitingAgent {
 		switch {
 		case errors.Is(err, ErrLoginExpired):
-			http.Error(w, "Login already used or expired", http.StatusGone)
+			browserMessage(w, r, "Login already used or expired", http.StatusGone)
 		case errors.Is(err, ErrGroupDenied):
 			logging.Emit(r.Context(), "saml.authorization_decided", slog.String("purpose", loginPurpose(ticket)), slog.String("outcome", "denied"), slog.String("reason", denialReason))
-			http.Error(w, "VPN group authorization refused. Contact your administrator.", http.StatusForbidden)
+			browserMessage(w, r, "VPN group authorization refused. Contact your administrator.", http.StatusForbidden)
 		case errors.Is(err, ErrConnectionLimit):
 			logging.Emit(r.Context(), "saml.authorization_decided", slog.String("purpose", loginPurpose(ticket)), slog.String("outcome", "denied"), slog.String("reason", "connection_limit"))
-			http.Error(w, "VPN connection limit reached. If you just cancelled or disconnected, wait for the previous connection to close, then reconnect. Otherwise, disconnect another VPN session and try again.", http.StatusForbidden)
+			browserMessage(w, r, "VPN connection limit reached. If you just cancelled or disconnected, wait for the previous connection to close, then reconnect. Otherwise, disconnect another VPN session and try again.", http.StatusForbidden)
 		default:
-			http.Error(w, "VPN unavailable. Reconnect.", http.StatusServiceUnavailable)
+			browserMessage(w, r, "VPN unavailable. Reconnect.", http.StatusServiceUnavailable)
 		}
 		return
 	}
@@ -310,9 +310,7 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: cookie.Name, Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode})
 	if awaitingAgent {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusAccepted)
-		fmt.Fprintln(w, "Sign-in verified. Waiting for the VPN server; check OpenVPN Connect.")
+		browserMessage(w, r, "Sign-in verified. Waiting for the VPN server; check OpenVPN Connect.", http.StatusAccepted)
 		return
 	}
 	if isProfile {
@@ -323,8 +321,7 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintln(w, "Sign-in accepted. Return to OpenVPN Connect to check the connection.")
+	browserMessage(w, r, "Sign-in accepted. Return to OpenVPN Connect to check the connection.", http.StatusOK)
 }
 
 func loginPurpose(ticket string) string {
@@ -338,5 +335,5 @@ func loginPurpose(ticket string) string {
 // trace. An attacker-provided ticket/header must not attach a failure to a VPN.
 func browserError(w http.ResponseWriter, r *http.Request, message string, status int) {
 	logging.Emit(r.Context(), "saml.request_refused", slog.Int("status", status))
-	http.Error(w, message, status)
+	browserMessage(w, r, message, status)
 }

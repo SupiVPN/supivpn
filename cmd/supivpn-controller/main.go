@@ -19,6 +19,7 @@ import (
 	"supivpn/internal/postgres"
 	"supivpn/internal/vm"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -64,6 +65,8 @@ func run(ctx context.Context, path string) error {
 }
 
 func operate(ctx context.Context, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	c, err := controlruntime.ReadConfig(path)
 	if err != nil {
 		return err
@@ -73,7 +76,7 @@ func operate(ctx context.Context, path string) error {
 		return errors.New("invalid operator request")
 	}
 	q, err := operatorapi.Decode(raw)
-	if err != nil || q.ProfileID == "" {
+	if err != nil || q.ProfileID == "" && q.Action != "profile-list" {
 		return errors.New("only profile operations are available through this VM command")
 	}
 	pool, err := postgres.OpenWithTLS(ctx, os.Getenv("SUPIVPN_DATABASE_URL"), nil, c.DatabaseTLS)
@@ -81,7 +84,18 @@ func operate(ctx context.Context, path string) error {
 		return err
 	}
 	defer pool.Close()
-	reply, err := operatorapi.Handler(postgres.New(pool))(ctx, raw)
+	store := postgres.New(pool)
+	var reply any
+	if q.Action == "profile-list" {
+		state, listErr := store.ListProfiles(ctx, q)
+		if listErr != nil {
+			reply = operatorapi.Reply{Error: "unavailable"}
+		} else {
+			reply = operatorapi.Reply{OK: true, State: &state}
+		}
+	} else {
+		reply, err = operatorapi.Handler(store)(ctx, raw)
+	}
 	if err != nil {
 		return err
 	}

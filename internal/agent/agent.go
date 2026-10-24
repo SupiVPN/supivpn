@@ -24,6 +24,7 @@ import (
 const maxConnections = 16
 
 type connection struct {
+	registrationMayExist       bool
 	proof                      profile.Credential
 	proofDigest                [32]byte
 	username                   string

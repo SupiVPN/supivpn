@@ -34,7 +34,7 @@ func Decode(raw []byte) (postgres.OperatorRequest, error) {
 		return q, refused
 	}
 	fields, err := jsonobject.Flat(bytes.NewReader(raw), "source", "action", "node_id", "expected_generation",
-		"profile_id", "recovery_id", "expected_revision", "maintenance_id", "request_id", "reason")
+		"profile_id", "recovery_id", "expected_revision", "maintenance_id", "request_id", "reason", "after_id", "limit")
 	if err != nil {
 		return q, refused
 	}

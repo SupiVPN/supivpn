@@ -19,6 +19,8 @@ import (
 // OperatorRequest is accepted only by a deployment-authenticated operator
 // transport, never by the public SAML or node API.
 type OperatorRequest struct {
+    AfterID string `json:"after_id,omitempty"`
+    Limit int `json:"limit,omitempty"`
     ProfileID string `json:"profile_id,omitempty"`
     Action string `json:"action"`
     NodeID string `json:"node_id"`
@@ -48,6 +50,8 @@ type MaintenanceState struct {
     Expired bool `json:"expired"`
 }
 type OperatorState struct {
+    Profiles []ProfileState `json:"profiles,omitempty"`
+    NextCursor string `json:"next_cursor,omitempty"`
     Profile *ProfileState `json:"profile,omitempty"`
     SchemaVersion int `json:"schema_version"`
     NodeID string `json:"node_id"`
@@ -62,6 +66,7 @@ type OperatorState struct {
 }
 
 func validOperator(q OperatorRequest) bool {
+    if q.AfterID!="" || q.Limit!=0 {return false}
     if q.ProfileID!="" || !validName(q.NodeID){return false}
     switch q.Action {
     case "status":

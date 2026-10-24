@@ -1,0 +1,3 @@
+# CGO_ENABLED=0 intentionally links the Go runtime and modules statically.
+# Dependency vulnerability checks and upgrades must rebuild this executable.
+supivpn-cli: statically-linked-binary [usr/sbin/supivpn-cli]
