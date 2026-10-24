@@ -19,7 +19,7 @@ func MigrationDigest() string {
 // CompatibleSchemaDigests is deliberately finite. Each new online migration
 // requires compatibility tests before extending this list.
 func CompatibleSchemaDigests() map[string]string {
-	return map[string]string{"7": migrationDigest(7), "8": migrationDigest(8), "9": migrationDigest(9), "10": migrationDigest(10)}
+	return map[string]string{"7": migrationDigest(7), "8": migrationDigest(8), "9": migrationDigest(9), "10": migrationDigest(10), "11": migrationDigest(11)}
 }
 
 func migrationDigest(limit int) string {

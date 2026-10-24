@@ -23,6 +23,7 @@ override_dh_auto_build:
 	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn-profile ./cmd/supivpn-profile
 	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn-controller ./cmd/supivpn-controller
 	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn-migrate ./cmd/supivpn-migrate
+	go build -mod=vendor -trimpath -buildvcs=false -ldflags='-s -w' -o debian/bin/supivpn-cli ./cmd/supivpn-cli
 
 # Full runtime checks run in the project CI, independently of package building.
 override_dh_auto_test:

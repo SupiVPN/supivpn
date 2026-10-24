@@ -209,8 +209,10 @@ Contract: [docs/RECOVERY.md](RECOVERY.md).
 
 ## Upgrades and verification
 
-The current VM controller supports **schemas 7/8/9/10**; isolated Lambda components
-require **schema 10**. Migration 010 rechecks heartbeat expiry after row-lock
+The development VM controller supports **schemas 7/8/9/10/11**; isolated Lambda
+components and opt-in profile features require **schema 11** (v0.7.1 uses 10).
+Migration 011 adds the profile registry, session binding and one-use import grants;
+follow the [two-port migration](PROFILE_BINDING.md). Migration 010 rechecks heartbeat expiry after row-lock
 waits and improves cleanup queries without releasing active grants.
 Migration 009 adds restricted SQL functions and separate
 role grants. A combined-Lambda deployment requires the [controlled cutover](LAMBDA_ISOLATION.md#upgrade-and-rollback).

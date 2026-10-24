@@ -240,6 +240,12 @@ func (a *agent) remoteStep(ctx context.Context) {
 		return
 	}
 	c, phase := j.conn, j.phase
+	previousRegistration := c.registrationMayExist
+	if phase == "register" {
+		// Set before releasing mu: a disconnect during the request must retain
+		// cancellation until its result is known. Retries may have committed.
+		c.registrationMayExist = true
+	}
 	cid, kid := int64(c.cid), int64(c.kid)
 	q := agentclient.Request{Generation: a.remote.generation}
 	if phase == "fetch" {
@@ -253,6 +259,7 @@ func (a *agent) remoteStep(ctx context.Context) {
 		q.CID, q.KID = &cid, &kid
 		if phase == "register" {
 			q.Ticket = c.ticket
+			q.ProfileID, q.ProfileSecret = c.proof.ID, c.proof.Secret
 		}
 	}
 	a.mu.Unlock()
@@ -261,6 +268,15 @@ func (a *agent) remoteStep(ctx context.Context) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if phase == "register" && agentclient.Status(err) == http.StatusGone && !previousRegistration {
+		// A first, definitive rejection cannot have created a controller login.
+		// Do not infer this after a timeout/retry: an earlier attempt may exist.
+		c.registrationMayExist = false
+		if j.phase == "cancel" {
+			a.finishRemoteLocked(j)
+			return
+		}
+	}
 	if ctx.Err() != nil || !a.readyLocked() {
 		return
 	}
@@ -310,6 +326,7 @@ func (a *agent) remoteStep(ctx context.Context) {
 	}
 	switch phase {
 	case "register":
+		c.proof.Secret = ""
 		remaining := int(c.expires.Sub(a.now()).Seconds())
 		if remaining <= 0 {
 			a.refuseRemoteLocked(c)
@@ -371,7 +388,7 @@ func (a *agent) validRemoteDecision(c *connection, d *agentapi.Decision) bool {
 	switch d.DenialReason {
 	case "":
 		return agentapi.ValidNode(d.GroupName)
-	case "invalid_groups_claim", "no_vpn_group", "connection_limit":
+	case "invalid_groups_claim", "no_vpn_group", "connection_limit", "profile_refused":
 		return d.GroupName == ""
 	default:
 		return false
@@ -380,6 +397,12 @@ func (a *agent) validRemoteDecision(c *connection, d *agentapi.Decision) bool {
 
 // Called after DISCONNECT or confirmed CID absence, never just after client-kill.
 func (a *agent) cancelRemoteLocked(c *connection) {
+	if !c.registrationMayExist && !c.active {
+		// Never dispatched, or definitively refused before any uncertain retry.
+		// There is no authorization or reservation to cancel at the controller.
+		a.remote.jobs = slices.DeleteFunc(a.remote.jobs, func(j *remoteJob) bool { return j.conn == c })
+		return
+	}
 	for _, j := range a.remote.jobs {
 		if j.conn == c {
 			j.phase, j.due, j.deadline = "cancel", time.Time{}, a.now().Add(30*time.Second)

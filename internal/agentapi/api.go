@@ -21,6 +21,7 @@ import (
 	"supivpn/internal/controller"
 	"supivpn/internal/jsonobject"
 	"supivpn/internal/postgres"
+	"supivpn/internal/profile"
 )
 
 type Store interface {
@@ -52,6 +53,8 @@ func IsPath(path string) bool {
 }
 
 type request struct {
+	ProfileID       *string          `json:"profile_id"`
+	ProfileSecret   *string          `json:"profile_secret"`
 	IncludeUsername *bool            `json:"include_username"`
 	IncludeSubject  *bool            `json:"include_subject"`
 	Ready           *bool            `json:"ready"`
@@ -79,7 +82,7 @@ type Decision struct {
 }
 
 func decode(r io.Reader, out *request) error {
-	fields, err := jsonobject.Flat(r, "generation", "previous_generation", "cid", "kid", "ticket", "decision_id", "outcome", "ready", "include_subject", "include_username")
+	fields, err := jsonobject.Flat(r, "generation", "previous_generation", "cid", "kid", "ticket", "decision_id", "outcome", "ready", "include_subject", "include_username", "profile_id", "profile_secret")
 	if err != nil {
 		return err
 	}
@@ -197,6 +200,18 @@ func New(store Store, pending time.Duration) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
+		var proof *profile.Credential
+		if q.ProfileID != nil || q.ProfileSecret != nil {
+			if r.URL.Path != "/agent/v1/register" || q.ProfileID == nil || q.ProfileSecret == nil {
+				fail(w, 400)
+				return
+			}
+			proof = &profile.Credential{ID: *q.ProfileID, Secret: *q.ProfileSecret}
+			if !proof.Valid() {
+				fail(w, 400)
+				return
+			}
+		}
 		switch r.URL.Path {
 		case "/agent/v1/heartbeat":
 			if hs, ok := store.(interface {
@@ -209,7 +224,16 @@ func New(store Store, pending time.Duration) http.Handler {
 		case "/agent/v1/rotate":
 			err = store.RotateNode(ctx, node, q.Previous, q.Generation)
 		case "/agent/v1/register":
-			err = store.Register(ctx, a, c, q.Ticket, pending)
+			if proof == nil {
+				err = store.Register(ctx, a, c, q.Ticket, pending)
+			} else if bound, ok := store.(interface {
+				RegisterProfile(context.Context, postgres.Agent, postgres.Connection, string, time.Duration, profile.Credential) error
+			}); ok {
+				err = bound.RegisterProfile(ctx, a, c, q.Ticket, pending, *proof)
+			} else {
+				fail(w, 503)
+				return
+			}
 		case "/agent/v1/fetch":
 			d, fetchErr := store.Fetch(ctx, a, c)
 			err = fetchErr

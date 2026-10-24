@@ -324,6 +324,10 @@ func vmLogin(t *testing.T, client *http.Client, signer *saml.ServiceProvider, pa
 }
 
 func vmLoginUntil(t *testing.T, client *http.Client, signer *saml.ServiceProvider, path string, status int, sessionEnd time.Time) []byte {
+	return vmLoginAs(t, client, signer, path, status, sessionEnd, "")
+}
+
+func vmLoginAs(t *testing.T, client *http.Client, signer *saml.ServiceProvider, path string, status int, sessionEnd time.Time, subject string) []byte {
 	t.Helper()
 	resp, err := client.Get("https://localhost:8443" + path)
 	if err != nil {
@@ -386,6 +390,9 @@ func vmLoginUntil(t *testing.T, client *http.Client, signer *saml.ServiceProvide
 	fixture := &testApplication{agent: &agent{config: config{SAMLGroupsAttribute: "groups"}},
 		sp: &saml.ServiceProvider{EntityID: origin.String() + "/saml/metadata", AcsURL: *origin.JoinPath("saml/acs")}}
 	assertion := groupAssertionFor(fixture, "admins-vpn")
+	if subject != "" {
+		assertion.Subject.NameID.Value = subject
+	}
 	assertion.ID = "assertion-" + request.ID
 	if !sessionEnd.IsZero() {
 		assertion.AuthnStatements[0].SessionNotOnOrAfter = &sessionEnd
@@ -487,6 +494,8 @@ func TestDebianVMAfterReboot(t *testing.T) {
 	vmWait(t, "controller after boot", time.Minute, func() bool { return vmReady(client, 8443) })
 	vmWait(t, "node after boot", time.Minute, func() bool { return vmReady(client, 9443) })
 	vmCheckSandbox(t)
+	vmWait(t, "bound node after boot", time.Minute, func() bool { return vmReady(client, 9444) })
+	vmCheckBoundSandbox(t)
 	vmCommand(t, "supivpn-setup", "check")
 	if vmRemoteDatabase() {
 		vmCheckRemoteDatabase(t)
@@ -501,12 +510,12 @@ func TestDebianVMAfterReboot(t *testing.T) {
 func TestDebianVMPackageLifecycle(t *testing.T) {
 	requireDebianVM(t)
 	client := vmHTTPS(t)
-	if !vmReady(client, 8443) || !vmReady(client, 9443) {
+	if !vmReady(client, 8443) || !vmReady(client, 9443) || !vmReady(client, 9444) {
 		t.Fatal("running-service lifecycle requires ready services")
 	}
 	identities := func() map[string]string {
 		out := make(map[string]string)
-		for _, unit := range []string{"supivpn-node", "supivpn-openvpn", "supivpn-controller"} {
+		for _, unit := range []string{"supivpn-node", "supivpn-openvpn", "supivpn-controller", "supivpn-node@bound", "supivpn-openvpn@bound"} {
 			out[unit] = vmCommand(t, "systemctl", "show", "--property=MainPID,InvocationID", unit)
 		}
 		return out
@@ -517,7 +526,7 @@ func TestDebianVMPackageLifecycle(t *testing.T) {
 	}
 	snapshot := func() map[string]preserved {
 		out := make(map[string]preserved)
-		for _, root := range []string{"/etc/supivpn", "/var/lib/supivpn-node"} {
+		for _, root := range []string{"/etc/supivpn", "/var/lib/supivpn-node", "/var/lib/supivpn-node-bound"} {
 			err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					return err
@@ -539,8 +548,8 @@ func TestDebianVMPackageLifecycle(t *testing.T) {
 	}
 	beforePID, beforeFiles := identities(), snapshot()
 	debs, err := filepath.Glob("/opt/supivpn-test/supivpn*.deb")
-	if err != nil || len(debs) != 3 {
-		t.Fatal("expected three test packages")
+	if err != nil || len(debs) != 4 {
+		t.Fatal("expected four test packages")
 	}
 	vmCommand(t, "dpkg", append([]string{"-i"}, debs...)...)
 	vmCommand(t, "dpkg-reconfigure", "-f", "noninteractive", "supivpn-controller")
@@ -564,30 +573,34 @@ func TestDebianVMPackageLifecycle(t *testing.T) {
 	if !reflect.DeepEqual(beforePID, identities()) || !reflect.DeepEqual(beforeFiles, snapshot()) {
 		t.Fatal("reinstall/reconfigure/upgrade restarted a service or changed operator files")
 	}
-	for _, unit := range []string{"supivpn-node", "supivpn-controller"} {
+	for _, unit := range []string{"supivpn-node", "supivpn-controller", "supivpn-node@bound"} {
 		if vmCommand(t, "systemctl", "is-enabled", unit) != "enabled" {
 			t.Fatal("upgrade lost service enablement")
 		}
 	}
-	if !vmReady(client, 8443) || !vmReady(client, 9443) {
+	if !vmReady(client, 8443) || !vmReady(client, 9443) || !vmReady(client, 9444) {
 		t.Fatal("upgrade lost readiness")
 	}
 	vmCommand(t, "dpkg", "-r", "supivpn")
 	if !reflect.DeepEqual(beforePID, identities()) {
 		t.Fatal("metapackage removal changed running services")
 	}
+	vmCommand(t, "dpkg", "-r", "supivpn-cli")
+	if !reflect.DeepEqual(beforePID, identities()) {
+		t.Fatal("CLI removal changed running services")
+	}
 	vmCommand(t, "dpkg", "-r", "supivpn-node")
-	if vmPID(t, "supivpn-node") != "0" || vmPID(t, "supivpn-openvpn") != "0" || !vmReady(client, 8443) {
+	if vmPID(t, "supivpn-node") != "0" || vmPID(t, "supivpn-openvpn") != "0" || vmPID(t, "supivpn-node@bound") != "0" || vmPID(t, "supivpn-openvpn@bound") != "0" || !vmReady(client, 8443) {
 		t.Fatal("node removal did not stop only its dedicated pair")
 	}
-	vmCommand(t, "dpkg", "--purge", "supivpn-node", "supivpn-controller", "supivpn")
+	vmCommand(t, "dpkg", "--purge", "supivpn-node", "supivpn-controller", "supivpn-cli", "supivpn")
 	if !reflect.DeepEqual(beforeFiles, snapshot()) {
 		t.Fatal("purge removed or changed operator files")
 	}
 	if _, err := user.Lookup("supivpn-controller"); err != nil {
 		t.Fatal("purge removed the retained controller account")
 	}
-	if vmReady(client, 8443) || vmReady(client, 9443) {
+	if vmReady(client, 8443) || vmReady(client, 9443) || vmReady(client, 9444) {
 		t.Fatal("purged service is still serving")
 	}
 	for _, executable := range []string{"/usr/sbin/supivpn", "/usr/sbin/supivpn-controller"} {

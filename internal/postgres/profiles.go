@@ -27,7 +27,7 @@ func NewProfileBackend(store *Store, lifetime time.Duration) *ProfileBackend {
 }
 
 func validProfileTicket(ticket string) bool {
-	return len(ticket) == 51 && strings.HasPrefix(ticket, "profile_") && validTicket(ticket)
+	return ((len(ticket) == 51 && strings.HasPrefix(ticket, "profile_")) || (len(ticket) == 55 && strings.HasPrefix(ticket, "profile_url_"))) && validTicket(ticket)
 }
 
 func (s *ProfileBackend) Start(ctx context.Context, ticket, requestID string, hash [32]byte) error {

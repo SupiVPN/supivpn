@@ -21,6 +21,7 @@ implementation and automated acceptance.
 | --- | --- | --- |
 | `supivpn-node` | Agent, profile/key bootstrap CLI, dedicated agent and OpenVPN units | OpenVPN Community 2.7.8, CA certificates, systemd |
 | `supivpn-controller` | Controller, explicit migration CLI, matching SQL and profile example | CA certificates, systemd, a reachable PostgreSQL 18 database |
+| `supivpn-cli` (unreleased, next minor series) | Local root-only operator frontend; no daemon | Matching node and controller on the same host, systemd; PostgreSQL may be external |
 | `supivpn` | Matching components, `supivpn-setup` and its configuration templates | Both components, Python 3, OpenSSL, curl; PostgreSQL 18 for setup |
 
 The controller package does not install OpenVPN or PostgreSQL. The node package
@@ -43,8 +44,11 @@ ARM64 and AMD64 runners. Package versions derive from the tag: `v1.2.3` becomes
 A deterministic changelog entry uses the tagged commit timestamp. The repository's
 `UNRELEASED` changelog remains the default for local development builds.
 
-The public set contains five `.deb` files: node/controller for each architecture
-and one `supivpn_<version>_all.deb`; plus `supivpn_<version>.dsc` and
+Published 0.6/0.7 sets contain five `.deb` files: node/controller for each
+architecture and one `supivpn_<version>_all.deb`. From the planned 0.8 series,
+the set contains seven, adding `supivpn-cli` for both architectures; the
+metapackage pins all three component packages to its exact version. See
+[CLI usage and security boundaries](CLI.md). Each set also includes `supivpn_<version>.dsc` and
 `supivpn_<version>.tar.xz` with the matching vendored source. The source descriptor,
 source archive and metapackage must match byte for byte across the two runners.
 The OpenVPN test fixture, build caches, VM images and local configuration are

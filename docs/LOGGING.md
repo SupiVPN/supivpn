@@ -151,7 +151,8 @@ version is independent of the database schema and release version.
 Optional fields depend on the event: `trace_id`, `cid`, `kid`, `node_id`, `generation`,
 `username`, `group_name`, `address`, `peer_ip`, `peer_port`, `purpose`, `outcome`, `reason`,
 `operation`, `status`, `phase`, `action`, `operator_request_id`, `client_version`,
-`client_platform`, `establishment_ms`, `duration_seconds`, `bytes_received`,
+`client_platform`, `profile_id`, `client_device_id`, `client_device_id_source`,
+`establishment_ms`, `duration_seconds`, `bytes_received`,
 `bytes_sent`, `disconnect_source`, `disconnect_reason`.
 Lambda records additionally use the platform invocation's `request_id` when
 available. Client headers cannot set it. Invocation context is reset between
@@ -244,6 +245,8 @@ Starting with v0.4.5, `vpn.tunnel_established` can include:
 | --- | --- |
 | `client_version` | Initial CONNECT's `IV_VER`, a bounded printable ASCII label |
 | `client_platform` | Initial CONNECT's `IV_PLAT`, a bounded platform identifier |
+| `client_device_id` | Unreleased: optional client-reported device label, up to 128 ASCII characters |
+| `client_device_id_source` | Unreleased: `UV_UUID` (Connect), otherwise `IV_HWADDR` (including OpenVPN 3 Linux) |
 | `establishment_ms` | Agent-observed elapsed milliseconds from handling CONNECT to the first ESTABLISHED |
 
 Client version/platform are self-reported diagnostics, not verified device
@@ -252,6 +255,15 @@ incorrect. Rekey events cannot replace the initial labels or reset the timer.
 The establishment interval includes browser/SAML login and agent processing;
 it is not network RTT. A missing start or backwards test/system clock omits the
 interval. Fields are restricted to authorized establishment events.
+
+Device labels are also self-reported and can be copied or changed. They help
+operators investigate reuse across devices; they are not hardware attestation
+and do not authorize or refuse access. Reinstallation, cloning and client settings
+can change their meaning. Missing, malformed or duplicate labels are omitted.
+`UV_UUID` takes precedence; an invalid or duplicate `UV_UUID` does not silently
+fall back to `IV_HWADDR`. Later events cannot replace the initial device label.
+Restrict access to these identifying logs and apply the deployment's retention
+policy. Device enforcement is not enabled by this diagnostic feature.
 
 `vpn.disconnected` includes `disconnect_source=management_event` for a daemon
 DISCONNECT or `disconnect_source=status_snapshot` when a complete ordered status
@@ -393,3 +405,8 @@ No database migration, API authorization change or release bundle format change
 is required for logging or flow correlation. Binaries older than v0.2.0 reject
 the `logging` configuration field, so a rollback to those versions must restore
 the corresponding old configuration as well.
+
+For unreleased bound profiles, `vpn.tunnel_established` and `vpn.disconnected`
+also include the opaque `profile_id` after authorization. Correlate it with the
+optional device label to investigate sharing; neither field is a secret or a
+substitute for SAML. Protect their retention as user/device activity data.

@@ -28,7 +28,7 @@ func (a *Controller) launchProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
-		http.Error(w, "Launch query not allowed", http.StatusBadRequest)
+		browserMessage(w, r, "Launch query not allowed", http.StatusBadRequest)
 		return
 	}
 	// Discard, rather than parse or log, even well-formed signed SAML. Bound
@@ -37,9 +37,9 @@ func (a *Controller) launchProfile(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(io.Discard, r.Body); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			http.Error(w, "Launch body too large", http.StatusRequestEntityTooLarge)
+			browserMessage(w, r, "Launch body too large", http.StatusRequestEntityTooLarge)
 		} else {
-			http.Error(w, "Invalid launch request", http.StatusBadRequest)
+			browserMessage(w, r, "Invalid launch request", http.StatusBadRequest)
 		}
 		return
 	}

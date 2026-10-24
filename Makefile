@@ -26,6 +26,7 @@ FUZZ_SAML_TIME ?= $(FUZZ_TIME)
 GOVULNCHECK_VERSION := v1.9.0
 VULNCHECK := $(LOCAL)/tools/$(GOVULNCHECK_VERSION)/govulncheck
 OPENVPN_IMAGE ?= supivpn-openvpn-test:2.7.8-$(ARCH)
+LINUX_CLIENT_IMAGE ?= supivpn-linux-client-test:$(ARCH)
 XMLSEC_IMAGE ?= supivpn-xmlsec-test:$(ARCH)
 POSTGRES_IMAGE ?= postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
 POSTGRES_CONTAINER ?= supivpn-pg18-test
@@ -56,7 +57,7 @@ tag: export SUPIVPN_TAG_COMMIT := $(value COMMIT)
  xmlsec-image openvpn-image postgres-start postgres-stop test-db-restart \
   security security-source security-binaries deps-verify deps-check audit ci-test-coverage tag deb deb-test deb-vm-test test-setup-db
 
-.PHONY: okta-probe
+.PHONY: okta-probe cli
 okta-probe: | $(LOCAL)/go.mod
 	@mkdir -p "$(LOCAL)/okta-ci"
 	@$(GO) build -race -o "$(LOCAL)/okta-ci/profile-probe" ./testdata/okta
@@ -140,6 +141,9 @@ audit:
 	@$(PYTHON) -B tools/repository_audit.py
 	@$(PYTHON) -B tools/check_language.py
 
+cli:
+	@cd "$(ROOT)" && $(LINUX) $(GO) build $(BUILD_FLAGS) -o "$(BUILD_DIR)/supivpn-cli" ./cmd/supivpn-cli
+
 build: agent controller profile migrate lambda
 	@cd "$(ROOT)" && $(GO) run ./cmd/supivpn-release-manifest -artifact-dir "$(BUILD_DIR)"
 
@@ -213,7 +217,8 @@ security-source: $(VULNCHECK)
 	@cd "$(ROOT)" && env CGO_ENABLED=0 GOOS=linux GOARCH=arm64 "$(VULNCHECK)" -test -tags=integration -show=verbose ./...
 	@cd "$(ROOT)" && env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "$(VULNCHECK)" -test -tags=integration -show=verbose ./...
 
-security-binaries: build $(VULNCHECK)
+security-binaries: build cli $(VULNCHECK)
+	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn-cli"
 	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn"
 	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn-controller"
 	@cd "$(ROOT)" && "$(VULNCHECK)" -mode=binary -show=verbose "$(BUILD_DIR)/supivpn-profile"
@@ -253,6 +258,19 @@ test-openvpn: agent
 	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/supivpn,target=/test/supivpn,readonly" \
 	 --env SUPIVPN_TEST_OPENVPN=/usr/sbin/openvpn --env SUPIVPN_TEST_AGENT=/test/supivpn \
 	 "$(OPENVPN_IMAGE)" /test/openvpn.test -test.run TestOpenVPN -test.v -test.timeout 300s
+
+.PHONY: linux-client-image test-linux-client
+linux-client-image:
+	@$(DOCKER) build --platform linux/$(ARCH) --build-arg "BASE_IMAGE=$(OPENVPN_IMAGE)" -t "$(LINUX_CLIENT_IMAGE)" "$(ROOT)/ci/linux-client"
+
+test-linux-client: agent
+	@cd "$(ROOT)" && $(LINUX) $(GO) test -c -o "$(BUILD_DIR)/openvpn.test" ./internal/agent
+	@$(DOCKER) run --rm --platform linux/$(ARCH) --network none --cap-add NET_ADMIN --device /dev/net/tun \
+	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/openvpn.test,target=/test/openvpn.test,readonly" \
+	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/supivpn,target=/test/supivpn,readonly" \
+	 --mount "type=bind,source=$(ROOT)/ci/linux-client,target=/runner,readonly" \
+	 --env SUPIVPN_TEST_OPENVPN=/usr/sbin/openvpn --env SUPIVPN_TEST_AGENT=/test/supivpn \
+	 --env SUPIVPN_TEST_OPENVPN3=/usr/bin/openvpn3 "$(LINUX_CLIENT_IMAGE)" python3 /runner/run.py
 
 test-connect: agent
 	@mkdir -p "$(LOCAL)/connect-test"

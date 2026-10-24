@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"supivpn/internal/controller"
+	"supivpn/internal/profile"
 )
 
 var (
@@ -108,7 +109,7 @@ func (s *Store) Ready(ctx context.Context) bool {
 	}
 	var version int
 	return s.pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) == nil &&
-		((s.component == "" && (version == 7 || version == 8 || version == 9 || version == 10)) || (s.component != "" && version == 10))
+		((s.component == "" && (version == 7 || version == 8 || version == 9 || version == 10 || version == 11)) || (s.component != "" && version == 11))
 }
 
 // RotateNode is a compare-and-swap performed by the authenticated node bootstrap
@@ -191,6 +192,10 @@ func (s *Store) lockNode(ctx context.Context, tx pgx.Tx, nodeID string) (string,
 // existing deadline, resurrects consumed state or accepts a second ticket for the
 // same connection. The future agent retains its random ticket across retries.
 func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration) error {
+	return s.register(ctx, a, c, ticket, lifetime, nil)
+}
+
+func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration, proof *profile.Credential) error {
 	if !validAgent(a) || !validTicket(ticket) || c.CID < 0 || c.KID < 0 ||
 		lifetime < 30*time.Second || lifetime > 180*time.Second {
 		return ErrConflict
@@ -211,7 +216,7 @@ func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket stri
 		return publicError(err)
 	}
 	hash := ticketHash(ticket)
-	_, err = tx.Exec(ctx, `
+	inserted, err := tx.Exec(ctx, `
         INSERT INTO supivpn.logins(ticket_hash,node_id,generation,cid,kid,expires_at)
         VALUES ($1,$2,$3,$4,$5,clock_timestamp()+$6*interval '1 microsecond')
         ON CONFLICT DO NOTHING
@@ -227,6 +232,40 @@ func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket stri
 		return publicError(err)
 	}
 	if r.agent != a || r.conn != c {
+		return ErrConflict
+	}
+	profileID := ""
+	if proof != nil {
+		digest, e := proof.Digest()
+		if e != nil {
+			return ErrConflict
+		}
+		var valid bool
+		query := "SELECT state='active' AND secret_hash=$2 FROM supivpn.issued_profiles WHERE profile_id=$1 FOR SHARE"
+		if s.component != "" {
+			query = "SELECT supivpn.profile_proof_valid($1,$2)"
+		}
+		err = tx.QueryRow(ctx, query, proof.ID, digest[:]).Scan(&valid)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return controller.ErrLoginExpired
+		}
+		if err != nil {
+			return publicError(err)
+		}
+		if !valid {
+			return controller.ErrLoginExpired
+		}
+		profileID = proof.ID
+	}
+	if profileID != "" && inserted.RowsAffected() == 1 {
+		if _, err = tx.Exec(ctx, "INSERT INTO supivpn.profile_bindings(ticket_hash,profile_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", hash, profileID); err != nil {
+			return publicError(err)
+		}
+	}
+	// Do not allow an idempotent retry to change the profile or downgrade it.
+	if bound, e := loginProfile(ctx, tx, hash); e != nil {
+		return publicError(e)
+	} else if bound != profileID {
 		return ErrConflict
 	}
 	now, err := dbNow(ctx, tx)
@@ -451,6 +490,17 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err := consumeAssertion(ctx, tx, d); err != nil {
 			return err
 		}
+		if id, err := loginProfile(ctx, tx, hash); err != nil {
+			return err
+		} else if id != "" {
+			ok, err := s.profileOwnerActive(ctx, tx, id, d.SubjectHash)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				d.GroupName, d.DenialReason = "", "profile_refused"
+			}
+		}
 		if d.DenialReason == "" {
 			// Version-2 grants have no subject identity. Until their node is
 			// drained/restarted or fenced, admitting anyone could bypass a limit.
@@ -509,7 +559,7 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err = tx.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version); err != nil {
 			return err
 		}
-		if version != 7 && version != 8 && version != 9 && version != 10 {
+		if version != 7 && version != 8 && version != 9 && version != 10 && version != 11 {
 			return controller.ErrUnavailable
 		}
 		if version >= 8 {

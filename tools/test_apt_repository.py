@@ -138,12 +138,14 @@ class AptIntegrationTests(unittest.TestCase):
         directory.mkdir()
         value = version[1:]
         for name, arches in (("supivpn", ("all",)), ("supivpn-node", ("amd64", "arm64")),
-                             ("supivpn-controller", ("amd64", "arm64"))):
+                             ("supivpn-controller", ("amd64", "arm64")), ("supivpn-cli", ("amd64", "arm64"))):
             for arch in arches:
                 source = directory / (name + arch)
                 (source / "DEBIAN").mkdir(parents=True)
-                depends = (f"Depends: supivpn-node (= {value}), supivpn-controller (= {value})\n"
+                depends = (f"Depends: supivpn-node (= {value}), supivpn-controller (= {value}), supivpn-cli (= {value})\n"
                            if name == "supivpn" else "")
+                if name == "supivpn-cli":
+                    depends = f"Depends: supivpn-node (= {value}), supivpn-controller (= {value})\n"
                 (source / "DEBIAN/control").write_text(
                     f"Package: {name}\nSource: supivpn\nVersion: {value}\nArchitecture: {arch}\n"
                     "Maintainer: Test <test@example.invalid>\nSection: net\nPriority: optional\n"
@@ -216,7 +218,7 @@ class AptIntegrationTests(unittest.TestCase):
                 repo.command([*args, "--download-only", "--yes", "install", "supivpn"])
                 downloaded = {p.name for p in (root / arch / "var/cache/apt/archives").glob("*.deb")}
                 self.assertEqual(downloaded, {f"supivpn_1.1.0_all.deb", f"supivpn-node_1.1.0_{arch}.deb",
-                                              f"supivpn-controller_1.1.0_{arch}.deb"})
+                                              f"supivpn-controller_1.1.0_{arch}.deb", f"supivpn-cli_1.1.0_{arch}.deb"})
             source_args = client("source-download", "amd64")
             source_list = root / "source-download/supivpn.sources"
             source_list.write_text(source_list.read_text().replace("Types: deb\n", "Types: deb deb-src\n"))

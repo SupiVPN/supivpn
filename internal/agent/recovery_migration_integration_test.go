@@ -22,6 +22,7 @@ func TestRecoveryMigrationPreservesUnknownLegacyStops(t *testing.T){
   if e:=s.RotateNode(ctx,n,"","old");e!=nil{t.Fatal(e)}
  }
  // Recreate schema 6 only in the disposable loopback database.
+ removeProfileSchema(t,pool)
   exec(`DROP FUNCTION supivpn.lock_node(text),supivpn.agent_heartbeat(text,text,boolean),supivpn.agent_rotate(text,text,text),supivpn.prune_auth(integer);
    DROP TABLE supivpn.node_maintenance,supivpn.operator_requests,supivpn.node_recovery_stops;
   DROP INDEX supivpn.recovery_starts_time;

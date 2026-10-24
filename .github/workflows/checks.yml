@@ -267,6 +267,8 @@ jobs:
           cache-to: type=gha,scope=toolchain-${{ matrix.arch }},mode=max
       - name: Native OpenVPN interoperability and failover
         run: make test-openvpn
+      - name: OpenVPN 3 Linux profile and browser-auth interoperability
+        run: make linux-client-image test-linux-client
 
   debian:
     name: Debian packages (${{ matrix.arch }})

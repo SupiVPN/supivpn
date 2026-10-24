@@ -7,6 +7,7 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/netip"
 	"net/url"
 	"supivpn/internal/logging"
+	"supivpn/internal/profile"
 	"supivpn/internal/tracecontext"
 	"sync"
 	"time"
@@ -22,6 +24,9 @@ import (
 const maxConnections = 16
 
 type connection struct {
+	registrationMayExist       bool
+	proof                      profile.Credential
+	proofDigest                [32]byte
 	username                   string
 	sessionUnlimited           bool
 	closeBy                    time.Time
@@ -185,6 +190,10 @@ func (a *agent) handleEvent(e clientEvent) {
 			return
 		}
 		token, err := randomToken()
+		if a.config.ProfileBinding == "required" && (a.remote == nil || !e.proof.Valid()) {
+			a.denyLocked(e)
+			return
+		}
 		if err != nil {
 			a.denyLocked(e)
 			return
@@ -193,6 +202,10 @@ func (a *agent) handleEvent(e clientEvent) {
 		c := &connection{cid: e.cid, kid: e.kid, revision: a.nextRevision, ticket: token,
 			expires: a.now().Add(time.Duration(a.config.PendingSeconds) * time.Second), peer: e.peer,
 			client: e.client, requestedAt: a.now()}
+		if a.config.ProfileBinding == "required" {
+			c.proof = e.proof
+			c.proofDigest, _ = e.proof.Digest()
+		}
 		a.connections[e.cid], a.tickets[token] = c, c
 		a.logEvent("vpn.connection_requested", c)
 		if a.remote != nil {
@@ -209,6 +222,14 @@ func (a *agent) handleEvent(e clientEvent) {
 		a.logEvent("vpn.browser_auth_requested", c)
 	case "REAUTH":
 		c := a.connections[e.cid]
+		if c != nil && a.config.ProfileBinding == "required" {
+			digest, err := e.proof.Digest()
+			if err != nil || subtle.ConstantTimeCompare(digest[:], c.proofDigest[:]) != 1 {
+				a.denyLocked(e)
+				a.closeClientLocked(c, "reauthentication_refused")
+				return
+			}
+		}
 		if c != nil && c.active && (c.closing || !c.sessionValid(a.now())) {
 			// Normal expiry requests RESTART, not AUTH_FAILED: Connect must be
 			// allowed to reconnect and perform a fresh browser authentication.
@@ -288,11 +309,17 @@ func (a *agent) logTunnelEvent(event string, c *connection, attrs ...slog.Attr) 
 		if c.client.platform != "" {
 			attrs = append(attrs, slog.String("client_platform", c.client.platform))
 		}
+		if c.client.deviceID != "" {
+			attrs = append(attrs, slog.String("client_device_id", c.client.deviceID), slog.String("client_device_id_source", c.client.deviceIDSource))
+		}
 		if !c.requestedAt.IsZero() && !c.establishedAt.IsZero() && !c.establishedAt.Before(c.requestedAt) {
 			attrs = append(attrs, slog.Int64("establishment_ms", c.establishedAt.Sub(c.requestedAt).Milliseconds()))
 		}
 	}
 	if c.active {
+		if c.proof.ID != "" {
+			attrs = append(attrs, slog.String("profile_id", c.proof.ID))
+		}
 		attrs = append(attrs, slog.String("username", c.username))
 	}
 	if c.active && c.peer.IsValid() {

@@ -168,7 +168,8 @@ func TestSessionLimitsAndFencingIntegration(t *testing.T) {
                 return nil,nil
             }))
             runtime.remote.node,runtime.remote.generation=a.NodeID,a.Generation
-            runtime.connections[1]=&connection{cid:1,kid:1,active:acknowledged}
+            // grant() already registered this connection directly in the store.
+            runtime.connections[1]=&connection{cid:1,kid:1,active:acknowledged,registrationMayExist:true}
             runtime.handleEvent(clientEvent{kind:"STATUS",clients:map[uint64]struct{}{1:{}}})
             if len(runtime.remote.jobs)!=0 {t.Fatal("live CID scheduled cancellation")}
             runtime.handleEvent(clientEvent{kind:"STATUS",clients:map[uint64]struct{}{}})

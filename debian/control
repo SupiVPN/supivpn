@@ -26,9 +26,17 @@ Description: SupiVPN authorization controller and database migration CLI
  Requires a reachable PostgreSQL 18 database, supplied separately.
  Installation never starts services or runs database migrations.
 
+Package: supivpn-cli
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, supivpn-node (= ${binary:Version}), supivpn-controller (= ${binary:Version}), systemd (>= 257)
+Description: local SupiVPN operator command line
+ Inspects services and profiles, blocks or reactivates profiles, and requests
+ local user-session termination. Requires root on a combined node/controller
+ host. PostgreSQL may be external. Provides no remote administration API.
+
 Package: supivpn
 Architecture: all
-Depends: ${misc:Depends}, supivpn-node (= ${binary:Version}), supivpn-controller (= ${binary:Version}), python3, openssl, curl
+Depends: ${misc:Depends}, supivpn-node (= ${binary:Version}), supivpn-controller (= ${binary:Version}), supivpn-cli (= ${binary:Version}), python3, openssl, curl
 Description: combined VPN node and authorization controller
  Installs matching versions of both SupiVPN components on one host.
  Includes supivpn-setup for explicit first-time configuration of a combined

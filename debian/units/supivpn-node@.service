@@ -1,0 +1,43 @@
+# Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+# SPDX-License-Identifier: AGPL-3.0-only
+[Unit]
+Description=SupiVPN node agent
+Documentation=https://github.com/SupiVPN/supivpn/blob/main/docs/DEBIAN_PACKAGING.md
+Wants=network-online.target
+After=network-online.target
+Upholds=supivpn-openvpn@%i.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/sbin/supivpn -config /etc/supivpn/nodes/%i/agent.json
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=45
+TimeoutStopSec=30
+KillMode=control-group
+RuntimeDirectory=supivpn-%i
+RuntimeDirectoryMode=0700
+StateDirectory=supivpn-node-%i
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

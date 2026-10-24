@@ -103,7 +103,7 @@ class ReleaseTests(unittest.TestCase):
                 patch.object(release.tag, "git", return_value=result(out=signed_tag(V, C, notes))), \
                 contextlib.redirect_stdout(io.StringIO()):
             release.prepare(V, output)
-        self.assertEqual(attest.call_count, 13)
+            self.assertEqual(attest.call_count, 15)
         return output
 
     def check_provenance(self, path, commit, version, run):

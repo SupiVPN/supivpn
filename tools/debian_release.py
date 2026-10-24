@@ -21,8 +21,18 @@ def version(tag):
 def filenames(tag, arch):
     a.architecture(arch)
     value = version(tag)
-    return {f"supivpn-node_{value}_{arch}.deb", f"supivpn-controller_{value}_{arch}.deb",
-            f"supivpn_{value}_all.deb", f"supivpn_{value}.dsc", f"supivpn_{value}.tar.xz"}
+    names = {f"supivpn-node_{value}_{arch}.deb", f"supivpn-controller_{value}_{arch}.deb",
+             f"supivpn_{value}_all.deb", f"supivpn_{value}.dsc", f"supivpn_{value}.tar.xz"}
+    if has_cli(tag):
+        names.add(f"supivpn-cli_{value}_{arch}.deb")
+    return names
+
+
+def has_cli(tag):
+    # Keep historical APT inputs valid. CLI delivery begins with the next minor
+    # series; patch releases on the existing 0.6/0.7 lines retain their payloads.
+    version(tag)
+    return tuple(map(int, tag[1:].split("-", 1)[0].split("."))) >= (0, 8, 0)
 
 
 def commit_epoch(root, commit):
@@ -88,11 +98,17 @@ def verify_package(path, tag, arch):
     fields = dict(line.split(": ", 1) for line in reply.stdout.splitlines())
     package = fields.get("Package")
     expected_arch = "all" if package == "supivpn" else arch
-    a.require(package in {"supivpn", "supivpn-node", "supivpn-controller"}
+    allowed = {"supivpn", "supivpn-node", "supivpn-controller"}
+    if has_cli(tag):
+        allowed.add("supivpn-cli")
+    a.require(package in allowed
               and fields.get("Version") == version(tag) and fields.get("Architecture") == expected_arch
               and path.name == f"{package}_{version(tag)}_{expected_arch}.deb",
               "Debian package identity mismatch")
-    if package == "supivpn":
-        for name in ("supivpn-node", "supivpn-controller"):
+    if package in {"supivpn", "supivpn-cli"}:
+        required = {"supivpn-node", "supivpn-controller"}
+        if package == "supivpn" and has_cli(tag):
+            required.add("supivpn-cli")
+        for name in required:
             a.require(f"{name} (= {version(tag)})" in fields.get("Depends", "").split(", "),
                       "Debian metapackage version mismatch")

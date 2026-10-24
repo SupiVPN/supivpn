@@ -1,0 +1,39 @@
+.\" Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+.\" SPDX-License-Identifier: AGPL-3.0-only
+.TH SUPIVPN-CLI 8
+.SH NAME
+supivpn-cli \- local SupiVPN operator frontend
+.SH SYNOPSIS
+.B supivpn-cli
+.RI "command [options]"
+.SH DESCRIPTION
+Run with sudo on a combined Debian node/controller host. PostgreSQL may be
+external. No remote administration endpoint is provided. Output is bounded JSON.
+.SH COMMANDS
+.TP
+.B status [--instance NAME]
+Show systemd state of the controller and selected node/OpenVPN pair.
+.TP
+.B profiles list [--limit 1..100] [--after PROFILE_ID]
+List nonsecret profile records using an opaque ID cursor.
+.TP
+.B profiles status PROFILE_ID
+Inspect state and revision.
+.TP
+.B profiles block|activate PROFILE_ID --revision N --yes
+Change state only if the inspected revision still matches.
+.TP
+.B sessions status|drop --user NAME [--instance NAME] [--yes]
+Inspect or request termination of the exact SAML user on one local listener.
+Drop requires --yes. Poll status to confirm closure; it is not a ban.
+.SH SECURITY
+Requires root, fixed root-owned configuration and a local Unix-connected
+node/controller. Profile commands use a restricted transient systemd service.
+No secrets are accepted on the command line or returned in output.
+Blocking a profile does not disconnect existing tunnels or prevent a newly
+issued profile. After a timeout inspect state before retrying a mutation.
+.SH FILES
+/usr/share/doc/supivpn-cli/CLI.md
+.SH SEE ALSO
+.BR supivpn (8),
+.BR supivpn-controller (8)

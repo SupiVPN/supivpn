@@ -28,18 +28,18 @@ type definition struct {
 // Event names and schema_version are the machine-readable contract. Messages
 // are for humans. Never derive an event name or message from request data.
 var events = map[string]definition{
-	"vpn.connection_requested":       {slog.LevelInfo, "VPN connection requested", ""},
-	"vpn.tls_reauthenticated":        {slog.LevelInfo, "Existing VPN session accepted a TLS rekey", ""},
-	"agent.login_registered":         {slog.LevelInfo, "Agent login registration committed", ""},
-	"agent.decision_delivered":       {slog.LevelInfo, "Authorization decision returned to the agent", ""},
-	"agent.decision_acknowledged":    {slog.LevelInfo, "Agent authorization outcome committed", "outcome"},
-	"agent.connection_cancelled":     {slog.LevelInfo, "Agent connection cancellation committed", ""},
-	"saml.request_refused":           {slog.LevelWarn, "Browser request refused", "status"},
+	"vpn.connection_requested":        {slog.LevelInfo, "VPN connection requested", ""},
+	"vpn.tls_reauthenticated":         {slog.LevelInfo, "Existing VPN session accepted a TLS rekey", ""},
+	"agent.login_registered":          {slog.LevelInfo, "Agent login registration committed", ""},
+	"agent.decision_delivered":        {slog.LevelInfo, "Authorization decision returned to the agent", ""},
+	"agent.decision_acknowledged":     {slog.LevelInfo, "Agent authorization outcome committed", "outcome"},
+	"agent.connection_cancelled":      {slog.LevelInfo, "Agent connection cancellation committed", ""},
+	"saml.request_refused":            {slog.LevelWarn, "Browser request refused", "status"},
 	"logging.output_failed":           {slog.LevelError, "Log file unavailable; application logging switched to stderr until restart", ""},
 	"vpn.authentication_refused":      {slog.LevelWarn, "VPN authentication refused", "reason"},
 	"vpn.browser_auth_requested":      {slog.LevelInfo, "VPN browser authentication requested", ""},
-	"vpn.tunnel_established":          {slog.LevelInfo, "VPN tunnel established", "username group_name address peer_ip peer_port client_version client_platform establishment_ms"},
-	"vpn.disconnected":                {slog.LevelInfo, "VPN disconnected", "username group_name address peer_ip peer_port duration_seconds bytes_received bytes_sent disconnect_source disconnect_reason"},
+	"vpn.tunnel_established":          {slog.LevelInfo, "VPN tunnel established", "profile_id username group_name address peer_ip peer_port client_version client_platform client_device_id client_device_id_source establishment_ms"},
+	"vpn.disconnected":                {slog.LevelInfo, "VPN disconnected", "profile_id username group_name address peer_ip peer_port duration_seconds bytes_received bytes_sent disconnect_source disconnect_reason"},
 	"vpn.session_expired":             {slog.LevelInfo, "VPN authentication/session expired", ""},
 	"vpn.authorization_denied":        {slog.LevelWarn, "VPN authorization refused", "reason"},
 	"vpn.authorization_applied":       {slog.LevelInfo, "VPN authorization acknowledged by OpenVPN", ""},
@@ -186,15 +186,25 @@ func identifier(s string, max int) bool {
 // ValidClientVersion bounds a self-reported diagnostic label, not an identity
 // or a security version assertion. Controls and non-ASCII text are refused.
 func ValidClientVersion(s string) bool {
-	if len(s) == 0 || len(s) > 128 || strings.TrimSpace(s) != s { return false }
+	if len(s) == 0 || len(s) > 128 || strings.TrimSpace(s) != s {
+		return false
+	}
 	for _, ch := range s {
-		if ch < 32 || ch > 126 { return false }
+		if ch < 32 || ch > 126 {
+			return false
+		}
 	}
 	return true
 }
 
 // ValidClientPlatform permits bounded platform names, including future clients.
 func ValidClientPlatform(s string) bool { return identifier(s, 32) }
+
+// ValidClientDeviceID accepts only bounded opaque labels supplied by a client.
+// It does not establish device identity or authorize a connection.
+func ValidClientDeviceID(s string) bool {
+	return identifier(strings.ReplaceAll(s, ":", "-"), 128)
+}
 
 func safe(a slog.Attr) bool {
 	// Never resolve LogValuer/Any values: even String/Error methods can leak data.
@@ -216,6 +226,8 @@ func safe(a slog.Attr) bool {
 	switch a.Key {
 	case "username":
 		return len(s) <= 1024 && utf8.ValidString(s)
+	case "profile_id":
+		return len(s) == 37 && strings.HasPrefix(s, "svp1_") && strings.Trim(s[5:], "0123456789abcdef") == ""
 	case "node_id", "generation", "group_name", "operator_request_id":
 		return identifier(s, 128)
 	case "address":
@@ -230,6 +242,10 @@ func safe(a slog.Attr) bool {
 		return ValidClientVersion(s)
 	case "client_platform":
 		return ValidClientPlatform(s)
+	case "client_device_id":
+		return ValidClientDeviceID(s)
+	case "client_device_id_source":
+		return oneOf(s, "UV_UUID IV_HWADDR")
 	case "disconnect_source":
 		return oneOf(s, "management_event status_snapshot")
 	case "disconnect_reason":
@@ -243,7 +259,7 @@ func safe(a slog.Attr) bool {
 	case "outcome":
 		return oneOf(s, "allowed denied applied failed")
 	case "reason":
-		return oneOf(s, "capacity_or_missing_webauth connection_limit invalid_groups_claim no_vpn_group pool_full deadline stop_budget start_budget retired_stopped retired_running already_stopped fenced terminated start_disabled healthy observation_timeout management_unavailable listener_unavailable startup_failed")
+		return oneOf(s, "profile_refused capacity_or_missing_webauth connection_limit invalid_groups_claim no_vpn_group pool_full deadline stop_budget start_budget retired_stopped retired_running already_stopped fenced terminated start_disabled healthy observation_timeout management_unavailable listener_unavailable startup_failed")
 	}
 	return false
 }

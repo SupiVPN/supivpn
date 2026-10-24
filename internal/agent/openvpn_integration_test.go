@@ -180,6 +180,7 @@ func testVPNCertificateFor(t *testing.T, dir string, validFor time.Duration) []b
 
 func TestOpenVPNTLSCryptV2(t *testing.T) {
 	binary := os.Getenv("SUPIVPN_TEST_OPENVPN")
+	linuxClient := os.Getenv("SUPIVPN_TEST_OPENVPN3")
 	if binary == "" {
 		t.Skip("requires isolated Linux container with OpenVPN 2.7.8 and /dev/net/tun")
 	}
@@ -205,10 +206,21 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 		{"go-core", []string{coreGroup}, "10.203.0.2"},
 		{"go-delayed-auth", []string{coreGroup}, "10.203.0.2"},
 		{"go-no-group", []string{unrelatedGroup}, ""},
+		{"go-bound", []string{coreGroup}, "10.203.0.2"},
+		{"go-bound-on-legacy", nil, ""},
+		{"go-legacy-on-bound", nil, ""},
 		{"go-wrong-key", nil, ""},
 		{"go-tampered", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if linuxClient != "" && tc.name != "go-core" && tc.name != "go-delayed-auth" && tc.name != "go-no-group" && tc.name != "go-bound" && tc.name != "go-bound-on-legacy" && tc.name != "go-legacy-on-bound" {
+				t.Skip("OpenVPN 3 Linux SAML interoperability subset")
+			}
+			bound := tc.name == "go-bound" || tc.name == "go-bound-on-legacy"
+			proof, err := profile.NewCredential()
+			if err != nil {
+				t.Fatal(err)
+			}
 			dir := t.TempDir()
 			if err := os.Chmod(dir, 0700); err != nil {
 				t.Fatal(err)
@@ -243,6 +255,13 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				"/opt/supivpn/supivpn", agentBinary,
 				"verb 2", "verb 3",
 			).Replace(openVPNServerTemplate)
+			if strings.Contains(tc.name, "bound") {
+				mode := "required"
+				if tc.name == "go-bound-on-legacy" {
+					mode = "legacy"
+				}
+				config += "\ntls-crypt-v2-verify \"" + agentBinary + " -verify-profile-metadata " + mode + "\"\n"
+			}
 			serverConfig := filepath.Join(dir, "server.conf")
 			writeTestFile(t, serverConfig, []byte(config))
 			serverLog := startProtocolProcess(t, binary, "--config", serverConfig)
@@ -286,6 +305,9 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 					t.Fatal("test wrapping key unavailable")
 				}
 				clientKey, err := profile.GenerateClientKey(serverKey, time.Now())
+				if bound {
+					clientKey, err = profile.GenerateBoundClientKey(serverKey, time.Now())
+				}
 				if err != nil {
 					t.Fatal("Go client key generation failed")
 				}
@@ -295,6 +317,9 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 					clientKey = pem.EncodeToMemory(block)
 				}
 				data, err := profile.Render([]byte(template), clientKey)
+				if bound {
+					data, err = profile.RenderBound([]byte(template), clientKey, proof)
+				}
 				if err != nil {
 					t.Fatal("Go profile rendering failed")
 				}
@@ -319,8 +344,12 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			// Connect uses CLIENT_CERT=0. These synthetic values grant no access:
 			// only the signed SAML assertion below may authorize the connection.
 			authFile := filepath.Join(dir, "cli-test-auth")
-			writeTestFile(t, authFile, []byte("unused-test\nunused-test\n"))
-			invalidKey := tc.name == "missing-key" || strings.HasSuffix(tc.name, "wrong-key") || tc.name == "go-tampered"
+			credentials := "unused-test\nunused-test\n"
+			if bound {
+				credentials = proof.ID + "\n" + proof.Secret + "\n"
+			}
+			writeTestFile(t, authFile, []byte(credentials))
+			invalidKey := tc.name == "missing-key" || strings.HasSuffix(tc.name, "wrong-key") || tc.name == "go-tampered" || tc.name == "go-bound-on-legacy" || tc.name == "go-legacy-on-bound"
 			clientArgs := []string{"--config", output,
 				"--auth-user-pass", authFile,
 				"--dev", "supivpnc", "--dev-type", "tun", "--disable-dco",
@@ -332,7 +361,23 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				// uses it to detect server silence during AUTH_PENDING.
 				clientArgs = append(clientArgs, "--hand-window", "5")
 			}
-			clientLog := startProtocolProcess(t, binary, clientArgs...)
+			clientBinary := binary
+			if linuxClient != "" {
+				// Embedded credentials are the proposed opaque profile proof,
+				// not the SAML user's name or password. Authorization below still
+				// requires a signed assertion and an allowed group.
+				if !bound {
+					writeTestFile(t, output, append(first, []byte("\n<auth-user-pass>\nsynthetic-profile-id\nsynthetic-profile-secret\n</auth-user-pass>\n")...))
+				}
+				clientBinary = linuxClient
+				clientArgs = []string{"session-start", "--config", output, "--timeout", "30", "--dco", "false"}
+				t.Cleanup(func() {
+					cmd := exec.Command(linuxClient, "session-manage", "--config", output, "--disconnect")
+					cmd.Stdout, cmd.Stderr = &protocolLog{}, &protocolLog{}
+					_ = cmd.Run()
+				})
+			}
+			clientLog := startProtocolProcess(t, clientBinary, clientArgs...)
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("client protocol categories: %v (raw log withheld)", clientLog.categories())
@@ -340,7 +385,14 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				}
 			})
 			if invalidKey {
-				waitProtocol(t, clientLog, "TLS Error: TLS key negotiation failed")
+				if linuxClient == "" {
+					waitProtocol(t, clientLog, "TLS Error: TLS key negotiation failed")
+				} else {
+					// Server-side proof of metadata rejection, without waiting
+					// for the Linux service's longer reconnect backoff.
+					waitProtocol(t, serverLog, "TLS CRYPT V2 VERIFY SCRIPT ERROR")
+					time.Sleep(time.Second)
+				}
 				select {
 				case <-m.events:
 					t.Fatal("invalid key reached the management authentication interface")
@@ -352,7 +404,9 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				}
 				return
 			}
-			waitProtocol(t, clientLog, "Peer Connection Initiated")
+			if linuxClient == "" {
+				waitProtocol(t, clientLog, "Peer Connection Initiated")
+			}
 			var e clientEvent
 			select {
 			case e = <-m.events:
@@ -361,6 +415,12 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			}
 			if e.kind != "CONNECT" || !supportsWebAuth(e.sso) {
 				t.Fatal("missing webauth CONNECT")
+			}
+			if bound && e.proof != proof {
+				t.Fatal("opaque inline proof was not delivered on the authenticated CID/KID")
+			}
+			if linuxClient != "" && bound && (e.client.deviceID == "" || e.client.deviceIDSource != "IV_HWADDR") {
+				t.Fatal("Linux device diagnostic missing")
 			}
 			a, _ := testApp(t, metadata)
 			audit := captureAudit(t, a.agent)
@@ -376,7 +436,11 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			a.connections, a.tickets = map[uint64]*connection{}, map[string]*connection{}
 			a.attach(m)
 			a.handleEvent(e)
-			waitProtocol(t, clientLog, "WEB_AUTH:external:")
+			if linuxClient == "" {
+				waitProtocol(t, clientLog, "WEB_AUTH:external:")
+			} else {
+				waitProtocol(t, clientLog, a.origin.String()+"/login/")
+			}
 			if tc.name == "go-delayed-auth" {
 				// Cross a PUSH_REQUEST retry interval while browser authentication
 				// is pending. A five-second client handshake window is too short.
@@ -424,14 +488,27 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				if result.Code != http.StatusForbidden || c.active {
 					t.Fatal("SAML group denial bypassed")
 				}
-				waitProtocol(t, clientLog, "AUTH_FAILED")
+				if linuxClient == "" {
+					waitProtocol(t, clientLog, "AUTH_FAILED")
+				} else {
+					select {
+					case event := <-m.events:
+						if event.kind != "DISCONNECT" {
+							t.Fatal("denied Linux client established a tunnel")
+						}
+					case <-time.After(15 * time.Second):
+						t.Fatal("denied Linux client did not disconnect")
+					}
+				}
 				return
 			}
 			if result.Code != http.StatusOK || c.address.String() != tc.address {
 				t.Fatal("SAML did not authorize expected group address")
 			}
-			waitProtocol(t, clientLog, "ifconfig "+tc.address+" 255.255.255.0")
-			waitProtocol(t, clientLog, "Initialization Sequence Completed")
+			if linuxClient == "" {
+				waitProtocol(t, clientLog, "ifconfig "+tc.address+" 255.255.255.0")
+				waitProtocol(t, clientLog, "Initialization Sequence Completed")
+			}
 			if clientLog.contains("SIGUSR1") || clientLog.contains("process restarting") {
 				t.Fatal("valid-key authentication restarted the client")
 			}

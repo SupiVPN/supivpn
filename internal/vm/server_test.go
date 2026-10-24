@@ -21,7 +21,96 @@ import (
 
 type identityStore struct{ nodes chan string }
 
-func (s *identityStore) Heartbeat(_ context.Context, a postgres.Agent) error { s.nodes <- a.NodeID; return nil }
+func TestAdditionalAgentExplicitIdentity(t *testing.T) {
+	uid := uint32(0)
+	c := Config{Listen: "127.0.0.1:8443", AgentUID: &uid, NodeID: "legacy",
+		AgentSocket: "/run/controller/legacy.sock", TLSCertificate: "/etc/test.crt",
+		TLSChain: "/etc/test-chain.crt", TLSPrivateKey: "/etc/test.key"}
+	good := AgentEndpoint{Socket: "/run/controller/bound.sock", UID: &uid, NodeID: "bound"}
+	c.AdditionalAgents = []AgentEndpoint{good}
+	if err := c.Validate(); err != nil {
+		t.Fatal("explicit second identity refused", err)
+	}
+	for _, bad := range []AgentEndpoint{
+		{Socket: good.Socket, NodeID: good.NodeID},
+		{Socket: good.Socket, UID: &uid, NodeID: c.NodeID},
+		{Socket: c.AgentSocket, UID: &uid, NodeID: good.NodeID},
+	} {
+		c.AdditionalAgents = []AgentEndpoint{bad}
+		if c.Validate() == nil {
+			t.Fatal("ambiguous second identity accepted")
+		}
+	}
+}
+
+func TestTwoPrivateAgentIdentities(t *testing.T) {
+	dir, err := os.MkdirTemp("", "supi-two-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	nodes := make(chan string, 2)
+	var locals []net.Listener
+	for _, name := range []string{"legacy", "bound"} {
+		l, e := ListenAgent(filepath.Join(dir, name), uint32(os.Geteuid()), name)
+		if e != nil {
+			t.Fatal(e)
+		}
+		locals = append(locals, l)
+		defer l.Close()
+	}
+	web, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer web.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- serveListeners(ctx, web, locals, http.NotFoundHandler(), agentapi.New(&identityStore{nodes: nodes}, time.Minute))
+	}()
+	for _, name := range []string{"legacy", "bound"} {
+		tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, name))
+		}}
+		client := &http.Client{Transport: tr, Timeout: time.Second}
+		r, _ := http.NewRequest("POST", "http://controller/agent/v1/rotate", strings.NewReader(`{"generation":"g1"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Node-ID", "forged")
+		response, e := client.Do(r)
+		if e != nil {
+			t.Fatal("private request failed")
+		}
+		response.Body.Close()
+		tr.CloseIdleConnections()
+		if response.StatusCode != 204 {
+			t.Fatal("private request refused")
+		}
+		select {
+		case got := <-nodes:
+			if got != name {
+				t.Fatal("node identity crossed listeners")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("missing actor")
+		}
+	}
+	cancel()
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(7 * time.Second):
+		t.Fatal("shutdown blocked")
+	}
+}
+
+func (s *identityStore) Heartbeat(_ context.Context, a postgres.Agent) error {
+	s.nodes <- a.NodeID
+	return nil
+}
 
 func (s *identityStore) RotateNode(_ context.Context, node, prev, next string) error {
 	s.nodes <- node

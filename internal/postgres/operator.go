@@ -19,6 +19,9 @@ import (
 // OperatorRequest is accepted only by a deployment-authenticated operator
 // transport, never by the public SAML or node API.
 type OperatorRequest struct {
+    AfterID string `json:"after_id,omitempty"`
+    Limit int `json:"limit,omitempty"`
+    ProfileID string `json:"profile_id,omitempty"`
     Action string `json:"action"`
     NodeID string `json:"node_id"`
     ExpectedGeneration string `json:"expected_generation,omitempty"`
@@ -47,6 +50,9 @@ type MaintenanceState struct {
     Expired bool `json:"expired"`
 }
 type OperatorState struct {
+    Profiles []ProfileState `json:"profiles,omitempty"`
+    NextCursor string `json:"next_cursor,omitempty"`
+    Profile *ProfileState `json:"profile,omitempty"`
     SchemaVersion int `json:"schema_version"`
     NodeID string `json:"node_id"`
     Exists bool `json:"exists"`
@@ -60,7 +66,8 @@ type OperatorState struct {
 }
 
 func validOperator(q OperatorRequest) bool {
-    if !validName(q.NodeID){return false}
+    if q.AfterID!="" || q.Limit!=0 {return false}
+    if q.ProfileID!="" || !validName(q.NodeID){return false}
     switch q.Action {
     case "status":
         return q.ExpectedGeneration=="" && q.RecoveryID=="" && q.ExpectedRevision==0 &&
@@ -112,6 +119,7 @@ func operatorState(ctx context.Context,db operatorQuery,node string)(OperatorSta
 
 func(s *Store) Operate(ctx context.Context,q OperatorRequest)(OperatorState,error) {
     var empty OperatorState
+    if q.ProfileID!="" {return s.operateProfile(ctx,q)}
     if s==nil || s.pool==nil || s.fencer==nil || !validOperator(q){return empty,ErrConflict}
     ctx,cancel:=context.WithTimeout(ctx,8*time.Second);defer cancel()
     before,err:=operatorState(ctx,s.pool,q.NodeID)

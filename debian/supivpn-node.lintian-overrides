@@ -2,3 +2,5 @@
 # Dependency vulnerability checks and upgrades must rebuild these executables.
 supivpn-node: statically-linked-binary [usr/sbin/supivpn]
 supivpn-node: statically-linked-binary [usr/sbin/supivpn-profile]
+# Read-only instance enumeration; all lifecycle changes use deb-systemd-invoke.
+supivpn-node: maintainer-script-calls-systemctl [prerm:10]
