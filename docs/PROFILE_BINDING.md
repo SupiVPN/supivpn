@@ -3,8 +3,8 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
-**Unreleased.** These options require the updated binaries and schema 11;
-v0.7.1 packages do not provide them. OpenVPN itself remains unmodified.
+**Available from v0.8.0.** These options require v0.8.0 or later binaries and
+schema 11; v0.7.1 packages do not provide them. OpenVPN itself remains unmodified.
 
 ## What is bound
 

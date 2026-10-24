@@ -239,11 +239,11 @@ committed DDL or restore an older database snapshot that could revive stale gran
 or fencing generations. An incompatible change needs explicit maintenance and a
 reviewed recovery procedure.
 
-The development VM runtime supports schemas 7/8/9/10/11 for legacy authorization;
+The v0.8.0 VM runtime supports schemas 7/8/9/10/11 for legacy authorization;
 isolated Lambda components and opt-in profile features require 11.
 Previously applied SQL migration files remain unchanged.
 
-### Schema 10 to 11 (unreleased)
+### Schema 10 to 11 (v0.8.0)
 
 Migration 011 adds issued-profile ownership/state, login bindings and bounded
 one-use import grants. Existing logins, decisions and replay state are retained;

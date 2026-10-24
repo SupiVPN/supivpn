@@ -3,8 +3,8 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for licensing terms.
 
-**Unreleased:** `supivpn-cli` is a separate Debian package for the next minor
-series (0.8). The `supivpn` metapackage installs it with exactly matching node
+**Available from v0.8.0:** `supivpn-cli` is a separate Debian package.
+The `supivpn` metapackage installs it with exactly matching node
 and controller versions. Existing 0.6/0.7 release assets remain unchanged.
 
 The first version supports a **combined Debian host** with the node, upstream

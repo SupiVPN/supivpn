@@ -16,7 +16,7 @@ combined process; it does not provide this process/IAM isolation.
 All ZIPs contain a `bootstrap` executable. Only the public ZIP contains
 `client.ovpn.template`. Corresponding standalone binaries are `bin/bootstrap`,
 `bin/bootstrap-agent` and `bin/bootstrap-recovery`. The release bundle is format
-**3**. All three Lambdas require database schema **11** (unreleased; v0.7.1 uses 10), as declared by
+**3**. All three Lambdas in v0.8.0 require database schema **11** (v0.7.1 uses 10), as declared by
 `release.json.lambda_components.<component>.required_schema`.
 
 ## Invocation and IAM

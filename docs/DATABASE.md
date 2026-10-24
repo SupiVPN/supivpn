@@ -63,7 +63,7 @@ See [reconnect, TLS, and timeouts](POSTGRES.md#connections-and-migrations).
 3. Wait for successful migration completion before starting/updating the controller.
 4. Verify readiness and SAML scenarios.
 
-This is the order for a fresh deployment. The unreleased profile-binding runtime
+This is the order for a fresh deployment. The v0.8.0 profile-binding runtime
 requires schema 11 for isolated Lambdas (v0.7.1 uses schema 10), and
 a controlled cutover from the combined function; follow [upgrade and rollback](LAMBDA_ISOLATION.md#upgrade-and-rollback).
 Migration is transactional; after commit, roll back only to a compatible runtime,

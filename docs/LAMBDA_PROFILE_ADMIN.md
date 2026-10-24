@@ -3,7 +3,7 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for licensing terms.
 
-**Unreleased profile-binding feature, schema 11.** The local
+**Available from v0.8.0; requires schema 11.** The local
 [`supivpn-cli`](CLI.md) requires a combined Debian node/controller host. It
 cannot administer Lambda or a split deployment. The existing restricted recovery
 operator invocation can handle profile status/block/activate if you have already
