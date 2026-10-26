@@ -31,7 +31,7 @@ func TestProfileOperatorInventory(t *testing.T) {
 	for _, suffix := range []string{"1", "2", "3"} {
 		p, _ := profile.NewCredential()
 		p.ID = "svp1_" + strings.Repeat("0", 31) + suffix
-		if s.CreateProfile(ctx, p, owner) != nil {
+		if s.CreateProfile(ctx, p, profile.Owner{SubjectHash: owner, Username: "inventory-user"}) != nil {
 			t.Fatal("fixture issue")
 		}
 	}
@@ -40,13 +40,18 @@ func TestProfileOperatorInventory(t *testing.T) {
 	if err != nil || len(first.Profiles) != 2 || first.NextCursor != first.Profiles[1].ID {
 		t.Fatal("first inventory page")
 	}
+	for _, p := range first.Profiles {
+		if p.OwnerUsername != "inventory-user" {
+			t.Fatal("inventory lost the verified owner label")
+		}
+	}
 	q.AfterID = first.NextCursor
 	last, err := s.ListProfiles(ctx, q)
 	if err != nil || len(last.Profiles) != 1 || last.NextCursor != "" || last.Profiles[0].ID <= q.AfterID {
 		t.Fatal("cursor page")
 	}
 	b, _ := json.Marshal(first)
-	for _, field := range []string{"subject_hash", "secret_hash", "username"} {
+	for _, field := range []string{"subject_hash", "secret_hash"} {
 		if strings.Contains(string(b), field) {
 			t.Fatal("inventory disclosed private field")
 		}
@@ -89,7 +94,7 @@ func TestProfileLimitedDatabaseOperator(t *testing.T) {
 	if _, err := admin.Exec(ctx, `CREATE ROLE supivpn_profile_operator_test LOGIN;
  GRANT CONNECT ON DATABASE supivpn_test TO supivpn_profile_operator_test;
  GRANT USAGE ON SCHEMA supivpn TO supivpn_profile_operator_test;
- GRANT SELECT(profile_id,state,revision,created_at),UPDATE(state,revision)
+ GRANT SELECT(profile_id,state,revision,created_at,owner_username),UPDATE(state,revision)
  ON supivpn.issued_profiles TO supivpn_profile_operator_test`); err != nil {
 		t.Fatal("operator fixture grants failed")
 	}
@@ -109,7 +114,7 @@ func TestProfileLimitedDatabaseOperator(t *testing.T) {
 	}
 	defer limited.Close()
 	proof, err := profile.NewCredential()
-	if err != nil || postgres.New(admin).CreateProfile(ctx, proof, sha256.Sum256([]byte("sql-operator-owner"))) != nil {
+	if err != nil || postgres.New(admin).CreateProfile(ctx, proof, profile.Owner{SubjectHash: sha256.Sum256([]byte("sql-operator-owner"))}) != nil {
 		t.Fatal("operator profile fixture failed")
 	}
 	s := postgres.New(limited)

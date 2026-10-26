@@ -9,12 +9,13 @@ import (
 	"net/http"
 	"strings"
 	"supivpn/internal/logging"
+	"supivpn/internal/profile"
 )
 
 // ProfileImports stores only one-use handoffs across controller replicas.
 type ProfileImports interface {
-	CreateImport(context.Context, string, [32]byte) error
-	ConsumeImport(context.Context, string) ([32]byte, error)
+	CreateImport(context.Context, string, profile.Owner) error
+	ConsumeImport(context.Context, string) (profile.Owner, error)
 }
 
 func (a *Controller) discoverProfile(w http.ResponseWriter, r *http.Request) {
@@ -54,13 +55,13 @@ func (a *Controller) connectProfile(w http.ResponseWriter, r *http.Request) {
 	a.startLogin(w, r, "profile_url_"+ticket, a.downloads.Backend)
 }
 
-func (a *Controller) handoffProfile(w http.ResponseWriter, r *http.Request, subject [32]byte) {
+func (a *Controller) handoffProfile(w http.ResponseWriter, r *http.Request, owner profile.Owner) {
 	if a.downloads.Imports == nil {
 		browserMessage(w, r, "Import unavailable", 503)
 		return
 	}
 	token, err := randomToken()
-	if err != nil || a.downloads.Imports.CreateImport(r.Context(), token, subject) != nil {
+	if err != nil || a.downloads.Imports.CreateImport(r.Context(), token, owner) != nil {
 		browserMessage(w, r, "Import unavailable. Sign in again.", 503)
 		return
 	}
@@ -91,11 +92,11 @@ func (a *Controller) importProfile(w http.ResponseWriter, r *http.Request) {
 	a.issueProfile(w, r, subject)
 }
 
-func (a *Controller) issueProfile(w http.ResponseWriter, r *http.Request, subject [32]byte) {
+func (a *Controller) issueProfile(w http.ResponseWriter, r *http.Request, owner profile.Owner) {
 	var data []byte
 	var err error
 	if a.downloads.IssueForSubject != nil {
-		data, err = a.downloads.IssueForSubject(r.Context(), subject)
+		data, err = a.downloads.IssueForSubject(r.Context(), owner)
 	} else {
 		data, err = a.downloads.Issue(r.Context())
 	}

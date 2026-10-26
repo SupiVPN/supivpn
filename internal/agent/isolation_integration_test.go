@@ -178,14 +178,14 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 			t.Fatal(e)
 		}
 		owner := sha256.Sum256([]byte("profile-owner"))
-		if e = pub.CreateProfile(ctx, proof, owner); e != nil {
+		if e = pub.CreateProfile(ctx, proof, profile.Owner{SubjectHash: owner}); e != nil {
 			t.Fatal("public issuance", e)
 		}
 		importToken := strings.Repeat("u", 43)
-		if e = pub.CreateImport(ctx, importToken, owner); e != nil {
+		if e = pub.CreateImport(ctx, importToken, profile.Owner{SubjectHash: owner, Username: "import-owner"}); e != nil {
 			t.Fatal("restricted import creation", e)
 		}
-		if got, e := pub.ConsumeImport(ctx, importToken); e != nil || got != owner {
+		if got, e := pub.ConsumeImport(ctx, importToken); e != nil || (got.SubjectHash != owner || got.Username != "import-owner") {
 			t.Fatal("restricted single-use import consumption", e)
 		}
 		if _, e = pub.ConsumeImport(ctx, importToken); !errors.Is(e, controller.ErrLoginExpired) {
@@ -194,6 +194,10 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 		denied(public, "UPDATE supivpn.profile_imports SET expires_at=clock_timestamp()+interval '1 day'")
 		denied(agent, "SELECT secret_hash FROM supivpn.issued_profiles")
 		denied(public, "UPDATE supivpn.issued_profiles SET state='blocked'")
+		denied(public, "UPDATE supivpn.issued_profiles SET subject_hash=decode(repeat('00',32),'hex')")
+		denied(public, "UPDATE supivpn.issued_profiles SET secret_hash=decode(repeat('00',32),'hex')")
+		denied(agent, "SELECT owner_username FROM supivpn.issued_profiles")
+		denied(recovery, "UPDATE supivpn.issued_profiles SET owner_username='forged'")
 		denied(recovery, "UPDATE supivpn.issued_profiles SET subject_hash=decode(repeat('00',32),'hex')")
 		digest, _ := proof.Digest()
 		var valid bool
@@ -222,7 +226,11 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 			t.Fatal("heartbeat", err)
 		}
 	}
-	if err := ag.Register(ctx, actor, conn, ticket, time.Minute); err != nil {
+	bound, err := profile.NewCredential()
+	if err != nil || pub.CreateProfile(ctx, bound, profile.Owner{SubjectHash: sha256.Sum256([]byte("alice"))}) != nil {
+		t.Fatal("pre-upgrade bound profile fixture")
+	}
+	if err := ag.RegisterProfile(ctx, actor, conn, ticket, time.Minute, bound); err != nil {
 		t.Fatal("register", err)
 	}
 	if err := pub.Start(ctx, ticket, "request", browser); err != nil {
@@ -236,6 +244,9 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 	d := controller.Authorization{Username: "alice", SubjectHash: sha256.Sum256([]byte("alice")), MaxConnections: 1, AssertionHash: sha256.Sum256([]byte("assertion")), GroupName: "admins-vpn", AssertionExpiresAt: now.Add(time.Minute), NotBefore: now.Add(-time.Minute), NotOnOrAfter: now.Add(time.Minute), SessionExpiresAt: now.Add(time.Hour)}
 	if err := pub.Complete(ctx, pending, d); !errors.Is(err, controller.ErrDecisionPending) {
 		t.Fatal("complete", err)
+	}
+	if p, err := pub.ProfileState(ctx, bound.ID); err != nil || p.OwnerUsername != "alice" || p.State != "active" || p.Revision != 1 {
+		t.Fatal("isolated public role failed to recover only the owner label", err)
 	}
 	decision, err := ag.Fetch(ctx, actor, conn)
 	if err != nil || decision.Username != "alice" {

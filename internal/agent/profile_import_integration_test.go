@@ -122,9 +122,12 @@ func TestServerURLSAMLProfileImport(t *testing.T) {
 		t.Fatal("invalid proof")
 	}
 	var stored []byte
-	var state string
-	if err = pool.QueryRow(ctx, "SELECT secret_hash,state FROM supivpn.issued_profiles WHERE profile_id=$1", proof.ID).Scan(&stored, &state); err != nil || state != "active" {
+	var state, ownerUsername string
+	if err = pool.QueryRow(ctx, "SELECT secret_hash,state,owner_username FROM supivpn.issued_profiles WHERE profile_id=$1", proof.ID).Scan(&stored, &state, &ownerUsername); err != nil || state != "active" || ownerUsername != assertion.Subject.NameID.Value {
 		t.Fatal("profile not persisted")
+	}
+	if strings.Contains(w.Body.String(), ownerUsername) {
+		t.Fatal("owner label leaked into the client profile")
 	}
 	digest, _ := proof.Digest()
 	if !bytes.Equal(stored, digest[:]) {
@@ -134,5 +137,31 @@ func TestServerURLSAMLProfileImport(t *testing.T) {
 	second.ServeHTTP(w, httptest.NewRequest("GET", match[1], nil))
 	if w.Code != 410 || loads != 1 {
 		t.Fatal("handoff replayed across replicas")
+	}
+
+	// The ordinary browser download must carry the same verified owner metadata,
+	// without depending on a Connect handoff or a prior VPN session.
+	w = httptest.NewRecorder()
+	first.ServeHTTP(w, httptest.NewRequest("GET", fixture.origin.String()+"/profile?username=forged", nil))
+	if w.Code != 302 || len(w.Result().Cookies()) != 1 {
+		t.Fatal("direct download login")
+	}
+	target, _ = url.Parse(w.Header().Get("Location"))
+	cookie = w.Result().Cookies()[0]
+	pending, err = postgres.NewProfileBackend(replica, time.Minute).Lookup(ctx, target.Query().Get("RelayState"), sha256.Sum256([]byte(cookie.Value)))
+	if err != nil {
+		t.Fatal("direct download pending")
+	}
+	assertion.ID = "file-" + pending.RequestID
+	assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo = pending.RequestID
+	body = profileSAMLBody(t, fixture, signer, pending, assertion, true)
+	w = submit(cookie)
+	credential = regexp.MustCompile(`<auth-user-pass>\n([^\n]+)\n([^\n]+)\n</auth-user-pass>`).FindStringSubmatch(w.Body.String())
+	if w.Code != 200 || len(credential) != 3 || loads != 2 {
+		t.Fatal("direct bound download failed")
+	}
+	p, err := s.ProfileState(ctx, credential[1])
+	if err != nil || p.OwnerUsername != assertion.Subject.NameID.Value || strings.Contains(w.Body.String(), p.OwnerUsername) {
+		t.Fatal("direct download owner metadata lost or disclosed")
 	}
 }

@@ -20,7 +20,7 @@ import (
 // BoundDownloadIssuer creates the proof only after the controller has verified
 // SAML, and persists ownership before returning a profile. Failed persistence
 // never produces a usable download.
-func BoundDownloadIssuer(template []byte, endpoint string, port uint16, load func(context.Context) ([]byte, error), save func(context.Context, Credential, [32]byte) error) (func(context.Context, [32]byte) ([]byte, error), error) {
+func BoundDownloadIssuer(template []byte, endpoint string, port uint16, load func(context.Context) ([]byte, error), save func(context.Context, Credential, Owner) error) (func(context.Context, Owner) ([]byte, error), error) {
 	if save == nil || port == 0 {
 		return nil, errors.New("invalid bound profile configuration")
 	}
@@ -36,8 +36,8 @@ func BoundDownloadIssuer(template []byte, endpoint string, port uint16, load fun
 	// A profile now contains a bearer proof. Validate the VPN server identity
 	// before sending it, in addition to the template's CA/purpose validation.
 	configured = append(configured, []byte("\nverify-x509-name "+endpoint+" name\n")...)
-	return func(ctx context.Context, subject [32]byte) ([]byte, error) {
-		if ctx.Err() != nil || subject == [32]byte{} {
+	return func(ctx context.Context, owner Owner) ([]byte, error) {
+		if ctx.Err() != nil || !owner.Valid() {
 			return nil, errors.New("profile authorization unavailable")
 		}
 		credential, err := NewCredential()
@@ -58,7 +58,7 @@ func BoundDownloadIssuer(template []byte, endpoint string, port uint16, load fun
 		if err != nil {
 			return nil, err
 		}
-		if err = save(ctx, credential, subject); err != nil {
+		if err = save(ctx, credential, owner); err != nil {
 			clear(data)
 			return nil, errors.New("profile ownership unavailable")
 		}

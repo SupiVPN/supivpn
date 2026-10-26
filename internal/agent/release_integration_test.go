@@ -26,7 +26,7 @@ func removeProfileSchema(t *testing.T, p *pgxpool.Pool) {
 	t.Helper()
 	_, err := p.Exec(context.Background(), `DROP TABLE IF EXISTS supivpn.profile_bindings,supivpn.issued_profiles,supivpn.profile_imports;
  DROP FUNCTION IF EXISTS supivpn.profile_proof_valid(text,bytea),supivpn.profile_is_active(text),supivpn.profile_owner_active(text,bytea);
- DELETE FROM public.supivpn_schema_migrations WHERE version=11`)
+ DELETE FROM public.supivpn_schema_migrations WHERE version>=11`)
 	if err != nil {
 		t.Fatal("cannot restore disposable pre-profile schema")
 	}
@@ -77,11 +77,11 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 			t.Error("cannot restore test schema", err)
 		}
 	})
-	for _, version := range []int{7, 8, 9, 10, 11} {
+	for _, version := range []int{7, 8, 9, 10, 11, 12} {
 		if !s.Ready(ctx) {
 			t.Fatalf("schema %d rejected by bridge", version)
 		}
-		if s.ProfileSchemaReady(ctx) != (version == 11) {
+		if s.ProfileSchemaReady(ctx) != (version == 12) {
 			t.Fatal("profile feature schema gate mismatch")
 		}
 		actor := postgres.Agent{NodeID: fmt.Sprintf("bridge-%d", version), Generation: "generation-a"}
@@ -206,16 +206,36 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 			if err != nil || old != decision {
 				t.Fatal("profile migration changed an existing authorization")
 			}
+			removeProfileOwnerSchema(t, p)
+		}
+		if version == 11 {
+			if err := postgres.Migrate(ctx, p); err != nil {
+				t.Fatal("profile owner migration failed", err)
+			}
+			old, err := s.Fetch(ctx, actor, conn)
+			if err != nil || old != decision {
+				t.Fatal("owner metadata migration changed authorization")
+			}
 		}
 	}
-	if _, err := p.Exec(ctx, "INSERT INTO public.supivpn_schema_migrations(version,checksum) VALUES(12,''::bytea)"); err != nil {
+	if _, err := p.Exec(ctx, "INSERT INTO public.supivpn_schema_migrations(version,checksum) VALUES(13,''::bytea)"); err != nil {
 		t.Fatal("cannot prepare future schema")
 	}
 	ready := s.Ready(ctx)
-	if _, err := p.Exec(ctx, "DELETE FROM public.supivpn_schema_migrations WHERE version=12"); err != nil {
+	if _, err := p.Exec(ctx, "DELETE FROM public.supivpn_schema_migrations WHERE version=13"); err != nil {
 		t.Fatal("cannot remove future schema fixture")
 	}
 	if ready {
 		t.Fatal("unreviewed future schema accepted")
+	}
+}
+
+func removeProfileOwnerSchema(t *testing.T, p *pgxpool.Pool) {
+	t.Helper()
+	_, err := p.Exec(context.Background(), `ALTER TABLE supivpn.issued_profiles DROP COLUMN owner_username;
+        ALTER TABLE supivpn.profile_imports DROP COLUMN owner_username;
+        DELETE FROM public.supivpn_schema_migrations WHERE version=12`)
+	if err != nil {
+		t.Fatal("cannot restore disposable schema 11")
 	}
 }

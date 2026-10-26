@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strings"
 	"supivpn/internal/logging"
+	"supivpn/internal/profile"
 	"time"
 
 	"supivpn/internal/saml"
@@ -48,7 +49,7 @@ type ProfileDownloads struct {
 	Backend         Backend
 	Imports         ProfileImports
 	Issue           func(context.Context) ([]byte, error)
-	IssueForSubject func(context.Context, [32]byte) ([]byte, error)
+	IssueForSubject func(context.Context, profile.Owner) ([]byte, error)
 }
 
 func New(c Config, origin *url.URL, sp *saml.ServiceProvider, backend Backend, now func() time.Time, downloads ...ProfileDownloads) (*Controller, error) {
@@ -314,10 +315,11 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isProfile {
+		owner := profile.Owner{SubjectHash: decision.SubjectHash, Username: decision.Username}
 		if strings.HasPrefix(ticket, "profile_url_") {
-			a.handoffProfile(w, r, decision.SubjectHash)
+			a.handoffProfile(w, r, owner)
 		} else {
-			a.issueProfile(w, r, decision.SubjectHash)
+			a.issueProfile(w, r, owner)
 		}
 		return
 	}

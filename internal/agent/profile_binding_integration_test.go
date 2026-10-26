@@ -28,7 +28,7 @@ func TestProfileOperatorLifecycle(t *testing.T) {
 	ctx := context.Background()
 	s := postgres.New(pool)
 	proof, _ := profile.NewCredential()
-	if err := s.CreateProfile(ctx, proof, sha256.Sum256([]byte("operator-test-owner"))); err != nil {
+	if err := s.CreateProfile(ctx, proof, profile.Owner{SubjectHash: sha256.Sum256([]byte("operator-test-owner"))}); err != nil {
 		t.Fatal("issue", err)
 	}
 	request := func(action string, revision int64) (postgres.OperatorState, error) {
@@ -74,7 +74,7 @@ func TestRequiredProfileRemoteSAMLAdmission(t *testing.T) {
 			proof, _ := profile.NewCredential()
 			assertion := assertionFor(f.app)
 			owner := sha256.Sum256([]byte(assertion.Issuer.Value + "\x00profile-owner"))
-			if err := f.stores[0].CreateProfile(context.Background(), proof, owner); err != nil {
+			if err := f.stores[0].CreateProfile(context.Background(), proof, profile.Owner{SubjectHash: owner}); err != nil {
 				t.Fatal("issue", err)
 			}
 			if scenario == "blocked-before-SAML" || scenario == "missing-proof" {
@@ -151,7 +151,7 @@ func TestProfileBindingAdmission(t *testing.T) {
 		t.Fatal("combined VM fixture unexpectedly has isolated function privileges")
 	}
 	s := postgres.New(runtime)
-	for _, scenario := range []string{"owner", "wrong-owner", "bad-secret", "unknown-profile", "blocked-register", "blocked-complete", "blocked-fetch", "blocked-ack", "legacy", "downgrade", "upgrade"} {
+	for _, scenario := range []string{"owner", "wrong-owner", "bad-secret", "unknown-profile", "blocked-register", "blocked-complete", "blocked-fetch", "blocked-ack", "legacy", "downgrade", "upgrade", "label-lock-contention", "existing-label"} {
 		t.Run(scenario, func(t *testing.T) {
 			if _, err := pool.Exec(ctx, "TRUNCATE supivpn.nodes,supivpn.assertions,supivpn.issued_profiles CASCADE"); err != nil {
 				t.Fatal("reset")
@@ -166,7 +166,11 @@ func TestProfileBindingAdmission(t *testing.T) {
 				t.Fatal(err)
 			}
 			owner := sha256.Sum256([]byte("verified issuer and subject"))
-			if err = s.CreateProfile(ctx, proof, owner); err != nil {
+			label := ""
+			if scenario == "existing-label" {
+				label = "original-owner-label"
+			}
+			if err = s.CreateProfile(ctx, proof, profile.Owner{SubjectHash: owner, Username: label}); err != nil {
 				t.Fatal("issue", err)
 			}
 			block := func() {
@@ -229,7 +233,33 @@ func TestProfileBindingAdmission(t *testing.T) {
 			if scenario == "blocked-complete" {
 				block()
 			}
-			err = s.Complete(ctx, pending, d)
+			if scenario == "label-lock-contention" {
+				tx, e := pool.Begin(ctx)
+				if e != nil {
+					t.Fatal("metadata contention fixture")
+				}
+				defer tx.Rollback(ctx)
+				if _, e = tx.Exec(ctx, "SELECT profile_id FROM supivpn.issued_profiles WHERE profile_id=$1 FOR SHARE", proof.ID); e != nil {
+					t.Fatal("metadata contention lock")
+				}
+			}
+			completeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			err = s.Complete(completeCtx, pending, d)
+			p, lookupErr := s.ProfileState(ctx, proof.ID)
+			if lookupErr != nil {
+				t.Fatal("profile label lookup failed")
+			}
+			wantOwner := "verified-user"
+			if scenario == "wrong-owner" || scenario == "blocked-complete" || scenario == "legacy" || scenario == "label-lock-contention" {
+				wantOwner = ""
+			}
+			if scenario == "existing-label" {
+				wantOwner = label
+			}
+			if p.OwnerUsername != wantOwner {
+				t.Fatal("existing profile label did not follow verified owner admission")
+			}
 			if scenario == "wrong-owner" || scenario == "blocked-complete" {
 				if !errors.Is(err, controller.ErrGroupDenied) {
 					t.Fatal("owner check did not deny", err)
@@ -282,13 +312,16 @@ func TestProfileImportSingleUseAndExpiry(t *testing.T) {
 	}
 	token := strings.Repeat("a", 43)
 	owner := sha256.Sum256([]byte("owner"))
-	if e := s.CreateImport(ctx, token, owner); e != nil {
+	if e := s.CreateImport(ctx, token, profile.Owner{SubjectHash: owner, Username: "import-owner"}); e != nil {
 		t.Fatal(e)
 	}
 	var wg sync.WaitGroup
 	results := make(chan bool, 8)
 	for range 8 {
-		wg.Go(func() { got, e := s.ConsumeImport(ctx, token); results <- e == nil && got == owner })
+		wg.Go(func() {
+			got, e := s.ConsumeImport(ctx, token)
+			results <- e == nil && (got.SubjectHash == owner && got.Username == "import-owner")
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -301,7 +334,7 @@ func TestProfileImportSingleUseAndExpiry(t *testing.T) {
 	if count != 1 {
 		t.Fatal("handoff was not atomic")
 	}
-	if e := s.CreateImport(ctx, token, owner); e != nil {
+	if e := s.CreateImport(ctx, token, profile.Owner{SubjectHash: owner, Username: "import-owner"}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := pool.Exec(ctx, "UPDATE supivpn.profile_imports SET expires_at=clock_timestamp()-interval '1 second'"); e != nil {
@@ -321,7 +354,7 @@ func TestProfileImportExpiryAfterRowLock(t *testing.T) {
 	s := postgres.New(pool)
 	token := strings.Repeat("l", 43)
 	owner := sha256.Sum256([]byte("locked-import-owner"))
-	if s.CreateImport(ctx, token, owner) != nil {
+	if s.CreateImport(ctx, token, profile.Owner{SubjectHash: owner, Username: "import-owner"}) != nil {
 		t.Fatal("import fixture unavailable")
 	}
 	hash := sha256.Sum256([]byte(token))
