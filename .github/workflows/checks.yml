@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 2
     outputs:
       code: ${{ steps.scope.outputs.code }}
+      base: ${{ steps.scope.outputs.base }}
+      head: ${{ steps.scope.outputs.head }}
       tag_oid: ${{ steps.tag.outputs.tag_oid }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,9 +41,13 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+          PUSH_FORCED: ${{ toJSON(github.event.forced) }}
         run: python3 -B ci/github_scope.py
 
   audit:
+    needs: scope
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     steps:
@@ -49,8 +55,22 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml gnupg reprepro
-      - run: make audit
+      - name: Install executable audit dependencies
+        if: needs.scope.outputs.code == 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml gnupg reprepro
+      - name: Full source and tooling audit
+        if: needs.scope.outputs.code == 'true'
+        run: make audit
+      - name: Lightweight documentation checks
+        if: needs.scope.outputs.code == 'false'
+        env:
+          DOCS_BASE: ${{ needs.scope.outputs.base }}
+          DOCS_HEAD: ${{ needs.scope.outputs.head }}
+        run: |
+          python3 -B tools/check_docs.py --base "$DOCS_BASE" --head "$DOCS_HEAD"
+          python3 -B tools/release_notes.py --audit
+          python3 -B tools/repository_audit.py
+          python3 -B tools/check_language.py
 
   tests:
     needs: scope

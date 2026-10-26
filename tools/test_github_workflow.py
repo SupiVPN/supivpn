@@ -99,6 +99,67 @@ class WorkflowTests(unittest.TestCase):
         service = config["jobs"]["tests"]["services"]["postgres"]
         self.assertEqual(service["ports"], ["127.0.0.1:55432:5432"])
 
+    def test_documentation_scope_has_complete_push_ids_and_light_audit(self):
+        jobs = self.workflow("checks.yml")["jobs"]
+        step = next(step for step in jobs["scope"]["steps"] if step.get("id") == "scope")
+        self.assertEqual(step["env"]["BEFORE_SHA"], "${{ github.event.before }}")
+        self.assertEqual(step["env"]["AFTER_SHA"], "${{ github.event.after }}")
+        self.assertEqual(step["env"]["PUSH_FORCED"], "${{ toJSON(github.event.forced) }}")
+        for name in ("base", "head"):
+            self.assertEqual(jobs["scope"]["outputs"][name], "${{ steps.scope.outputs." + name + " }}")
+        for step in jobs["audit"]["steps"]:
+            if "run" not in step:
+                continue
+            if "check_docs.py" in step["run"]:
+                self.assertEqual(step["if"], "needs.scope.outputs.code == 'false'")
+                self.assertNotIn("make audit", step["run"])
+                self.assertNotIn("apt-get", step["run"])
+                for script in ("repository_audit.py", "check_language.py", "release_notes.py"):
+                    self.assertIn(script, step["run"])
+            else:
+                self.assertEqual(step["if"], "needs.scope.outputs.code == 'true'")
+
+    def test_codeql_retains_languages_queries_and_reports_intentional_skips(self):
+        config = self.workflow("codeql.yml")
+        self.assertEqual(set(config["on"]), {"push", "pull_request", "schedule", "workflow_dispatch"})
+        self.assertEqual(config["on"]["push"], {"branches": ["main"], "tags": ["v*"]})
+        self.assertEqual(config["permissions"], {"contents": "read"})
+        jobs = config["jobs"]
+        step = next(step for step in jobs["scope"]["steps"] if step.get("id") == "scope")
+        original = next(step for step in self.workflow("checks.yml")["jobs"]["scope"]["steps"]
+                        if step.get("id") == "scope")
+        self.assertEqual(step, original)
+        analysis = jobs["analyze"]
+        self.assertEqual(analysis["needs"], "scope")
+        self.assertEqual(analysis["if"], "needs.scope.outputs.code == 'true'")
+        self.assertEqual(analysis["permissions"], {"contents": "read", "security-events": "write"})
+        languages = analysis["strategy"]["matrix"]["include"]
+        self.assertEqual({row["language"] for row in languages},
+                         {"actions", "go", "javascript-typescript", "python"})
+        for row in languages:
+            self.assertEqual(row["build-mode"], "autobuild" if row["language"] == "go" else "none")
+        init = next(step for step in analysis["steps"] if "codeql-action/init@" in step.get("uses", ""))
+        self.assertEqual(init["with"]["queries"], "security-extended")
+        analyze = analysis["steps"][-1]
+        self.assertEqual(analyze["with"]["category"], "/language:${{ matrix.language }}")
+        self.assertEqual(analyze["with"]["upload-database"], "false")
+        self.assertNotIn("secrets.", str(jobs))
+        gate = jobs["required"]
+        self.assertEqual(gate["needs"], ["scope", "analyze"])
+        self.assertEqual(gate["if"], "always()")
+        program = gate["steps"][0]["run"].split("\n", 1)[1].rsplit("PY\n", 1)[0]
+        for code in ("true", "false", "", None):
+            for scope_result in ("success", "failure", "cancelled", "skipped"):
+                for result in ("success", "failure", "cancelled", "skipped"):
+                    needs = {"scope": {"result": scope_result, "outputs": {"code": code}},
+                             "analyze": {"result": result}}
+                    actual = subprocess.run([sys.executable, "-c", program],
+                                            env=dict(os.environ, RESULTS=json.dumps(needs)),
+                                            capture_output=True, timeout=5).returncode == 0
+                    expected = scope_result == "success" and (
+                        (code == "true" and result == "success") or (code == "false" and result == "skipped"))
+                    self.assertEqual(actual, expected, (code, scope_result, result))
+
     def test_only_tag_builds_upload_candidates_without_signing_credentials(self):
         jobs = self.workflow("checks.yml")["jobs"]
         authentication = next(step for step in jobs["scope"]["steps"] if step.get("id") == "tag")
@@ -176,7 +237,7 @@ class WorkflowTests(unittest.TestCase):
         jobs = self.workflow("checks.yml")["jobs"]
         executable = {"tests", "security", "fuzz", "build", "openvpn", "debian"}
         self.assertNotIn("needs", jobs["scope"])
-        self.assertNotIn("needs", jobs["audit"])
+        self.assertEqual(jobs["audit"]["needs"], "scope")
         for name in executable:
             self.assertEqual(jobs[name]["needs"], "scope")
             self.assertEqual(jobs[name]["if"], "needs.scope.outputs.code == 'true'")
@@ -251,7 +312,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn("secrets.", str(job))
 
     def test_actions_are_pinned_and_checkouts_do_not_retain_tokens(self):
-        for name in ("checks.yml", "release.yml"):
+        for name in ("checks.yml", "release.yml", "codeql.yml"):
             config = self.workflow(name)
             for job in config["jobs"].values():
                 self.assertIn("timeout-minutes", job)
