@@ -17,7 +17,11 @@ installed SDK with `make GO=/path/to/go test` or your IDE's project SDK setting.
 
 For documentation-only changes, edit the Markdown and open a PR; there is no
 need to install Go or Docker or build the product. Check the rendered text and
-links; hosted CI runs the applicable documentation checks.
+links; hosted CI runs the applicable documentation checks on both PRs and pushes
+to `main`. Only root-level and `docs/` Markdown qualifies; copyright/notices,
+source, dependencies, packaging and CI changes keep the full checks. Release
+tags, scheduled and manual runs always run the full suite, as does an unknown
+or unavailable diff. See [CI selection and CodeQL setup](docs/CI.md).
 
 For code changes, fork the repository on GitHub and clone your fork (replace
 `YOUR-USERNAME` below):
