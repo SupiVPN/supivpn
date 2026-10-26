@@ -209,8 +209,10 @@ Contract: [docs/RECOVERY.md](RECOVERY.md).
 
 ## Upgrades and verification
 
-The development VM controller supports **schemas 7/8/9/10/11**; isolated Lambda
-components and opt-in profile features require **schema 11** (v0.7.1 uses 10).
+The v0.8.1 VM controller supports **schemas 7/8/9/10/11/12**; isolated Lambda
+components and opt-in profile features require **schema 12** (v0.8.0 uses 11).
+Migration 012 adds persistent operator-visible owner labels without changing
+profile proofs or session authorization; existing profiles need no reissue.
 Migration 011 adds the profile registry, session binding and one-use import grants;
 follow the [two-port migration](PROFILE_BINDING.md). Migration 010 rechecks heartbeat expiry after row-lock
 waits and improves cleanup queries without releasing active grants.

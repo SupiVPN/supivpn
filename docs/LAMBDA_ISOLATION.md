@@ -16,7 +16,7 @@ combined process; it does not provide this process/IAM isolation.
 All ZIPs contain a `bootstrap` executable. Only the public ZIP contains
 `client.ovpn.template`. Corresponding standalone binaries are `bin/bootstrap`,
 `bin/bootstrap-agent` and `bin/bootstrap-recovery`. The release bundle is format
-**3**. All three Lambdas in v0.8.0 require database schema **11** (v0.7.1 uses 10), as declared by
+**3**. v0.8.1 requires database schema **12** for all three Lambdas (v0.8.0 uses 11), as declared by
 `release.json.lambda_components.<component>.required_schema`.
 
 ## Invocation and IAM
@@ -126,6 +126,8 @@ Do not duplicate these same object grants in competing deployment resources.
 | VPN login mailbox | Read; authentication decision columns only | Read; registration columns and ACK/cancel state only | No direct access |
 | SAML replay ledger | Read/insert | None | Bounded expiry cleanup function |
 | Profile login state | DML | None | Bounded expiry cleanup function |
+| Issued profiles | Read/insert; UPDATE owner label only | Proof/state functions; no direct read | Read; UPDATE state/revision only |
+| Profile import grants | Read/insert/delete | None | None |
 | Recovery state, budgets, maintenance, operator receipts | None | None | DML |
 | DDL, role changes, grants | None | None | None |
 
@@ -180,8 +182,8 @@ budgets. It does not make the previous combined Lambda deployment compatible.
 Migration 010 replaces heartbeat and cleanup functions without changing their
 signatures or privileges. Heartbeat checks lease expiry after acquiring the node
 lock; cleanup uses indexable expiry cutoffs while preserving active grants.
-The isolated Lambdas require schema 11. The VM executable in this release
-supports schemas 7/8/9/10/11; `compatible_schemas` describes that bridge, not a waiver
+The isolated Lambdas require schema 12. The VM executable in this release
+supports schemas 7/8/9/10/11/12; `compatible_schemas` describes that bridge, not a waiver
 of the Lambda component requirements.
 
 For a fresh setup: provision roles/secrets/IAM -> migrate and install grants ->
@@ -195,19 +197,20 @@ If uninterrupted heartbeat cannot be guaranteed, drain/stop VPN pairs through
 the existing maintenance procedure and expect client reconnects. Do not rely on
 the active VPN connection as the only control path for that cutover.
 
-For existing schema-9 or schema-10 isolated Lambdas, quiesce all three components
-and the recovery schedule before applying all pending migrations through 011.
+For existing schema-9, schema-10 or schema-11 isolated Lambdas, quiesce all three components
+and the recovery schedule before applying all pending migrations through 012.
 Reapply restricted role grants, then deploy the matching
-schema-11 bundles and verify each boundary before resuming traffic. Use the
+schema-12 bundles and verify each boundary before resuming traffic. Use the
 existing maintenance procedure to drain/stop VPN pairs if heartbeat continuity
-cannot be maintained. Older bundles reject schema 11; a rolling mixture of
-schema-10-only and schema-11-only Lambdas is not supported.
+cannot be maintained. Older bundles reject schema 12; a rolling mixture of
+schema-11-only and schema-12-only Lambdas is not supported. Existing bound profiles
+need no reissue; see [owner-label migration](POSTGRES.md#schema-11-to-12-v081).
 
 Migration and grant installation are separate transactions. A grant failure
 must stop deployment; retry the reviewed migrator to verify the ledger and
 reinstall grants. Never down-migrate, reset slots/generations, or restore the old
 broad-privilege Lambda as an automatic rollback. Roll back only to an independently
-verified schema-11/component-compatible artifact/configuration. Retain maintenance
+verified schema-12/component-compatible artifact/configuration. Retain maintenance
 and report an unconfirmed rollback instead of widening permissions.
 
 Local checks cover distinct DB logins, forbidden SQL, the cross-role login/profile

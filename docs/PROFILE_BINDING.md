@@ -3,8 +3,9 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
-**Available from v0.8.0.** These options require v0.8.0 or later binaries and
-schema 11; v0.7.1 packages do not provide them. OpenVPN itself remains unmodified.
+**Available since v0.8.0 (schema 11).** The v0.8.1 owner-label fix requires
+schema 12. OpenVPN itself remains unmodified; existing bound profiles keep
+working without reissue. See [upgrade steps](POSTGRES.md#schema-11-to-12-v081).
 
 ## What is bound
 
@@ -12,7 +13,10 @@ A profile contains a random opaque ID and a separate 256-bit secret in an inline
 `auth-user-pass` block. Neither the SAML username nor an IdP password appears in
 that block. Issuance follows a verified, group-authorized SAML login. PostgreSQL
 stores the proof's SHA-256 digest, the verified subject hash (issuer and NameID),
-and `active`/`blocked` state. It never stores the plaintext proof.
+and `active`/`blocked` state. Schema 12 also stores `owner_username`, the verified
+SAML NameID, for privileged operator inspection. This audit label is never used
+as authorization evidence or embedded in a client profile. The database never
+stores the plaintext proof.
 
 The OpenVPN management `CONNECT` environment delivers that proof on the exact
 CID/KID. The agent registers it with its authenticated controller identity. A
@@ -93,7 +97,7 @@ ownership everywhere; blocking a new profile cannot revoke an old format key.
 
 ## VM and systemd configuration
 
-1. Back up the database, run the normal explicit migration to schema 11, and
+1. Back up the database, run the normal explicit migration to schema 12, and
    upgrade all controllers and agents together. Reapply restricted runtime grants
    for separate roles. Old binaries are not promised to accept the new schema;
    the compatibility window is for client profiles, not arbitrary binary/schema
@@ -211,7 +215,7 @@ Sources: [OpenVPN web authentication/profile protocol](https://github.com/OpenVP
 ## Inspect, block and reactivate
 
 On a combined Debian host, prefer the new [local supivpn-cli](CLI.md), included
-in the upcoming metapackage. For Lambda, see the temporary
+in the metapackage since v0.8.0. For Lambda, see the temporary
 [bounded SQL procedure and limitations](LAMBDA_PROFILE_ADMIN.md). Neither method
 turns a profile block into immediate tunnel termination or an account-wide ban.
 
@@ -234,9 +238,10 @@ Use the returned revision when mutating:
 
 `profile-activate` uses the same shape with the latest revision. A stale revision
 fails; after an ambiguous response read status before deciding whether to retry.
-Responses contain ID, state, revision and creation time, never the proof, digest
-or SAML owner hash. With separate component database roles, the public runtime
-can issue profiles but cannot change their state; agents can check proofs
+Responses contain ID, state, revision, creation time and, from v0.8.1,
+`owner_username`; never the proof, digest or SAML owner hash. Empty labels mean
+the old label has not been recovered yet. With separate component database roles, the public runtime
+can issue profiles and fill owner labels but cannot change their state; agents can check proofs
 without selecting the registry. The recovery role can update only
 state/revision, not ownership or proof digests. The combined VM controller uses
 its existing shared runtime role and table privileges; the operator entry point

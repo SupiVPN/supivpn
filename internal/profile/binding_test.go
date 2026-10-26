@@ -16,11 +16,11 @@ import (
 
 func TestBoundProfileIssuancePersistsBeforeDisclosure(t *testing.T) {
 	template := []byte("client\nremote supivpn.example.test 1194\n<tls-crypt-v2>\n" + Placeholder + "\n</tls-crypt-v2>\n")
-	owner := [32]byte{1}
+	owner := Owner{SubjectHash: [32]byte{1}, Username: "verified-owner"}
 	calls := 0
 	fail := false
 	var saved Credential
-	issue, err := BoundDownloadIssuer(template, "vpn.example.test", 1195, func(context.Context) ([]byte, error) { calls++; return testKey(serverType), nil }, func(_ context.Context, c Credential, subject [32]byte) error {
+	issue, err := BoundDownloadIssuer(template, "vpn.example.test", 1195, func(context.Context) ([]byte, error) { calls++; return testKey(serverType), nil }, func(_ context.Context, c Credential, subject Owner) error {
 		if subject != owner {
 			t.Fatal("unverified owner substituted")
 		}
@@ -33,10 +33,13 @@ func TestBoundProfileIssuancePersistsBeforeDisclosure(t *testing.T) {
 	if err != nil || calls != 0 {
 		t.Fatal("construction loaded key")
 	}
-	if _, err = issue(context.Background(), [32]byte{}); err == nil || calls != 0 {
+	if _, err = issue(context.Background(), Owner{}); err == nil || calls != 0 {
 		t.Fatal("missing owner admitted")
 	}
 	data, err := issue(context.Background(), owner)
+	if bytes.Contains(data, []byte(owner.Username)) {
+		t.Fatal("owner label leaked into the profile")
+	}
 	if err != nil || !saved.Valid() || !bytes.Contains(data, []byte("verify-x509-name vpn.example.test name")) || !bytes.Contains(data, []byte("remote vpn.example.test 1195")) || !bytes.Contains(data, []byte(saved.Secret)) || !bytes.Contains(data, []byte("push-peer-info")) {
 		t.Fatal("invalid bound profile")
 	}
@@ -44,6 +47,19 @@ func TestBoundProfileIssuancePersistsBeforeDisclosure(t *testing.T) {
 	data, err = issue(context.Background(), owner)
 	if err == nil || len(data) != 0 {
 		t.Fatal("persistence failure disclosed a profile")
+	}
+}
+
+func TestProfileOwnerMetadataBounds(t *testing.T) {
+	for _, name := range []string{"", "alice@example.test", "Unicode-Älice", "escaped\nlabel"} {
+		if !(Owner{SubjectHash: [32]byte{1}, Username: name}).Valid() {
+			t.Fatal("valid audit metadata rejected")
+		}
+	}
+	for _, o := range []Owner{{}, {SubjectHash: [32]byte{1}, Username: strings.Repeat("x", 1025)}, {SubjectHash: [32]byte{1}, Username: "a\x00b"}, {SubjectHash: [32]byte{1}, Username: string([]byte{255})}} {
+		if o.Valid() {
+			t.Fatal("invalid owner metadata accepted")
+		}
 	}
 }
 

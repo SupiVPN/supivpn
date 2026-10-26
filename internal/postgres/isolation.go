@@ -40,6 +40,7 @@ func componentPrivileges(c Component) (privileges, bool) {
 		p.tables["supivpn.assertions"] = []string{"SELECT", "INSERT"}
 		p.tables["supivpn.profile_logins"] = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}
 		p.tables["supivpn.issued_profiles"] = []string{"SELECT", "INSERT"}
+		p.columns["supivpn.issued_profiles"] = map[string][]string{"UPDATE": {"owner_username"}}
 		p.tables["supivpn.profile_bindings"] = []string{"SELECT"}
 		p.tables["supivpn.profile_imports"] = []string{"SELECT", "INSERT", "DELETE"}
 		p.columns["supivpn.logins"] = map[string][]string{"UPDATE": {
@@ -82,13 +83,13 @@ func NewIsolated(ctx context.Context, pool *pgxpool.Pool, c Component, f Fencer)
 }
 
 func CheckPrivileges(ctx context.Context, pool *pgxpool.Pool, c Component) error {
-	refused := errors.New("database component privileges invalid; require schema 11 and separate restricted roles")
+	refused := errors.New("database component privileges invalid; require schema 12 and separate restricted roles")
 	policy, ok := componentPrivileges(c)
 	if !ok || pool == nil {
 		return refused
 	}
 	var version int
-	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 11 {
+	if pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) != nil || version != 12 {
 		return refused
 	}
 	var unsafe bool

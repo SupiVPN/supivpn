@@ -100,6 +100,28 @@ func TestSessionsAreLocalAndTargeted(t *testing.T) {
 	}
 }
 
+func TestProfileOwnerLabelIsEscapedAuditOutput(t *testing.T) {
+	for _, action := range []string{"status", "list"} {
+		args := []string{"profiles", action}
+		if action == "status" {
+			args = append(args, testID)
+		}
+		owner := "verified\nowner\u001b[31m@example.test"
+		p := map[string]any{"profile_id": testID, "state": "active", "revision": 1, "owner_username": owner, "subject_hash": "not-for-output", "secret_hash": "not-for-output"}
+		state := map[string]any{"profile": p, "profiles": []any{p}}
+		raw, _ := json.Marshal(map[string]any{"ok": true, "state": state})
+		var out bytes.Buffer
+		err := execute(context.Background(), args, &out, func(string) error { return nil }, func(context.Context, command) ([]byte, error) { return raw, nil })
+		if err != nil || strings.Contains(out.String(), "not-for-output") || strings.Contains(out.String(), owner) || !strings.Contains(out.String(), `"owner_username"`) {
+			t.Fatal("unsafe or missing owner output")
+		}
+		var decoded map[string]any
+		if json.Unmarshal(out.Bytes(), &decoded) != nil {
+			t.Fatal("invalid JSON")
+		}
+	}
+}
+
 func TestHostRejectionPreventsAllOperations(t *testing.T) {
 	called := false
 	err := execute(context.Background(), []string{"profiles", "block", testID, "--revision", "1", "--yes"}, &bytes.Buffer{},

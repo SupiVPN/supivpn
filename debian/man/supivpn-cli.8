@@ -15,10 +15,11 @@ external. No remote administration endpoint is provided. Output is bounded JSON.
 Show systemd state of the controller and selected node/OpenVPN pair.
 .TP
 .B profiles list [--limit 1..100] [--after PROFILE_ID]
-List nonsecret profile records using an opaque ID cursor.
+List profile records and verified owner_username using an opaque ID cursor.
+An empty owner label means unknown. Protect this personal audit data.
 .TP
 .B profiles status PROFILE_ID
-Inspect state and revision.
+Inspect the verified owner label, state and revision.
 .TP
 .B profiles block|activate PROFILE_ID --revision N --yes
 Change state only if the inspected revision still matches.

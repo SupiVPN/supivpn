@@ -3,9 +3,9 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for licensing terms.
 
-**Available from v0.8.0:** `supivpn-cli` is a separate Debian package.
-The `supivpn` metapackage installs it with exactly matching node
-and controller versions. Existing 0.6/0.7 release assets remain unchanged.
+`supivpn-cli` is available since v0.8.0 as a separate Debian package. The
+`supivpn` metapackage installs it with exactly matching node/controller versions.
+Owner labels are available since v0.8.1 and require schema 12.
 
 The first version supports a **combined Debian host** with the node, upstream
 OpenVPN, controller and systemd installed locally. PostgreSQL may be on another
@@ -33,9 +33,18 @@ the second pair used during [profile migration](PROFILE_BINDING.md).
 Profile listing returns at most 100 rows, ordered by opaque profile ID, and a
 `next_cursor` when another page exists. Use that value with `--after`; this
 is not a time-ordered or snapshot-consistent inventory. Profile responses contain
-only ID, active/blocked state, revision and creation time. Identify the relevant
-ID through the protected `vpn.tunnel_established` logs; there is no plaintext
-owner, owner hash, proof or secret digest in CLI output.
+ID, active/blocked state, revision, creation time and `owner_username`, the exact
+verified SAML NameID. This is not necessarily an email address. An empty label
+means unknown, not an unowned profile: authorization still checks `subject_hash`.
+No owner hash, proof or secret digest appears in output. Treat the owner label
+as personal audit data; protect output and JSON-escape it in downstream tools.
+
+Existing bound profiles do not need to be downloaded again. Migration 012 fills
+labels from retained verified login records when they agree. If none remain,
+the next successful bound-profile SAML admission can fill that profile's label.
+Concurrent row locks can defer this metadata update until a later login. The
+label survives authentication-state cleanup; it never changes profile state,
+revision, proof or authorization identity. See [upgrade steps](POSTGRES.md#schema-11-to-12-v081).
 
 ## Block and reactivate a profile
 

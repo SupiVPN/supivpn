@@ -61,9 +61,9 @@ generate disposable keys, and the built-bundle test requires the existing
 
 Before a release, run `make prepare`: source audit -> unit/race -> vet -> full build.
 `make build` also creates `local/<arch>/release.json` with SHA-256 hashes of all
-components and compatible VM SQL digests for schemas 7/8/9/10/11. Isolated Lambda
-components explicitly require schema 11 in `lambda_components`. Profile ownership
-and Server URL also require schema 11 on a VM. Building one component
+components and compatible VM SQL digests for schemas 7/8/9/10/11/12. Isolated Lambda
+components explicitly require schema 12 in `lambda_components`. Profile ownership
+and Server URL also require schema 12 on a VM. Building one component
 does not update this contract: repeat prepare/build before a full deployment. CI runs `make security-binaries` on each native architecture;
 both jobs must pass before a release candidate can be used.
 Prefer compatible migrations; new online migrations require an explicit

@@ -4,8 +4,9 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](LICENSE) for copyright ownership and licensing terms.
 
 One Debian 13 VM, a `.deb` metapackage, one setup file. The `supivpn` package
-installs the node, controller and local operator CLI, and provides `supivpn-setup` to configure the controller,
-node and local PostgreSQL 18 database. Services run directly under systemd.
+installs the node, controller and local operator CLI, and provides `supivpn-setup`
+to configure the controller, node and local PostgreSQL 18 database. Services run
+directly under systemd.
 To keep PostgreSQL on another host, see the
 [external database walkthrough](docs/REMOTE_DATABASE.md), including a controlled
 move of an existing database. Remote setup-helper support is available from
@@ -30,6 +31,9 @@ continue through the client's normal connection.
 
 See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
+For an existing installation, follow the [v0.8.1 / schema 12 upgrade steps](docs/POSTGRES.md#schema-11-to-12-v081)
+before using the persistent owner labels. Existing profiles do not need reissue;
+labels without retained login history remain empty until a successful owner login.
 
 ## Choose your access policy
 

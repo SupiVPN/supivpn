@@ -347,8 +347,9 @@ loopback, including `127.0.0.1`, on this host. Then run:
 ```
 
 Require exit status zero before continuing. Migrations are embedded in the
-binary and transactionally applied as `supivpn_owner`. Published v0.7.1 reaches
-schema 10; v0.8.0 reaches schema 11.
+binary and transactionally applied as `supivpn_owner`. v0.8.0 reaches schema 11;
+the v0.8.1 owner-label fix reaches schema 12. Follow the
+[upgrade procedure](POSTGRES.md#schema-11-to-12-v081) for an existing installation.
 Do not execute the inspection copies under `/usr/share/supivpn-controller/migrations`
 individually. This is the non-AWS environment mode; `-config` is for the AWS
 migration adapter, not the controller's JSON file.

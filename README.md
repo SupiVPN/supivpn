@@ -66,6 +66,9 @@ for the current SAML integration requirements.
 
 See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
+From **v0.8.1**, the profile registry also retains the verified SAML owner's name.
+Existing profiles remain valid without reissue; follow the
+[schema 12 upgrade steps](docs/POSTGRES.md#schema-11-to-12-v081).
 
 ## Features
 

@@ -37,8 +37,8 @@ func writeManifest(directory string) error {
 		artifacts[name] = fmt.Sprintf("%x", sha256.Sum256(data))
 	}
 	data, err := json.MarshalIndent(map[string]any{
-		"format": 1, "schema": 11, "schema_digest": postgres.MigrationDigest(),
-		"lambda_components":  map[string]any{"public": map[string]any{"artifact": "supivpn-lambda.zip", "required_schema": 11}, "agent": map[string]any{"artifact": "supivpn-agent-lambda.zip", "required_schema": 11}, "recovery": map[string]any{"artifact": "supivpn-recovery-lambda.zip", "required_schema": 11}},
+		"format": 1, "schema": 12, "schema_digest": postgres.MigrationDigest(),
+		"lambda_components":  map[string]any{"public": map[string]any{"artifact": "supivpn-lambda.zip", "required_schema": 12}, "agent": map[string]any{"artifact": "supivpn-agent-lambda.zip", "required_schema": 12}, "recovery": map[string]any{"artifact": "supivpn-recovery-lambda.zip", "required_schema": 12}},
 		"compatible_schemas": postgres.CompatibleSchemaDigests(), "artifacts": artifacts,
 	}, "", "  ")
 	if err != nil {
