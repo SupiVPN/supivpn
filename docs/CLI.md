@@ -5,7 +5,7 @@ See [LICENSE](../LICENSE) for licensing terms.
 
 `supivpn-cli` is available since v0.8.0 as a separate Debian package. The
 `supivpn` metapackage installs it with exactly matching node/controller versions.
-The owner-label fix described here targets v0.8.1 and requires schema 12.
+Owner labels are available since v0.8.1 and require schema 12.
 
 The first version supports a **combined Debian host** with the node, upstream
 OpenVPN, controller and systemd installed locally. PostgreSQL may be on another

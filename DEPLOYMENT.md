@@ -4,8 +4,9 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](LICENSE) for copyright ownership and licensing terms.
 
 One Debian 13 VM, a `.deb` metapackage, one setup file. The `supivpn` package
-installs both components and provides `supivpn-setup` to configure the controller,
-node and local PostgreSQL 18 database. Services run directly under systemd.
+installs the node, controller and local operator CLI, and provides `supivpn-setup`
+to configure the controller, node and local PostgreSQL 18 database. Services run
+directly under systemd.
 To keep PostgreSQL on another host, see the
 [external database walkthrough](docs/REMOTE_DATABASE.md), including a controlled
 move of an existing database. Remote setup-helper support is available from
@@ -18,8 +19,9 @@ code (IaC) are next on the roadmap, including an **HA active-active cluster**.
 The [existing cluster capabilities](docs/HA.md) describe the runtime and network
 requirements; the production guide and IaC are not delivered by this walkthrough.
 
-**Evaluation status:** the shipped VPN client template verifies the certificate
-chain but does not yet enforce the server DNS name.
+**Evaluation status:** the default legacy VPN client template verifies the certificate
+chain but does not enforce the server DNS name. Opt-in bound profiles in v0.8.0
+add an exact certificate common-name check; they do not implement DNS SAN matching.
 [DNS SAN verification](docs/TLS_CRYPT_V2.md#planned-dns-san-verification)
 remains a production blocker. The helper does not remove that limitation.
 
@@ -27,8 +29,11 @@ The short path below establishes a split tunnel and a ping to the VPN gateway.
 Private-network access is an explicit follow-up. Client Internet traffic and DNS
 continue through the client's normal connection.
 
-See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the **unreleased** account-bound profile format,
+See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
+For an existing installation, follow the [v0.8.1 / schema 12 upgrade steps](docs/POSTGRES.md#schema-11-to-12-v081)
+before using the persistent owner labels. Existing profiles do not need reissue;
+labels without retained login history remain empty until a successful owner login.
 
 ## Choose your access policy
 
@@ -45,7 +50,8 @@ opening access to private resources:
 | Send Internet traffic or DNS through the VPN | Configure OpenVPN, forwarding/SNAT and a DNS forwarder separately. [Full tunnel](docs/HOST.md#full-tunnel) and [client DNS](docs/HOST.md#client-dns-through-the-local-node). The helper configures neither. |
 | Use your SAML IdP and a convenient profile download entry | Set the groups claim and metadata; optionally add an IdP dashboard tile. [IdP requirements](docs/IDENTITY_PROVIDER.md#groups-claim) and [profile downloads](docs/PROFILES.md). Okta is the documented example, not the only SAML provider. |
 | Require encrypted SAML assertions | [RSA-OAEP + AES-GCM modes, key provisioning and rollout](docs/ASSERTION_ENCRYPTION.md). Disabled by default; check the feature's release availability before configuring it. |
-| Put PostgreSQL on a separate host | [Private endpoint, verified TLS, setup and existing-data cutover](docs/REMOTE_DATABASE.md). The controller supports this now; the helper extension is pending release. |
+| Put PostgreSQL on a separate host | [Private endpoint, verified TLS, setup and existing-data cutover](docs/REMOTE_DATABASE.md). The setup-helper extension is available from v0.6.1. |
+| Inspect services or block a bound profile | [Local operator CLI](docs/CLI.md), available from v0.8.0 on a combined Debian node/controller host; PostgreSQL may be external. Blocking prevents new admission and does not disconnect established tunnels. |
 | Customize logging or grow beyond one VM | [Logging](docs/LOGGING.md#destinations-and-defaults) and [active-active architecture](docs/HA.md). The one-host helper does not provision an HA deployment. |
 
 For the Debian file paths and a safe point to customize them, see

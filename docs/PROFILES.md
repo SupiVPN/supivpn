@@ -9,7 +9,7 @@ For `public_url=https://login.example.test/supivpn`, this is
 One Okta SAML App can provide both VPN authentication and the dashboard tile;
 a separate Bookmark App is optional.
 
-See the [profile ownership and two-port migration guide](PROFILE_BINDING.md) for the **unreleased** account-bound profile format,
+See the [profile ownership and two-port migration guide](PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
 
 ## One Okta SAML App

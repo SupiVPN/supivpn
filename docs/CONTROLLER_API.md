@@ -262,5 +262,5 @@ and configure `/var/task/idp-metadata.xml`.
 AWS deployment may supply JSON through environment variables.
 Passwords, DSNs, and private keys are not included in the ZIP.
 
-Unreleased profile binding, additional VM agent listeners and Server URL routes are
+Profile binding, additional VM agent listeners and Server URL routes, available from v0.8.0, are
 described in [PROFILE_BINDING.md](PROFILE_BINDING.md).
