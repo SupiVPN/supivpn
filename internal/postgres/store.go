@@ -109,7 +109,7 @@ func (s *Store) Ready(ctx context.Context) bool {
 	}
 	var version int
 	return s.pool.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version) == nil &&
-		((s.component == "" && (version == 7 || version == 8 || version == 9 || version == 10 || version == 11)) || (s.component != "" && version == 11))
+		((s.component == "" && (version == 7 || version == 8 || version == 9 || version == 10 || version == 11 || version == 12)) || (s.component != "" && version == 12))
 }
 
 // RotateNode is a compare-and-swap performed by the authenticated node bootstrap
@@ -490,7 +490,8 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err := consumeAssertion(ctx, tx, d); err != nil {
 			return err
 		}
-		if id, err := loginProfile(ctx, tx, hash); err != nil {
+		id, err := loginProfile(ctx, tx, hash)
+		if err != nil {
 			return err
 		} else if id != "" {
 			ok, err := s.profileOwnerActive(ctx, tx, id, d.SubjectHash)
@@ -536,7 +537,8 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 				d.GroupName, d.DenialReason = "", "connection_limit"
 			}
 		}
-		id := rand.Text()
+		profileID := id
+		id = rand.Text()
 		var sessionExpires any
 		if !d.SessionUnlimited {
 			sessionExpires = d.SessionExpiresAt
@@ -559,7 +561,7 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err = tx.QueryRow(ctx, "SELECT max(version) FROM public.supivpn_schema_migrations").Scan(&version); err != nil {
 			return err
 		}
-		if version != 7 && version != 8 && version != 9 && version != 10 && version != 11 {
+		if version != 7 && version != 8 && version != 9 && version != 10 && version != 11 && version != 12 {
 			return controller.ErrUnavailable
 		}
 		if version >= 8 {
@@ -572,6 +574,11 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		}
 		if d.DenialReason != "" {
 			return controller.ErrGroupDenied
+		}
+		if version >= 12 && profileID != "" && d.Username != "" {
+			if err := recordProfileOwner(ctx, tx, profileID, d); err != nil {
+				return err
+			}
 		}
 		return controller.ErrDecisionPending
 	})

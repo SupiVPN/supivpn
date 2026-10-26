@@ -76,7 +76,7 @@ func TestConnectServerURLManual(t *testing.T) {
 	var issued, discoveries, browserVisits, redemptions atomic.Int32
 	issue, err := profile.BoundDownloadIssuer([]byte(openVPNClientTemplate), base.Hostname(), 1195,
 		func(context.Context) ([]byte, error) { return bytes.Clone(wrapping), nil },
-		func(ctx context.Context, c profile.Credential, subject [32]byte) error {
+		func(ctx context.Context, c profile.Credential, subject profile.Owner) error {
 			if e := store.CreateProfile(ctx, c, subject); e != nil {
 				return e
 			}

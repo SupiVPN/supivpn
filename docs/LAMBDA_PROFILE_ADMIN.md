@@ -3,7 +3,7 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for licensing terms.
 
-**Unreleased profile-binding feature, schema 11.** The local
+**Profile binding: v0.8.0; owner labels: v0.8.1 / schema 12.** The local
 [`supivpn-cli`](CLI.md) requires a combined Debian node/controller host. It
 cannot administer Lambda or a split deployment. The existing restricted recovery
 operator invocation can handle profile status/block/activate if you have already
@@ -26,7 +26,7 @@ workflow, or your normal DB administration tooling. Do not use a public runtime
 credential. The dedicated operator needs only:
 
 - CONNECT to the intended database and USAGE on schema `supivpn`;
-- SELECT on `profile_id,state,revision,created_at` in `supivpn.issued_profiles`;
+- SELECT on `profile_id,owner_username,state,revision,created_at` in `supivpn.issued_profiles`;
 - UPDATE on `state,revision` in that table.
 
 Provisioning that role is a separate administrative action. No SELECT on
@@ -35,15 +35,30 @@ or changes to Lambda IAM/runtime grants are necessary.
 
 ## Identify and inspect
 
-Obtain the opaque `profile_id` from the protected tunnel logs or your issuance
-records. Do not use Device ID as the authorization target: it is client supplied.
+Find the opaque `profile_id` and verified SAML NameID directly in the registry:
+
+```sql
+SELECT profile_id, owner_username, state, revision, created_at
+FROM supivpn.issued_profiles
+ORDER BY created_at DESC, profile_id
+LIMIT 100;
+```
+
+`owner_username` is personal audit data, not a credential or a new authorization
+key. It may be empty for a pre-upgrade profile with no retained login evidence;
+the next successful admission using that profile can fill it without reissuing
+the file. Row-lock contention can defer filling until another login. See
+[schema 12 migration](POSTGRES.md#schema-11-to-12-v081). Existing operator roles
+need SELECT on the new column; they do not need permission to modify it.
+
+Do not use Device ID as the authorization target: it is client supplied.
 
 In psql, set the exact ID and inspect only nonsecret columns:
 
 ```sql
 \set ON_ERROR_STOP on
 \set profile_id 'svp1_0123456789abcdef0123456789abcdef'
-SELECT profile_id, state, revision, created_at
+SELECT profile_id, owner_username, state, revision, created_at
 FROM supivpn.issued_profiles
 WHERE profile_id = :'profile_id';
 ```
@@ -67,7 +82,7 @@ WHERE profile_id = :'profile_id'
 RETURNING profile_id, state, revision;
 COMMIT;
 
-SELECT profile_id, state, revision, created_at
+SELECT profile_id, owner_username, state, revision, created_at
 FROM supivpn.issued_profiles
 WHERE profile_id = :'profile_id';
 ```

@@ -239,11 +239,49 @@ committed DDL or restore an older database snapshot that could revive stale gran
 or fencing generations. An incompatible change needs explicit maintenance and a
 reviewed recovery procedure.
 
-The development VM runtime supports schemas 7/8/9/10/11 for legacy authorization;
-isolated Lambda components and opt-in profile features require 11.
+The v0.8.1 VM runtime supports schemas 7/8/9/10/11/12 for legacy authorization;
+isolated Lambda components and opt-in profile features require 12.
 Previously applied SQL migration files remain unchanged.
 
-### Schema 10 to 11 (unreleased)
+### Schema 11 to 12 (v0.8.1)
+
+Migration 012 adds `owner_username` to issued profiles and short-lived import
+grants. It fills existing profile labels from retained verified SAML login
+records only when all available labels for that subject hash agree. It preserves
+IDs, proof hashes, owner hashes, active/blocked states, revisions and timestamps.
+Existing `.ovpn` files and OpenVPN settings do not change; no reissue is needed.
+
+Unknown labels remain empty when no usable login evidence remains, including
+never-used profiles and profiles whose login records have already been pruned.
+After upgrade, a successful bound-profile SAML
+admission fills that profile's empty label from verified NameID. A concurrent
+row lock can defer that audit update until another login. Missing labels never
+weaken owner checks or cause legacy fallback. New browser downloads and Connect
+imports persist the label before delivering the file; no username is added to it.
+
+Back up and verify restore procedures first. Prepare matching v0.8.1 binaries
+and migration configuration before the maintenance window. Quiesce controllers,
+all three Lambda components and recovery scheduling; drain VPN pairs when
+heartbeat continuity cannot be maintained. Run the normal explicit migrator,
+then reapply isolated runtime grants and start the matching binaries. Public
+runtime gains UPDATE on `issued_profiles.owner_username` only, not on its proof,
+subject hash, state or revision. Restricted SQL operators need SELECT on the
+new column. Runtime startup performs no DDL or automatic grants.
+
+The migration scans retained login records and the profile registry and takes
+DDL locks. Existing 3-second lock and 10-second statement
+timeouts apply; timeout rolls back the entire migration. Schedule it appropriately
+for database size. Migration and role grants are separate transactions; a grant
+failure must stop the deployment before traffic resumes.
+
+v0.8.0 binaries reject schema 12. Mixed v0.8.0/v0.8.1 Lambdas are unsupported;
+after commit, use only a verified schema-12-compatible build for runtime rollback.
+Do not down-migrate or restore stale authorization state. The two-minor legacy
+client transition remains unchanged (0.8.x and 0.9.x); it does not promise mixed
+binary/schema versions. Check profile list/status and one existing bound profile
+login after upgrade, then check block/reactivate with the current revision.
+
+### Schema 10 to 11 (v0.8.0)
 
 Migration 011 adds issued-profile ownership/state, login bindings and bounded
 one-use import grants. Existing logins, decisions and replay state are retained;

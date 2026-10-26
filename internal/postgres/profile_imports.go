@@ -10,11 +10,12 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"supivpn/internal/controller"
+	"supivpn/internal/profile"
 	"time"
 )
 
-func (s *Store) CreateImport(ctx context.Context, token string, subject [32]byte) error {
-	if len(token) != 43 || !validTicket(token) || subject == [32]byte{} {
+func (s *Store) CreateImport(ctx context.Context, token string, owner profile.Owner) error {
+	if len(token) != 43 || !validTicket(token) || !owner.Valid() {
 		return ErrConflict
 	}
 	tx, err := s.begin(ctx)
@@ -36,15 +37,15 @@ func (s *Store) CreateImport(ctx context.Context, token string, subject [32]byte
 		return controller.ErrUnavailable
 	}
 	hash := sha256.Sum256([]byte(token))
-	_, err = tx.Exec(ctx, `INSERT INTO supivpn.profile_imports(token_hash,subject_hash,expires_at) VALUES ($1,$2,clock_timestamp()+interval '60 seconds')`, hash[:], subject[:])
+	_, err = tx.Exec(ctx, `INSERT INTO supivpn.profile_imports(token_hash,subject_hash,owner_username,expires_at) VALUES ($1,$2,$3,clock_timestamp()+interval '60 seconds')`, hash[:], owner.SubjectHash[:], owner.Username)
 	if err != nil {
 		return publicError(err)
 	}
 	return publicError(tx.Commit(ctx))
 }
 
-func (s *Store) ConsumeImport(ctx context.Context, token string) ([32]byte, error) {
-	var subject [32]byte
+func (s *Store) ConsumeImport(ctx context.Context, token string) (profile.Owner, error) {
+	var subject profile.Owner
 	if s == nil || s.pool == nil {
 		return subject, controller.ErrUnavailable
 	}
@@ -62,7 +63,7 @@ func (s *Store) ConsumeImport(ctx context.Context, token string) ([32]byte, erro
 	// DELETE acquires the row lock without expanding the public role's grants.
 	// Its predicate may be evaluated before a lock wait: check a fresh database
 	// clock afterwards, then commit before disclosing the subject to the issuer.
-	err = tx.QueryRow(ctx, `DELETE FROM supivpn.profile_imports WHERE token_hash=$1 RETURNING subject_hash,expires_at`, hash[:]).Scan(&raw, &expires)
+	err = tx.QueryRow(ctx, `DELETE FROM supivpn.profile_imports WHERE token_hash=$1 RETURNING subject_hash,expires_at,owner_username`, hash[:]).Scan(&raw, &expires, &subject.Username)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return subject, controller.ErrLoginExpired
 	}
@@ -79,6 +80,9 @@ func (s *Store) ConsumeImport(ctx context.Context, token string) ([32]byte, erro
 	if err = tx.Commit(ctx); err != nil {
 		return subject, controller.ErrUnavailable
 	}
-	copy(subject[:], raw)
+	copy(subject.SubjectHash[:], raw)
+	if !subject.Valid() {
+		return profile.Owner{}, controller.ErrUnavailable
+	}
 	return subject, nil
 }

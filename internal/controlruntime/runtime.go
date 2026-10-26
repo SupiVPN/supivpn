@@ -232,7 +232,7 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 	if c.Profile != nil {
 		if (c.Profile.Binding == "required" || c.Profile.ServerURL) && !store.ProfileSchemaReady(ctx) {
 			pool.Close()
-			return nil, errors.New("profile ownership and Server URL require schema 11")
+			return nil, errors.New("profile ownership and Server URL require schema 12")
 		}
 		download, profileErr := profileDownload(c.Profile, key, store)
 		if profileErr != nil {

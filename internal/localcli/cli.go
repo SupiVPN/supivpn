@@ -41,6 +41,7 @@ const Help = `Usage:
 Run locally with sudo on a configured Debian host with node and controller.
 Default listener: supivpn-node; use --instance bound for the migration listener.
 Output is JSON. No passwords, profile proofs or owner hashes are returned.
+Profiles include owner_username (verified SAML NameID); empty means unknown.
 Block prevents new admission; it does not disconnect established tunnels.
 Drop requests local termination, not a ban; poll sessions status until matched
 and unidentified are zero. Repeat on every listener and node as necessary.
