@@ -207,16 +207,20 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 		{"go-delayed-auth", []string{coreGroup}, "10.203.0.2"},
 		{"go-no-group", []string{unrelatedGroup}, ""},
 		{"go-bound", []string{coreGroup}, "10.203.0.2"},
+		{"go-bound-wrong-name", nil, ""},
+		{"go-bound-untrusted-ca", nil, ""},
+		{"go-bound-expired-cert", nil, ""},
 		{"go-bound-on-legacy", nil, ""},
 		{"go-legacy-on-bound", nil, ""},
 		{"go-wrong-key", nil, ""},
 		{"go-tampered", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if linuxClient != "" && tc.name != "go-core" && tc.name != "go-delayed-auth" && tc.name != "go-no-group" && tc.name != "go-bound" && tc.name != "go-bound-on-legacy" && tc.name != "go-legacy-on-bound" {
+			tlsRejected := tc.name == "go-bound-wrong-name" || tc.name == "go-bound-untrusted-ca" || tc.name == "go-bound-expired-cert"
+			if linuxClient != "" && !tlsRejected && tc.name != "go-core" && tc.name != "go-delayed-auth" && tc.name != "go-no-group" && tc.name != "go-bound" && tc.name != "go-bound-on-legacy" && tc.name != "go-legacy-on-bound" {
 				t.Skip("OpenVPN 3 Linux SAML interoperability subset")
 			}
-			bound := tc.name == "go-bound" || tc.name == "go-bound-on-legacy"
+			bound := tc.name == "go-bound" || tc.name == "go-bound-on-legacy" || tlsRejected
 			proof, err := profile.NewCredential()
 			if err != nil {
 				t.Fatal(err)
@@ -239,6 +243,9 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				t.Fatal("native server key rotated")
 			}
 			ca := testVPNCertificate(t, dir)
+			if tc.name == "go-bound-expired-cert" {
+				ca = testVPNCertificateFor(t, dir, -time.Minute)
+			}
 			socket := filepath.Join(dir, "management.sock")
 			listener, err := net.Listen("unix", socket)
 			if err != nil {
@@ -281,6 +288,17 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			waitProtocol(t, serverLog, "Initialization Sequence Completed")
 
 			template := strings.Replace(openVPNClientTemplate, "remote supivpn.example.test 1194", "remote 127.0.0.1 1194", 1)
+			if bound {
+				// Match BoundDownloadIssuer's exact CN check, while dialing loopback.
+				name := "localhost"
+				if tc.name == "go-bound-wrong-name" {
+					name = "different.example.test"
+				}
+				template += "\nverify-x509-name " + name + " name\n"
+			}
+			if tc.name == "go-bound-untrusted-ca" {
+				ca = testVPNCertificate(t, t.TempDir())
+			}
 			start, end := strings.Index(template, "<ca>"), strings.Index(template, "</ca>")
 			if start < 0 || end < start {
 				t.Fatal("client CA block missing")
@@ -384,6 +402,26 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 					t.Logf("server protocol categories: %v (raw log withheld)", serverLog.categories())
 				}
 			})
+			if tlsRejected {
+				deadline := time.Now().Add(15 * time.Second)
+				for !clientLog.contains("VERIFY ERROR") && !clientLog.contains("VERIFY X509NAME ERROR") &&
+					!clientLog.contains("CERT_VERIFY_FAIL") && !serverLog.contains("TLS Error: TLS handshake failed") {
+					if time.Now().After(deadline) {
+						t.Fatal("invalid server certificate was not rejected during TLS")
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				select {
+				case <-m.events:
+					// A CONNECT would expose the profile proof before checking the peer.
+					t.Fatal("invalid server certificate reached management authentication")
+				default:
+				}
+				if clientLog.contains("WEB_AUTH") || serverLog.contains("Peer Connection Initiated") {
+					t.Fatal("invalid server certificate reached SAML authentication")
+				}
+				return
+			}
 			if invalidKey {
 				if linuxClient == "" {
 					waitProtocol(t, clientLog, "TLS Error: TLS key negotiation failed")

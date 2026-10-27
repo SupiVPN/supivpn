@@ -105,8 +105,11 @@ Retrieve the file through secure administrative access. Each issuance creates a
 fresh client key; existing files are not overwritten. Profiles without tls-crypt-v2
 must be reissued. Profiles do not fix the user's group or IP.
 
-Current template limitation: the client checks CA, certificate validity, and
-purpose, but not server name. tls-crypt-v2 does not replace fixing this check.
+Current legacy-template limitation: the client checks CA and certificate validity,
+but not server name. There are no explicit KU/EKU directives; see
+[client template compatibility](PROFILES.md#client-template-compatibility).
+Bound downloads additionally check the exact server CN. tls-crypt-v2 does not
+replace server identity verification.
 The selected replacement is [public CA plus DNS SAN verification](#planned-dns-san-verification);
 client support must be established before changing the production template.
 

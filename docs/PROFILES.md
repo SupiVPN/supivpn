@@ -12,6 +12,30 @@ a separate Bookmark App is optional.
 See the [profile ownership and two-port migration guide](PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
 
+## Client template compatibility
+
+The shipped client template omits the explicit `remote-cert-ku` and
+`remote-cert-eku` directives following a
+Windows client compatibility report. CA validation and certificate validity
+checks remain enabled. Bound downloads also retain the exact server common-name
+check (`verify-x509-name ... name`) before sending the profile credential.
+The template no longer requires explicit KU/EKU extensions through these
+directives; TLS-library validation is client-specific. Continue provisioning
+VPN server certificates for TLS server authentication.
+
+Legacy profiles still lack server-name verification: another certificate under
+the trusted CA may be accepted. This patch does not add that guarantee to the
+legacy path. Follow the [two-port migration](PROFILE_BINDING.md) for bound
+profiles; DNS SAN verification remains a separate [client limitation](TLS_CRYPT_V2.md#planned-dns-san-verification).
+
+Updating the package or Lambda ZIP does not rewrite an existing template copied
+to `/etc` or an already imported profile. Apply the same two-line removal to
+the configured template and affected `.ovpn` files, then re-import as needed.
+Keep the CA, `verify-x509-name`, inline credential and `tls-crypt-v2` blocks
+unchanged. No database migration, profile-secret rotation or profile-registry
+change is required. Working older profiles remain valid. A new download is also
+possible, but creates a separate profile credential.
+
 ## One Okta SAML App
 
 Configure the existing SAML application after deploying the controller and route:

@@ -24,7 +24,7 @@ including the loss of existing tunnels and change of VPN IP on failover to anoth
 **Evaluation status:** signed Debian assets and the [APT repository](APT_REPOSITORY.md)
 are available starting with v0.6.0; the short guide uses APT.
 The shipped VPN client template validates
-the certificate chain, validity and server purpose, but does **not** verify the
+the certificate chain and validity, but does **not** verify the
 server DNS name. Required DNS SAN verification in OpenVPN Connect remains
 [unfinished](TLS_CRYPT_V2.md#planned-dns-san-verification). A successful
 tunnel below does not close that production blocker or the other
