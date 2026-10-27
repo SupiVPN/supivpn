@@ -217,6 +217,9 @@ shared heartbeat loss cannot authorize node stops. See the fencing contract.
 
 409 means conflict/stale generation; 410 means unknown or completed/expired login;
 503 means backend unavailable. An identical ACK may be retried after a lost reply.
+Confirmed-disconnect cancellation also survives transient failures while the
+node lease remains live; see [retry bounds and update diagnostics](SESSIONS.md#client-disconnection).
+This agent retry change is unreleased and uses the existing API/schema.
 Fetch 204 cannot keep a request pending indefinitely: the agent enforces its deadline.
 Internal database errors and SAML bodies never appear in responses or logs.
 

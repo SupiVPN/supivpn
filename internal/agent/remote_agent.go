@@ -78,6 +78,7 @@ type remoteJob struct {
 	due, deadline       time.Time
 	decisionID, outcome string
 	failures            uint
+	disconnectConfirmed bool
 }
 
 // jobs and connection state are protected by agent.mu. Only the worker performs
@@ -162,7 +163,10 @@ func (a *agent) nextRemoteLocked() *remoteJob {
 	now := a.now()
 	for i := 0; i < len(a.remote.jobs); {
 		j := a.remote.jobs[i]
-		if !now.Before(j.deadline) {
+		// A proven disconnect cannot authorize traffic. Retain its bounded
+		// cancellation job across transient API outages while this generation's
+		// lease is live; abandoning it would strand a cluster session slot.
+		if !(j.phase == "cancel" && j.disconnectConfirmed) && !now.Before(j.deadline) {
 			if j.phase == "cancel" || j.phase == "ack" && j.outcome == "applied" {
 				// An uncertain release/ACK must not leak a user's slot indefinitely.
 				// Stop the node heartbeat; slot reuse requires fencing or a clean restart.
@@ -405,7 +409,8 @@ func (a *agent) cancelRemoteLocked(c *connection) {
 	}
 	for _, j := range a.remote.jobs {
 		if j.conn == c {
-			j.phase, j.due, j.deadline = "cancel", time.Time{}, a.now().Add(30*time.Second)
+			j.phase, j.due = "cancel", time.Time{}
+			j.disconnectConfirmed = true
 			j.failures = 0
 			return
 		}
@@ -414,7 +419,7 @@ func (a *agent) cancelRemoteLocked(c *connection) {
 		a.management.close()
 		return
 	}
-	a.remote.jobs = append(a.remote.jobs, &remoteJob{conn: c, phase: "cancel", deadline: a.now().Add(30 * time.Second)})
+	a.remote.jobs = append(a.remote.jobs, &remoteJob{conn: c, phase: "cancel", disconnectConfirmed: true})
 }
 
 // The old node HTTPS listener remains for the NLB health check. SAML routes are

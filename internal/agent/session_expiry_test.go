@@ -19,6 +19,7 @@ func TestSessionExpiryIsolatedToClient(t *testing.T) {
             now:=time.Now()
             a.now=func()time.Time{return now}
             cancels:=0
+            cancelUnavailable:=ordering=="cancel-unavailable"
             a.remote.api=remoteAPIFunc(func(_ context.Context,op string,q agentclient.Request)(*agentapi.Decision,error) {
                 if op=="fetch" {
                     return allowedRemoteDecision(coreGroup),nil
@@ -26,7 +27,7 @@ func TestSessionExpiryIsolatedToClient(t *testing.T) {
                 if op=="cancel" {
                     if *q.CID!=7 || *q.KID!=2 {t.Fatal("wrong cancelled connection")}
                     cancels++
-                    if ordering=="cancel-unavailable" {return nil,&agentclient.Error{Status:503}}
+                    if cancelUnavailable {return nil,&agentclient.Error{Status:503}}
                 }
                 return nil,nil
             })
@@ -71,7 +72,14 @@ func TestSessionExpiryIsolatedToClient(t *testing.T) {
             if ordering=="cancel-unavailable" {
                 now=now.Add(30*time.Second)
                 remoteStepNow(a)
-                select {case <-a.management.done:default:t.Fatal("unknown cancel outcome left node running")}
+                if !a.readyLocked() || len(a.remote.jobs)!=1 || cancels!=2 || a.connections[8]!=other {
+                    t.Fatal("cancel outage discarded confirmed disconnect or stopped another user")
+                }
+                cancelUnavailable=false
+                remoteStepNow(a)
+                if !a.readyLocked() || len(a.remote.jobs)!=0 || cancels!=3 || len(a.pools.leases)!=1 {
+                    t.Fatal("confirmed cancellation did not recover independently")
+                }
                 return
             }
             if cancels!=1 || len(a.remote.jobs)!=0 {t.Fatal("confirmed disconnect did not release controller slot")}
