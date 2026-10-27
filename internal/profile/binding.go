@@ -34,7 +34,7 @@ func BoundDownloadIssuer(template []byte, endpoint string, port uint16, load fun
 	source = strings.ReplaceAll(source, "# Deliberately no client cert/key or auth-user-pass. SAML still authorizes access.\n", "# No client certificate. The opaque profile proof and its verified SAML owner authorize access.\n")
 	configured := []byte(strings.Replace(source, "remote supivpn.example.test 1194\n", "remote "+endpoint+" "+strconv.Itoa(int(port))+"\n", 1))
 	// A profile now contains a bearer proof. Validate the VPN server identity
-	// before sending it, in addition to the template's CA/purpose validation.
+	// before sending it, in addition to the template's CA validation.
 	configured = append(configured, []byte("\nverify-x509-name "+endpoint+" name\n")...)
 	return func(ctx context.Context, owner Owner) ([]byte, error) {
 		if ctx.Err() != nil || !owner.Valid() {

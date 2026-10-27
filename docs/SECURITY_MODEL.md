@@ -52,7 +52,10 @@ controlled restart, or confirmed fencing is required. EC2 adapter tests use mock
 real stop operations and IAM/EC2/database failures need deployment testing.
 
 1. **VPN server identity.** The current `examples/client.ovpn.example` trusts the
-   CA, validity period, and EKU, but does not verify a specific VPN server.
+   CA and validity period, but does not verify a specific VPN server. Explicit
+   KU/EKU directives are omitted for [client compatibility](PROFILES.md#client-template-compatibility).
+   Bound downloads additionally enforce an exact CN match before sending their
+   profile proof; legacy downloads do not receive that guarantee.
    The selected direction (2026-10-05) is a public CA plus client-side DNS SAN
    verification, without CN fallback. This is not implemented: stock OpenVPN
    Connect profile support is a blocker. See the [client compatibility evidence

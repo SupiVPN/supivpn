@@ -1,5 +1,5 @@
 # TEMPORARY: server certificate name verification is intentionally disabled.
-# CA validation, certificate validity and TLS server purpose checks remain enabled.
+# CA validation and certificate validity checks remain enabled.
 # This can accept other servers with certificates chaining to the same trusted CA.
 client
 # Template only: use supivpn-profile to issue an importable profile.
@@ -12,9 +12,7 @@ resolv-retry infinite
 connect-retry 2 10
 ping 10
 ping-restart 60
-# Let's Encrypt tlsserver uses Digital Signature without Key Encipherment.
-remote-cert-ku 80
-remote-cert-eku "TLS Web Server Authentication"
+# No explicit KU/EKU directives: keep the profile portable across clients.
 tls-version-min 1.2
 setenv CLIENT_CERT 0
 hand-window 180
