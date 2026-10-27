@@ -123,9 +123,62 @@ local address. When client connectivity disappears, OpenVPN waits for keepalive
 timeout; server `keepalive 10 60` means approximately 120 seconds.
 Until failure is detected, a new attempt may be rejected because the slot is occupied.
 
-Lost cancel is retried within bounds; the agent closes its OpenVPN pair if
-release/application remains uncertain. This protects accounting, but controller
-failure may disconnect other users on the same node.
+After a confirmed disconnect, transient cancel failures are retried while the
+agent generation's lease remains live. Retries back off up to 16 seconds; the
+shared worker still makes at most four calls per second and keeps at most 32
+jobs. Repeated cancellation is idempotent, including a response lost after commit.
+The cluster slot remains occupied until cancellation commits. A temporary cancel
+outage does not by itself stop unrelated live tunnels after 30 seconds.
+This retry improvement is unreleased; v0.8.1 stops the pair after that deadline.
+
+The delivery deadline for an uncertain applied ACK, the live-lease requirement,
+generation checks and queue capacity remain enforced. Permanent API refusals or
+exhausting the queue still stop the pair. If heartbeats also fail until the local
+40-second lease expires, the agent stops; recovery then needs a clean restart of
+the agent/OpenVPN pair or confirmed fencing. Merely restarting Lambda cannot
+prove that an old VPN tunnel has stopped.
+
+### Session limit after a controller update
+
+A Lambda cold start does not invalidate live sessions. An `acknowledged` row is
+not necessarily an occupied slot: only grants from the node's current generation,
+without a confirmed stopped fence, count. A clean pair restart establishes a new
+generation before releasing OpenVPN's startup hold. Historical rows may remain
+`acknowledged` until cleanup without blocking reconnect on either node.
+
+Use this read-only diagnostic query with an authorized operator connection. It
+shows counts without usernames, profile secrets, login tickets or SAML data:
+
+```sql
+SELECT l.node_id, l.state, l.ack_result,
+       l.generation = n.generation AS current_generation,
+       n.fence_state,
+       n.lease_expires_at > clock_timestamp() AS lease_live,
+       count(*) AS rows,
+       count(*) FILTER (
+           WHERE l.generation = n.generation
+             AND n.fence_state <> 'stopped'
+             AND l.denial_reason = ''
+             AND (l.ack_result IS NULL OR l.ack_result = 'applied')
+       ) AS occupied_slots
+FROM supivpn.logins l
+LEFT JOIN supivpn.nodes n ON n.node_id = l.node_id
+WHERE l.state IN ('decided', 'acknowledged')
+GROUP BY l.node_id, l.state, l.ack_result,
+         l.generation = n.generation, n.fence_state,
+         n.lease_expires_at > clock_timestamp()
+ORDER BY l.node_id, l.state;
+```
+
+For a current-generation slot, correlate `vpn.disconnected` with
+`controller.request_retry` (`operation=cancel`) on the agent and
+`agent.connection_cancelled` in the agent Lambda. A missing disconnect can mean
+the daemon is still waiting for the transport timeout; inspect its complete
+status before treating that tunnel as closed. After a heartbeat outage, check
+that the old pair stopped and its supervised restart established a new generation.
+If it cannot restart, use the verified shutdown/recovery procedure below.
+Do not delete login rows or clear slots based only on their age or an expired
+lease: doing so can admit an extra connection while the original tunnel survives.
 
 ## Heartbeat
 
@@ -237,6 +290,10 @@ Controller 8 supports old agents: it sends `username` only with explicit
 
 `make integration` checks concurrent slot allocation, lost ACK/cancel, migrations,
 unlimited sessions, expiry without unsafe release, fencing, and recovery.
+The restricted-role tests cover both Lambda gateway formats, handler replacement,
+90-second cancel outages, lost committed replies, short whole-API outages and
+clean generation restart after lease expiry. These are local fault-injection
+tests with PostgreSQL; they do not deploy or update live Lambda functions.
 Unit/race checks cover group duration, omitted/0/null configuration, signed IdP
 deadlines, expired IdP rejection, TLS rekey without extension, heartbeat, and
 isolation when terminating one user.

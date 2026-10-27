@@ -341,6 +341,9 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 		t.Fatal("inherited role accepted without SET permission")
 	}
 	exec("REVOKE pg_read_all_stats FROM supivpn_public_test")
+	t.Run("lambda-update-cancellation", func(t *testing.T) {
+		testLambdaUpdateCancellation(t, admin, public, agent)
+	})
 	for _, scenario := range []string{"lease-renewed-during-observation", "unmanaged-witness", "start-without-stop-reservation"} {
 		t.Run(scenario, func(t *testing.T) {
 			exec("TRUNCATE supivpn.nodes CASCADE")
