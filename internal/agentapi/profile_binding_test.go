@@ -66,3 +66,29 @@ func TestUnboundRegisterCannotUseLegacyStore(t *testing.T) {
 		}
 	}
 }
+
+type migrationStore struct{ proofStore }
+
+func (s *migrationStore) LegacyProfilesAllowed(node string) bool { return node == "legacy-node" }
+
+func TestLegacyAdmissionRequiresTrustedNodeAndNoProofFields(t *testing.T) {
+	base := `{"generation":"g1","cid":7,"kid":2,"ticket":"` + strings.Repeat("x", 43) + `"`
+	for _, tc := range []struct {
+		node, suffix string
+		want         int
+	}{
+		{"legacy-node", "}", 204}, {"bound-node", "}", 400},
+		{"legacy-node", `,"profile_id":null}`, 400},
+		{"legacy-node", `,"profile_id":""}`, 400},
+		{"legacy-node", `,"profile_secret":""}`, 400},
+		{"legacy-node", `,"profile_id":"bad","profile_secret":"bad"}`, 400},
+		{"bound-node", `,"node_id":"legacy-node"}`, 400},
+	} {
+		s := &migrationStore{}
+		w := httptest.NewRecorder()
+		New(s, time.Minute).ServeHTTP(w, requestFor("/agent/v1/register", base+tc.suffix, tc.node))
+		if w.Code != tc.want || (s.calls > 0) != (tc.want == 204) {
+			t.Fatal("unsafe legacy API admission", w.Code)
+		}
+	}
+}

@@ -157,7 +157,9 @@ or exclusive features.
 v0.9.0 adds [optional TCP fallback alongside UDP](docs/TRANSPORTS.md).
 TCP is disabled by default; enabling it preserves the shared address pool and
 uses the same owner-bound profile on both transports. Existing bound UDP-only
-profiles remain valid; migrate unbound profiles on v0.8.x before upgrading.
+profiles remain valid. v0.9.0 refuses unbound profiles; the planned v0.9.1 patch
+restores an [explicit transition through v0.9.x](docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x).
+Final removal is scheduled for v0.10.0; new installations remain bound-only.
 
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** for a fresh Debian 13 server:
 install `supivpn-node`, `supivpn-controller` and the `supivpn` metapackage,
@@ -212,7 +214,8 @@ Bounded EC2 stop/start recovery is implemented. Automatic VM replacement, ASG,
 and rolling updates belong to the infrastructure deployment, not this checkout.
 Wrapping key rotation with overlap is not implemented. From v0.8.0, bound profiles
 can be blocked to prevent new admission; blocking does not terminate established
-tunnels. v0.9.0 removes admission for unbound profiles. See [local administration](docs/CLI.md) and
+tunnels. Legacy migration never provides the bound-owner guarantee and cannot
+revoke an old key by blocking a bound profile. See [local administration](docs/CLI.md) and
 [Lambda administration](docs/LAMBDA_PROFILE_ADMIN.md).
 Local tests do not guarantee the behavior of a specific load balancer, routing setup, or IdP.
 

@@ -106,11 +106,19 @@ func TestProfileListenerFormatsAndAge(t *testing.T) {
 	if !VerifyClientMetadata("required", "0", bound, now, time.Hour) {
 		t.Fatal("current metadata refused")
 	}
+	if !VerifyClientMetadata("legacy", "1", ts, now, time.Hour) {
+		t.Fatal("explicit legacy metadata refused")
+	}
+	if VerifyClientMetadata("legacy", "1", ts, now.Add(time.Hour+time.Second), time.Hour) ||
+		VerifyClientMetadata("legacy", "1", ts, now.Add(-301*time.Second), 0) ||
+		VerifyClientMetadata("legacy", "1", ts, now, -time.Second) {
+		t.Fatal("legacy gate ignored timestamp or age policy")
+	}
 	for _, tc := range []struct {
 		mode, kind string
 		data       []byte
 	}{
-		{"legacy", "1", ts},
+		{"legacy", "0", ts}, {"legacy", "1", bound}, {"legacy", "1", nil},
 		{"legacy", "0", bound}, {"required", "1", ts}, {"required", "0", append([]byte("SupiVPN/profile-auth/v2\x00"), ts...)},
 		{"required", "0", bound[:len(bound)-1]}, {"legacy", "1", append(ts, 0)}, {"unknown", "1", ts},
 	} {

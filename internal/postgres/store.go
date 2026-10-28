@@ -53,9 +53,10 @@ type Decision struct {
 }
 
 type Store struct {
-	pool      *pgxpool.Pool
-	fencer    Fencer
-	component Component
+	pool               *pgxpool.Pool
+	fencer             Fencer
+	component          Component
+	legacyProfileNodes map[string]bool
 }
 
 var _ controller.Backend = (*Store)(nil)
@@ -188,10 +189,16 @@ func (s *Store) lockNode(ctx context.Context, tx pgx.Tx, nodeID string) (string,
 	return generation, err
 }
 
-// Register refuses the removed unbound protocol, including callers using an
-// older API adapter. RegisterProfile is the only supported admission path.
+// Register retains the unbound protocol only for explicitly configured migration nodes.
 func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration) error {
-	return ErrConflict
+	if !s.LegacyProfilesAllowed(a.NodeID) {
+		return ErrConflict
+	}
+	err := s.register(ctx, a, c, ticket, lifetime, nil)
+	if err == nil {
+		logConnection(ctx, "profile.legacy_login", ticketHash(ticket), a, c)
+	}
+	return err
 }
 
 func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration, proof *profile.Credential) error {
@@ -493,8 +500,9 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err != nil {
 			return err
 		} else if id == "" {
-			// Also reject pending unbound logins created before the upgrade.
-			d.GroupName, d.DenialReason = "", "profile_refused"
+			if !s.LegacyProfilesAllowed(r.agent.NodeID) {
+				d.GroupName, d.DenialReason = "", "profile_refused"
+			}
 		} else {
 			ok, err := s.profileOwnerActive(ctx, tx, id, d.SubjectHash)
 			if err != nil {

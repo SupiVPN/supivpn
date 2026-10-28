@@ -158,13 +158,19 @@ func GenerateBoundClientKey(serverPEM []byte, now time.Time) ([]byte, error) {
 
 // VerifyClientMetadata consumes OpenVPN's metadata_file (which omits the type
 // byte), after OpenVPN has authenticated it using the wrapping key. Only the
-// identity-bound format is accepted. maxAge zero means no age limit.
+// selected format is accepted; the two formats never fall back to each other.
+// Legacy support ends in v0.10.0. maxAge zero means no age limit.
 func VerifyClientMetadata(mode string, kind string, data []byte, now time.Time, maxAge time.Duration) bool {
 	if maxAge < 0 || now.Unix() < 0 {
 		return false
 	}
 	var timestamp []byte
 	switch mode {
+	case "legacy":
+		if kind != "1" || len(data) != 8 {
+			return false
+		}
+		timestamp = data
 	case "required":
 		if kind != "0" || len(data) != len(bindingMarker)+8 || string(data[:len(bindingMarker)]) != bindingMarker {
 			return false

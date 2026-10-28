@@ -39,9 +39,11 @@ and installs only the assigned client address using fixed iproute2 commands.
 Remove this client's shared-pool route on OpenVPN disconnect.
 Use only with explicit \-route-device and \-route-network.
 .TP
-.BI \-verify-profile-metadata " required"
+.BI \-verify-profile-metadata " required|legacy"
 Validate authenticated tls-crypt-v2 metadata for the selected listener format.
 Intended for OpenVPN's tls-crypt-v2-verify hook; starts no services.
+Legacy mode accepts historical unbound keys only. It also requires an explicit
+legacy agent and controller node allowlist, and will be removed in v0.10.0.
 .TP
 .BI \-profile-max-age " duration"
 Optional maximum key age for the metadata hook, such as 2160h.

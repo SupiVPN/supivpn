@@ -224,8 +224,15 @@ func New(store Store, pending time.Duration) http.Handler {
 			err = store.RotateNode(ctx, node, q.Previous, q.Generation)
 		case "/agent/v1/register":
 			if proof == nil {
-				fail(w, 400)
-				return
+				legacy, ok := store.(interface {
+					LegacyProfilesAllowed(string) bool
+					Register(context.Context, postgres.Agent, postgres.Connection, string, time.Duration) error
+				})
+				if !ok || !legacy.LegacyProfilesAllowed(a.NodeID) {
+					fail(w, 400)
+					return
+				}
+				err = legacy.Register(ctx, a, c, q.Ticket, pending)
 			} else if bound, ok := store.(interface {
 				RegisterProfile(context.Context, postgres.Agent, postgres.Connection, string, time.Duration, profile.Credential) error
 			}); ok {

@@ -87,10 +87,15 @@ func readConfig(path string) (config, *url.URL, error) {
 		return c, nil, errors.New("use a dedicated SAML encryption key separate from TLS")
 	}
 	u, err := url.Parse(c.PublicURL)
-	if c.ProfileBinding != "" && c.ProfileBinding != "required" || c.RemoteController == nil {
-		return c, nil, errors.New("identity-bound profiles require profile_binding required and a remote controller; unbound mode is no longer supported")
+	if c.ProfileBinding != "" && c.ProfileBinding != "required" && c.ProfileBinding != "legacy" || c.RemoteController == nil {
+		return c, nil, errors.New("profile_binding requires required or explicit legacy migration mode and a remote controller")
 	}
-	c.ProfileBinding = "required"
+	if c.ProfileBinding == "" {
+		c.ProfileBinding = "required"
+	}
+	if c.ProfileBinding == "legacy" && c.TCPManagementSocket != "" {
+		return c, nil, errors.New("legacy migration supports only the separate UDP listener; TCP requires bound profiles")
+	}
 	if c.TCPManagementSocket != "" && (!filepath.IsAbs(c.TCPManagementSocket) || filepath.Clean(c.TCPManagementSocket) != c.TCPManagementSocket || c.TCPManagementSocket == c.ManagementSocket || filepath.Dir(c.TCPManagementSocket) != filepath.Dir(c.ManagementSocket) || c.SAMLGroupsAttribute == "") {
 		return c, nil, errors.New("TCP management requires groups and a distinct canonical socket in the primary management directory")
 	}
@@ -150,6 +155,9 @@ func run(ctx context.Context, path string) (runErr error) {
 		return err
 	}
 	defer closeLogs()
+	if c.ProfileBinding == "legacy" {
+		logging.Emit(ctx, "profile.legacy_enabled", slog.String("node_id", c.RemoteController.NodeID))
+	}
 	stage = "startup_tls"
 	keyPair, err := tls.LoadX509KeyPair(c.TLSCertificate, c.TLSPrivateKey)
 	if err != nil {
@@ -359,7 +367,7 @@ func Main() {
 	routeDisconnect := flag.Bool("route-disconnect", false, "remove this client's shared pool route on OpenVPN disconnect")
 	check := flag.Bool("check-config", false, "validate configuration without starting services")
 	operator := flag.Bool("operator-request", false, "send a local user-session request from stdin")
-	metadataMode := flag.String("verify-profile-metadata", "", "OpenVPN tls-crypt-v2-verify mode: required (unbound profiles are refused)")
+	metadataMode := flag.String("verify-profile-metadata", "", "OpenVPN tls-crypt-v2-verify mode: required or legacy (migration until v0.10.0)")
 	metadataAge := flag.Duration("profile-max-age", 0, "maximum profile age; zero disables age expiry")
 	flag.Parse()
 	if *routeDisconnect || (*learn && (*routeDevice != "" || *routeNetwork != "")) {
