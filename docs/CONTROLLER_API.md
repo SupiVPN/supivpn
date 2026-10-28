@@ -179,9 +179,14 @@ Unknown/duplicate/nested/null fields are rejected. Requests must not contain
 `node_id`. `generation` is a required unique process generation; CID/KID are
 non-negative signed 64-bit integers. With TCP enabled, the agent reserves bit 62
 of CID to distinguish identical daemon-local IDs; all services must preserve the
-integer exactly. Retries do not extend the original deadline. From v0.9.0,
-registration without a valid active profile proof is refused; no unbound fallback
-is available. Never log the profile secret.
+integer exactly. Retries do not extend the original deadline. Registration
+without a valid active profile proof is refused by default. The planned v0.9.1
+patch permits omission of both proof fields only for authenticated nodes in
+`legacy_profile_nodes`, until removal in v0.10.0. The same allowlist is required
+in the public and agent components; partial, null or malformed fields never
+fall back. A legacy node cannot register new-format proofs. See the
+[migration procedure](PROFILE_BINDING.md#explicit-legacy-transition-through-v09x).
+Never log the profile secret.
 
 | Path | JSON fields besides generation | Success |
 | --- | --- | --- |

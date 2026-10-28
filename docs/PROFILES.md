@@ -23,8 +23,10 @@ The template no longer requires explicit KU/EKU extensions through these
 directives; TLS-library validation is client-specific. Continue provisioning
 VPN server certificates for TLS server authentication.
 
-The v0.9.0 controller issues only bound profiles; unbound profiles must be
-replaced before upgrading. See [required ownership](PROFILE_BINDING.md).
+The controller issues only bound profiles. The planned v0.9.1 patch restores
+explicit acceptance of existing unbound profiles through v0.9.x; migrate them
+before v0.10.0. Published v0.9.0 does not support that exception.
+See [required ownership and migration](PROFILE_BINDING.md).
 DNS SAN verification remains a separate [client limitation](TLS_CRYPT_V2.md#planned-dns-san-verification).
 
 Updating the package or Lambda ZIP does not rewrite an existing template copied

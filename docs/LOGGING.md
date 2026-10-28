@@ -170,6 +170,7 @@ identifies just one Lambda invocation and must not replace it.
 | `agent.login_registered`, `agent.decision_delivered` | Connection registered, or a completed decision returned to its bound agent; INFO |
 | `agent.decision_acknowledged`, `agent.connection_cancelled` | Agent result or disconnect recorded in PostgreSQL; INFO |
 | `profile.issued`, `profile.issue_failed` | Profile generated (not confirmed downloaded), or generation failed |
+| `profile.legacy_enabled`, `profile.legacy_login` | Explicit migration policy enabled, or unbound login registered; WARN, planned for v0.9.1 and removed in v0.10.0 |
 | `controller.ready`, `agent.https_ready`, `agent.management_ready` | Startup milestones; INFO |
 | `controller.request_retry`, `controller.request_refused` | Remote operation/status, without payload or error text; WARN |
 | `controller.lease_expired`, `controller.generation_rejected` | Agent safety shutdown conditions; ERROR |

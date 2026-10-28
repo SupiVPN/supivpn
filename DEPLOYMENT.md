@@ -19,8 +19,11 @@ code (IaC) are next on the roadmap, including an **HA active-active cluster**.
 The [existing cluster capabilities](docs/HA.md) describe the runtime and network
 requirements; the production guide and IaC are not delivered by this walkthrough.
 
-**Evaluation status:** v0.9.0 requires bound profiles and verifies the VPN
-server's exact certificate common name. This is not DNS SAN matching;
+**Evaluation status:** this setup uses bound profiles and verifies the VPN
+server's exact certificate common name. The planned v0.9.1
+[legacy transition](docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x)
+is an explicit exception for existing deployments through v0.9.x, removed in
+v0.10.0; first-time setup does not enable it. This is not DNS SAN matching;
 [DNS SAN verification](docs/TLS_CRYPT_V2.md#planned-dns-san-verification)
 remains a production blocker. The helper does not remove that limitation.
 

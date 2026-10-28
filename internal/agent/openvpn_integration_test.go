@@ -204,6 +204,8 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 		{"expanded-core", []string{devGroup, coreGroup}, "10.203.0.129"},
 		{"no-group", []string{unrelatedGroup}, ""},
 		{"go-core", []string{coreGroup}, "10.203.0.2"},
+		{"go-legacy-gated", []string{coreGroup}, "10.203.0.2"},
+		{"native-legacy-gated", []string{coreGroup}, "10.203.0.2"},
 		{"go-delayed-auth", []string{coreGroup}, "10.203.0.2"},
 		{"go-no-group", []string{unrelatedGroup}, ""},
 		{"go-bound", []string{coreGroup}, "10.203.0.2"},
@@ -211,6 +213,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 		{"go-bound-untrusted-ca", nil, ""},
 		{"go-bound-expired-cert", nil, ""},
 		{"go-bound-on-legacy", nil, ""},
+		{"go-bound-stripped-on-legacy", nil, ""},
 		{"go-legacy-on-bound", nil, ""},
 		{"go-wrong-key", nil, ""},
 		{"go-tampered", nil, ""},
@@ -220,7 +223,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			if linuxClient != "" && !tlsRejected && tc.name != "go-core" && tc.name != "go-delayed-auth" && tc.name != "go-no-group" && tc.name != "go-bound" && tc.name != "go-bound-on-legacy" && tc.name != "go-legacy-on-bound" {
 				t.Skip("OpenVPN 3 Linux SAML interoperability subset")
 			}
-			bound := tc.name == "go-bound" || tc.name == "go-bound-on-legacy" || tlsRejected
+			bound := tc.name == "go-bound" || tc.name == "go-bound-on-legacy" || tc.name == "go-bound-stripped-on-legacy" || tlsRejected
 			proof, err := profile.NewCredential()
 			if err != nil {
 				t.Fatal(err)
@@ -262,9 +265,9 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				"/opt/supivpn/supivpn", agentBinary,
 				"verb 2", "verb 3",
 			).Replace(openVPNServerTemplate)
-			if strings.Contains(tc.name, "bound") {
+			if strings.Contains(tc.name, "bound") || strings.HasSuffix(tc.name, "legacy-gated") {
 				mode := "required"
-				if tc.name == "go-bound-on-legacy" {
+				if strings.HasSuffix(tc.name, "on-legacy") || strings.HasSuffix(tc.name, "legacy-gated") {
 					mode = "legacy"
 				}
 				config += "\ntls-crypt-v2-verify \"" + agentBinary + " -verify-profile-metadata " + mode + "\"\n"
@@ -335,7 +338,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 					clientKey = pem.EncodeToMemory(block)
 				}
 				data, err := profile.Render([]byte(template), clientKey)
-				if bound {
+				if bound && tc.name != "go-bound-stripped-on-legacy" {
 					data, err = profile.RenderBound([]byte(template), clientKey, proof)
 				}
 				if err != nil {
@@ -367,7 +370,10 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				credentials = proof.ID + "\n" + proof.Secret + "\n"
 			}
 			writeTestFile(t, authFile, []byte(credentials))
-			invalidKey := tc.name == "missing-key" || strings.HasSuffix(tc.name, "wrong-key") || tc.name == "go-tampered" || tc.name == "go-bound-on-legacy" || tc.name == "go-legacy-on-bound"
+			invalidKey := tc.name == "missing-key" || strings.HasSuffix(tc.name, "wrong-key") || tc.name == "go-tampered" || strings.HasSuffix(tc.name, "on-legacy") || tc.name == "go-legacy-on-bound"
+			if tc.name == "go-bound-stripped-on-legacy" {
+				writeTestFile(t, authFile, []byte("unused-test\nunused-test\n"))
+			}
 			clientArgs := []string{"--config", output,
 				"--auth-user-pass", authFile,
 				"--dev", "supivpnc", "--dev-type", "tun", "--disable-dco",

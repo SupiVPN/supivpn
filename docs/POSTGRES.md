@@ -276,7 +276,9 @@ failure must stop the deployment before traffic resumes.
 
 v0.8.0 binaries reject schema 12. Mixed v0.8.0/v0.8.1 Lambdas are unsupported;
 after commit, use only a verified schema-12-compatible build for runtime rollback.
-Do not down-migrate or restore stale authorization state. The v0.9.0 change ends unbound-profile support after 0.8.x; see the
+Do not down-migrate or restore stale authorization state. v0.9.0 refused unbound
+profiles; the planned v0.9.1 explicit transition restores support through v0.9.x
+without changing schema 12. Final removal is v0.10.0; see the
 [required migration](PROFILE_BINDING.md#required-ownership-in-v090). This does not promise mixed
 binary/schema versions. Check profile list/status and one existing bound profile
 login after upgrade, then check block/reactivate with the current revision.

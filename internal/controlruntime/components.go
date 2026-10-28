@@ -7,15 +7,20 @@ package controlruntime
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/url"
 	"time"
 
 	"supivpn/internal/agentapi"
+	"supivpn/internal/logging"
 	"supivpn/internal/operatorapi"
 	"supivpn/internal/postgres"
 )
 
 func OpenAgent(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error)) (*Application, error) {
+	if err := postgres.ValidateLegacyProfileNodes(c.LegacyProfileNodes); err != nil {
+		return nil, err
+	}
 	if c.PendingSeconds < 30 || c.PendingSeconds > 180 || c.Gateway == nil || c.Profile != nil || c.IDPMetadata != "" || len(c.Groups) != 0 || c.VM != nil || c.AssertionEncryption != nil || c.VPNLoginConfirmation != nil {
 		return nil, errors.New("agent component requires only gateway, public URL, pending limit and database TLS configuration")
 	}
@@ -32,7 +37,19 @@ func OpenAgent(ctx context.Context, c Config, dsn string, password func(context.
 		pool.Close()
 		return nil, err
 	}
+	store, err = store.WithLegacyProfiles(c.LegacyProfileNodes)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	logLegacyProfiles(ctx, c.LegacyProfileNodes)
 	return &Application{Agents: Bounded(agentapi.New(store, time.Duration(c.PendingSeconds)*time.Second)), Origin: origin, pool: pool, store: store}, nil
+}
+
+func logLegacyProfiles(ctx context.Context, nodes []string) {
+	for _, node := range nodes {
+		logging.Emit(ctx, "profile.legacy_enabled", slog.String("node_id", node))
+	}
 }
 
 // Recovery has no HTTP gateway, SAML metadata, profile issuer or wrapping key.

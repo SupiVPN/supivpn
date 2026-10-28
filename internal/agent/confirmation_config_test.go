@@ -95,7 +95,9 @@ func TestTransportConfigurationDefaultsAndBoundaries(t *testing.T) {
 		{"same socket", "/run/supivpn/management.sock", "required", false},
 		{"other directory", "/run/other/management.sock", "required", false},
 		{"noncanonical", "/run/supivpn/../supivpn/tcp.sock", "required", false},
-		{"legacy", "", "legacy", false},
+		{"legacy", "", "legacy", true},
+		{"legacy TCP", "/run/supivpn/management-tcp.sock", "legacy", false},
+		{"unknown binding", "", "optional", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := confirmationConfigFile(t, "", true)
@@ -119,7 +121,11 @@ func TestTransportConfigurationDefaultsAndBoundaries(t *testing.T) {
 			if (err == nil) != tc.valid {
 				t.Fatal("unexpected transport validation result", err)
 			}
-			if tc.valid && (got.TCPManagementSocket != tc.socket || got.ProfileBinding != "required") {
+			expectedBinding := tc.binding
+			if expectedBinding == "" {
+				expectedBinding = "required"
+			}
+			if tc.valid && (got.TCPManagementSocket != tc.socket || got.ProfileBinding != expectedBinding) {
 				t.Fatal("unsafe defaults")
 			}
 		})

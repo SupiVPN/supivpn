@@ -54,7 +54,7 @@ func (s *Store) fetchRecord(ctx context.Context, a Agent, c Connection, hash []b
 			return ErrNoDecision
 		}
 		if r.denial == "" {
-			if err := s.activeLoginProfile(ctx, tx, hash); err != nil {
+			if err := s.activeLoginProfile(ctx, tx, hash, r.agent.NodeID); err != nil {
 				return err
 			}
 		}
@@ -114,7 +114,7 @@ func (s *Store) Acknowledge(ctx context.Context, a Agent, id string, outcome Out
 			return ErrConflict
 		}
 		if outcome == Applied {
-			if err := s.activeLoginProfile(ctx, tx, hash); err != nil {
+			if err := s.activeLoginProfile(ctx, tx, hash, r.agent.NodeID); err != nil {
 				return err
 			}
 		}
