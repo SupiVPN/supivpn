@@ -38,7 +38,7 @@ operator session-disconnect action for immediate termination.
 
 ## Required ownership in v0.9.0
 
-**Unreleased change:** v0.9.0 requires bound profiles on every supported listener.
+**Available since v0.9.0:** bound profiles are required on every supported listener.
 The `legacy` agent mode and legacy metadata gate are removed. Omitting
 `profile_binding` now selects `required`; explicitly setting `legacy` fails
 startup. The public controller likewise defaults `profile.binding` to `required`

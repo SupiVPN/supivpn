@@ -223,7 +223,7 @@ shared heartbeat loss cannot authorize node stops. See the fencing contract.
 503 means backend unavailable. An identical ACK may be retried after a lost reply.
 Confirmed-disconnect cancellation also survives transient failures while the
 node lease remains live; see [retry bounds and update diagnostics](SESSIONS.md#client-disconnection).
-This agent retry change is unreleased and uses the existing API/schema.
+This agent retry change is available since v0.8.2 and uses the existing API/schema.
 Fetch 204 cannot keep a request pending indefinitely: the agent enforces its deadline.
 Internal database errors and SAML bodies never appear in responses or logs.
 

@@ -287,7 +287,7 @@ automatically and has no independent enablement. Stopping only the OpenVPN unit
 is not a maintenance stop: the node's `Upholds=` dependency starts it again.
 Use `systemctl stop supivpn-node.service` to leave both stopped.
 
-For the optional TCP configuration planned for v0.9.0, the same node unit also
+For the optional TCP configuration available since v0.9.0, the same node unit also
 manages `supivpn-openvpn-tcp.service`. It starts only when
 `/etc/supivpn/node/openvpn-tcp.conf` exists. Its `Wants=` dependency is evaluated
 once per node start, avoiding continuous attempts when TCP is disabled.

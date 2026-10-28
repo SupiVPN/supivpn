@@ -4,7 +4,7 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
 Nodes accept VPN connections through a shared UDP endpoint. With the optional
-TCP fallback planned for v0.9.0, the same public name also exposes TCP/443.
+TCP fallback available since v0.9.0, the same public name also exposes TCP/443.
 TCP remains disabled by default. Controllers use
 PostgreSQL for SAML requests, decisions, and replay protection.
 OpenVPN sessions and IP leases remain local to each node.
