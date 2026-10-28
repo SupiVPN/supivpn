@@ -133,7 +133,7 @@ shared worker still makes at most four calls per second and keeps at most 32
 jobs. Repeated cancellation is idempotent, including a response lost after commit.
 The cluster slot remains occupied until cancellation commits. A temporary cancel
 outage does not by itself stop unrelated live tunnels after 30 seconds.
-This retry improvement is unreleased; v0.8.1 stops the pair after that deadline.
+This retry improvement is available since v0.8.2; v0.8.1 stops the pair after that deadline.
 
 The delivery deadline for an uncertain applied ACK, the live-lease requirement,
 generation checks and queue capacity remain enforced. Permanent API refusals or
@@ -266,7 +266,7 @@ Contract: [docs/RECOVERY.md](RECOVERY.md).
 
 ## Upgrades and verification
 
-The upcoming v0.9.0 controller requires **schema 12** and bound profiles for
+The v0.9.0 controller requires **schema 12** and bound profiles for
 both VM and Lambda deployments. The older v0.8.1 VM controller supports
 **schemas 7/8/9/10/11/12**; its isolated Lambda components and opt-in profile
 features require **schema 12** (v0.8.0 uses 11).

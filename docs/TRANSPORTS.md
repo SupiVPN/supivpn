@@ -3,7 +3,7 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
-**Unreleased: planned for v0.9.0.** UDP remains the default. TCP is an explicit
+**Available since v0.9.0.** UDP remains the default. TCP is an explicit
 operator choice and does not replace profile ownership or SAML authorization.
 
 ## Enable TCP in a new Debian setup

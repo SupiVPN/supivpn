@@ -154,9 +154,10 @@ or exclusive features.
 
 ## Deploying SupiVPN
 
-On the v0.9.0 development branch, see [UDP and optional TCP fallback](docs/TRANSPORTS.md).
+v0.9.0 adds [optional TCP fallback alongside UDP](docs/TRANSPORTS.md).
 TCP is disabled by default; enabling it preserves the shared address pool and
-uses the same owner-bound profile on both transports. This is not yet a published release.
+uses the same owner-bound profile on both transports. Existing bound UDP-only
+profiles remain valid; migrate unbound profiles on v0.8.x before upgrading.
 
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** for a fresh Debian 13 server:
 install `supivpn-node`, `supivpn-controller` and the `supivpn` metapackage,

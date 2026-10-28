@@ -85,9 +85,8 @@ on other VMs also needs the [appropriate authenticated transport](docs/CONTROLLE
   guarantee retry on a node with free capacity. Size each group's surviving-node
   pools and connection limits for failover. See [address planning](docs/HA.md#node-count-and-group-expansion).
 
-The upcoming minor release also includes [supivpn-cli](docs/CLI.md) for local
-service status, profile administration and session termination. It is not in
-the currently published 0.7 packages. Lambda uses the temporary
+Since v0.8.0, the metapackage also includes [supivpn-cli](docs/CLI.md) for local
+service status, profile administration and session termination. Lambda uses the temporary
 [profile database procedure](docs/LAMBDA_PROFILE_ADMIN.md).
 
 ## 1. Prepare the VM and packages
@@ -284,7 +283,7 @@ do not delete state or rerun setup blindly. `init` is not an upgrade command.
 
 ### Customize the generated configuration
 
-For the upcoming v0.9.0 setup, TCP fallback is **disabled by default**. Set
+Since v0.9.0, setup supports TCP fallback, **disabled by default**. Set
 `"tcp_fallback": {"enabled": true, "port": 443}` in the setup input to add it.
 Both transports share the existing address pool; no half is reserved for TCP.
 See [transport configuration and existing-host migration](docs/TRANSPORTS.md).
