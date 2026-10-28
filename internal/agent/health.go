@@ -5,8 +5,8 @@
 package agent
 
 import (
-    "context"
-    "time"
+	"context"
+	"time"
 )
 
 // Readiness requires completed tunnel initialization and a responsive daemon.
@@ -14,27 +14,27 @@ import (
 // Cache probes briefly because NLB sends checks from multiple AZs. No DB/API
 // polling here: the independent heartbeat worker enforces the controller lease.
 func (a *agent) loadBalancerReady(ctx context.Context) bool {
-    a.mu.Lock()
-    m := a.management
-    ready := ctx.Err() == nil && a.readyLocked() && (a.remote == nil || a.now().Before(a.remote.leaseUntil))
-    a.mu.Unlock()
-    if !ready || !m.initialized.Load() {
-        return false
-    }
-    if time.Now().UnixNano() < m.healthUntil.Load() {
-        return true
-    }
-    if !m.probeMu.TryLock() {
-        return false
-    }
-    defer m.probeMu.Unlock()
-    if err := m.command("pid"); err != nil {
-        m.close()
-        return false
-    }
-    if !m.initialized.Load() || !a.Ready(ctx) {
-        return false
-    }
-    m.healthUntil.Store(time.Now().Add(5 * time.Second).UnixNano())
-    return true
+	a.mu.Lock()
+	m := a.management
+	ready := ctx.Err() == nil && a.readyLocked() && (a.remote == nil || a.now().Before(a.remote.leaseUntil))
+	a.mu.Unlock()
+	if !ready || !m.tunnelsInitialized() {
+		return false
+	}
+	if time.Now().UnixNano() < m.healthUntil.Load() {
+		return true
+	}
+	if !m.probeMu.TryLock() {
+		return false
+	}
+	defer m.probeMu.Unlock()
+	if err := m.command("pid"); err != nil {
+		m.close()
+		return false
+	}
+	if !m.tunnelsInitialized() || !a.Ready(ctx) {
+		return false
+	}
+	m.healthUntil.Store(time.Now().Add(5 * time.Second).UnixNano())
+	return true
 }

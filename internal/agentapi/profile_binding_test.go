@@ -55,3 +55,14 @@ func TestProfileProofAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestUnboundRegisterCannotUseLegacyStore(t *testing.T) {
+	for _, s := range []Store{&recordedStore{}, &proofStore{}} {
+		w := httptest.NewRecorder()
+		body := `{"generation":"g1","cid":7,"kid":2,"ticket":"` + strings.Repeat("x", 43) + `"}`
+		New(s, time.Minute).ServeHTTP(w, requestFor("/agent/v1/register", body, "trusted-node"))
+		if w.Code != 400 {
+			t.Fatal("missing proof accepted by authenticated API")
+		}
+	}
+}

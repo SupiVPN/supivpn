@@ -75,7 +75,7 @@ func TestPostgresIntegration(t *testing.T) {
 	conn := postgres.Connection{CID: 7, KID: 2}
 	ticket := strings.Repeat("a", 43)
 	browser := sha256.Sum256([]byte("test-browser"))
-	reset := func(t *testing.T) {
+	reset := func(t *testing.T, owners ...[32]byte) {
 		t.Helper()
 		if _, err := p.Exec(ctx, "TRUNCATE supivpn.logins,supivpn.assertions,supivpn.nodes RESTART IDENTITY CASCADE"); err != nil {
 			t.Fatal("cannot reset disposable database")
@@ -83,7 +83,11 @@ func TestPostgresIntegration(t *testing.T) {
 		if err := s.RotateNode(ctx, actor.NodeID, "", actor.Generation); err != nil {
 			t.Fatal("cannot register node")
 		}
-		if err := s.Register(ctx, actor, conn, ticket, time.Minute); err != nil {
+		owner := sha256.Sum256([]byte("test-user"))
+		if len(owners) != 0 {
+			owner = owners[0]
+		}
+		if err := registerOwnedFixture(t, s, ctx, actor, conn, ticket, time.Minute, owner); err != nil {
 			t.Fatal("cannot register login")
 		}
 	}
@@ -114,14 +118,14 @@ func TestPostgresIntegration(t *testing.T) {
 	t.Run("registration-and-binding", func(t *testing.T) {
 		reset(t)
 		pending := started(t)
-		if err := second.Register(ctx, actor, conn, ticket, 180*time.Second); err != nil {
+		if err := registerOwnedFixture(t, second, ctx, actor, conn, ticket, 180*time.Second, sha256.Sum256([]byte("test-user"))); err != nil {
 			t.Fatal("registration retry failed")
 		}
 		again, err := s.Lookup(ctx, ticket, browser)
 		if err != nil || !again.ExpiresAt.Equal(pending.ExpiresAt) {
 			t.Fatal("registration retry extended expiry")
 		}
-		if err = s.Register(ctx, actor, conn, strings.Repeat("b", 43), time.Minute); !errors.Is(err, postgres.ErrConflict) {
+		if err = registerOwnedFixture(t, s, ctx, actor, conn, strings.Repeat("b", 43), time.Minute, sha256.Sum256([]byte("test-user"))); !errors.Is(err, postgres.ErrConflict) {
 			t.Fatal("second ticket for same connection accepted")
 		}
 		if err = second.Start(ctx, ticket, "request-other", browser); !errors.Is(err, controller.ErrLoginStarted) {
@@ -131,7 +135,7 @@ func TestPostgresIntegration(t *testing.T) {
 			t.Fatal("wrong browser accepted")
 		}
 		expire(t)
-		if err = s.Register(ctx, actor, conn, ticket, time.Minute); !errors.Is(err, controller.ErrLoginExpired) {
+		if err = registerOwnedFixture(t, s, ctx, actor, conn, ticket, time.Minute, sha256.Sum256([]byte("test-user"))); !errors.Is(err, controller.ErrLoginExpired) {
 			t.Fatal("expired registration resurrected")
 		}
 	})
@@ -201,7 +205,7 @@ func TestPostgresIntegration(t *testing.T) {
 			t.Fatal("first completion failed")
 		}
 		secondTicket := strings.Repeat("b", 43)
-		if err := s.Register(ctx, actor, postgres.Connection{CID: 8, KID: 2}, secondTicket, time.Minute); err != nil {
+		if err := registerOwnedFixture(t, s, ctx, actor, postgres.Connection{CID: 8, KID: 2}, secondTicket, time.Minute, sha256.Sum256([]byte("test-user"))); err != nil {
 			t.Fatal("registration failed")
 		}
 		if err := s.Start(ctx, secondTicket, "request-8", browser); err != nil {
@@ -250,7 +254,7 @@ func TestPostgresIntegration(t *testing.T) {
 		if err := s.RotateNode(ctx, "unknown-node", "missing-generation", "new-generation"); !errors.Is(err, postgres.ErrGeneration) {
 			t.Fatal("unknown predecessor accepted")
 		}
-		if err := s.Register(ctx, actor, postgres.Connection{CID: 9, KID: 2}, strings.Repeat("c", 43), time.Minute); !errors.Is(err, postgres.ErrGeneration) {
+		if err := registerOwnedFixture(t, s, ctx, actor, postgres.Connection{CID: 9, KID: 2}, strings.Repeat("c", 43), time.Minute, sha256.Sum256([]byte("test-user"))); !errors.Is(err, postgres.ErrGeneration) {
 			t.Fatal("old agent registered login")
 		}
 	})
@@ -410,9 +414,10 @@ func TestPostgresIntegration(t *testing.T) {
 		}
 	})
 	t.Run("signed-saml-across-controllers", func(t *testing.T) {
-		reset(t)
 		signer, md := testIdP(t)
 		a, _ := testApp(t, md)
+		subject := assertionFor(a)
+		reset(t, sha256.Sum256([]byte(subject.Issuer.Value+"\x00"+subject.Subject.NameID.Value)))
 		policy := controller.Config{Policy: controller.Policy{SAMLGroupsAttribute: "groups",
 			Groups: []controller.Group{{GroupName: "admins-vpn", Priority: 10}}}, PendingSeconds: 180, SessionSeconds: 900}
 		first, err := controller.New(policy, a.origin, a.sp, s, time.Now)

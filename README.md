@@ -64,7 +64,7 @@ See the [detailed architecture](docs/ARCHITECTURE.md) for deployment modes,
 state ownership and trust boundaries, and [IdP configuration](docs/IDENTITY_PROVIDER.md)
 for the current SAML integration requirements.
 
-See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
+See the [profile ownership and upgrade guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
 From **v0.8.1**, the profile registry also retains the verified SAML owner's name.
 Existing profiles remain valid without reissue; follow the
@@ -154,6 +154,10 @@ or exclusive features.
 
 ## Deploying SupiVPN
 
+On the v0.9.0 development branch, see [UDP and optional TCP fallback](docs/TRANSPORTS.md).
+TCP is disabled by default; enabling it preserves the shared address pool and
+uses the same owner-bound profile on both transports. This is not yet a published release.
+
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** for a fresh Debian 13 server:
 install `supivpn-node`, `supivpn-controller` and the `supivpn` metapackage,
 supply your hostname, certificate and IdP in one setup file, then run
@@ -207,7 +211,7 @@ Bounded EC2 stop/start recovery is implemented. Automatic VM replacement, ASG,
 and rolling updates belong to the infrastructure deployment, not this checkout.
 Wrapping key rotation with overlap is not implemented. From v0.8.0, bound profiles
 can be blocked to prevent new admission; blocking does not terminate established
-tunnels or revoke legacy profiles. See [local administration](docs/CLI.md) and
+tunnels. v0.9.0 removes admission for unbound profiles. See [local administration](docs/CLI.md) and
 [Lambda administration](docs/LAMBDA_PROFILE_ADMIN.md).
 Local tests do not guarantee the behavior of a specific load balancer, routing setup, or IdP.
 
@@ -215,9 +219,8 @@ Findings R1-R3 are fixed; maintenance and controlled recovery from blocked
 are documented in [RECOVERY.md](docs/RECOVERY.md). Cloud acceptance tests and the
 blockers in [SECURITY_MODEL.md](docs/SECURITY_MODEL.md) remain before production.
 
-The default legacy client template checks the CA, validity period and certificate
-purpose, but does not verify the VPN server name. Bound profiles add an exact
-certificate common-name check against the configured endpoint; this is not DNS
+The v0.9.0 controller issues only bound profiles, retaining CA validation and an
+exact certificate common-name check against the configured endpoint; this is not DNS
 SAN or wildcard matching. See [certificate requirements](docs/PROFILE_BINDING.md#vm-and-systemd-configuration).
 `tls-crypt-v2` does not replace server identity verification.
 

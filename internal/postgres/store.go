@@ -188,11 +188,10 @@ func (s *Store) lockNode(ctx context.Context, tx pgx.Tx, nodeID string) (string,
 	return generation, err
 }
 
-// Register is idempotent for the same ticket and connection. It never extends an
-// existing deadline, resurrects consumed state or accepts a second ticket for the
-// same connection. The future agent retains its random ticket across retries.
+// Register refuses the removed unbound protocol, including callers using an
+// older API adapter. RegisterProfile is the only supported admission path.
 func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration) error {
-	return s.register(ctx, a, c, ticket, lifetime, nil)
+	return ErrConflict
 }
 
 func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration, proof *profile.Credential) error {
@@ -493,7 +492,10 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		id, err := loginProfile(ctx, tx, hash)
 		if err != nil {
 			return err
-		} else if id != "" {
+		} else if id == "" {
+			// Also reject pending unbound logins created before the upgrade.
+			d.GroupName, d.DenialReason = "", "profile_refused"
+		} else {
 			ok, err := s.profileOwnerActive(ctx, tx, id, d.SubjectHash)
 			if err != nil {
 				return err

@@ -278,6 +278,10 @@ func (a *agent) handleEvent(e clientEvent) {
 		}
 	case "STATUS":
 		for cid, c := range a.connections {
+			// A snapshot proves absence only in the daemon that produced it.
+			if e.scoped && int(cid/transportCIDBit) != e.transport {
+				continue
+			}
 			if _, exists := e.clients[cid]; !exists {
 				// The daemon no longer owns this CID, even if it never emitted
 				// DISCONNECT for the abandoned handshake. Use normal cancellation.
@@ -291,6 +295,13 @@ func (a *agent) handleEvent(e clientEvent) {
 func (a *agent) logEvent(event string, c *connection, attrs ...slog.Attr) {
 	if c != nil {
 		attrs = append(attrs, slog.Uint64("cid", c.cid), slog.Uint64("kid", c.kid))
+		if a.config.TCPManagementSocket != "" {
+			transport := "udp"
+			if c.cid >= transportCIDBit {
+				transport = "tcp"
+			}
+			attrs = append(attrs, slog.String("transport", transport))
+		}
 	}
 	if a.remote != nil {
 		attrs = append(attrs, slog.String("node_id", a.remote.node), slog.String("generation", a.remote.generation))

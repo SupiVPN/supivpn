@@ -57,7 +57,7 @@ func TestRuntimeDatabaseRoleAndCredentialReconnect(t *testing.T) {
 	if err = store.RotateNode(ctx, "credential-test-node", "", "g1"); err != nil {
 		t.Fatal("runtime node write denied")
 	}
-	if err = store.Register(ctx, postgres.Agent{NodeID: "credential-test-node", Generation: "g1"}, postgres.Connection{CID: 1, KID: 1}, strings.Repeat("c", 43), time.Minute); err != nil {
+	if err = registerOwnedFixture(t, store, ctx, postgres.Agent{NodeID: "credential-test-node", Generation: "g1"}, postgres.Connection{CID: 1, KID: 1}, strings.Repeat("c", 43), time.Minute, [32]byte{1}); err != nil {
 		t.Fatal("runtime login/identity sequence write denied")
 	}
 	if _, err = store.Prune(ctx, 10); err != nil {

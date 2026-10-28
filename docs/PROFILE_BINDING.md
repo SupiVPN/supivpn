@@ -1,4 +1,4 @@
-# Profile ownership and a two-port migration
+# Profile ownership and enforcement
 
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
@@ -36,100 +36,53 @@ a profile stops new admission and incomplete admission checked by the controller
 it does not continuously revoke an already admitted tunnel. Use the existing
 operator session-disconnect action for immediate termination.
 
-## Two distinct listeners
+## Required ownership in v0.9.0
 
-The compatibility option is explicit on **each agent**:
+**Unreleased change:** v0.9.0 requires bound profiles on every supported listener.
+The `legacy` agent mode and legacy metadata gate are removed. Omitting
+`profile_binding` now selects `required`; explicitly setting `legacy` fails
+startup. The public controller likewise defaults `profile.binding` to `required`
+and rejects `legacy`. All production agents use a separate PostgreSQL-backed
+controller; the old embedded controller is no longer a supported deployment.
 
-- `"profile_binding": "legacy"` (also the transitional default when omitted):
-  existing SAML authorization without an owner-bound profile proof.
-- `"profile_binding": "required"`: a proof and its active verified owner are
-  required. A separate PostgreSQL-backed controller is mandatory; the embedded
-  controller does not implement the registry.
+This intentionally shortens the previously announced transition: v0.8.x remains
+the last compatible series for unbound profiles, instead of the previously
+planned v0.9.x. Operators must migrate those users **before upgrading to v0.9.0**.
+This is an explicit release scope change, not a claim of a newly classified
+Critical vulnerability. Do not expose an old listener alongside a new deployment
+and describe the whole deployment as ownership-enforced.
 
-Run two unmodified OpenVPN processes, each with its own agent, management socket,
-node identity and nonoverlapping VPN subnet. For example:
-
-| Listener | UDP port | Node ID (VM example) | Device | VPN subnet |
-| --- | --- | --- | --- | --- |
-| Existing profiles | 1194 | `vm-legacy` | `supivpn0` | `10.203.0.0/24` |
-| Bound profiles | 1195 | `vm-bound` | `supivpn1` | `10.204.0.0/24` |
-
-Choose subnets that do not overlap your existing networks. Keep group priorities,
-identity rules and the shared connection limit consistent, but assign each
-agent pools inside its own subnet. Configure forwarding, firewall, return routes
-and DNS for both. There is no tunnel migration between processes; reconnecting
-requires a new SAML login and obtains a different VPN IP.
-
-**Install the legacy format gate on every old listener before issuing any bound
-profile.** Port numbers alone are not protection: users can edit `remote`.
-The authenticated tls-crypt-v2 metadata distinguishes old timestamp keys from
-new versioned profile keys. The two gates accept disjoint formats:
-
-```text
-# Old listener (retain its other existing directives):
-script-security 2
-tls-crypt-v2-verify "/usr/sbin/supivpn -verify-profile-metadata legacy"
-
-# New listener (retain certificate validation, management auth and other settings):
-port 1195
-dev supivpn1
-server 10.204.0.0 255.255.255.0 nopool
-management /run/supivpn-bound/management.sock unix
-script-security 2
-tls-crypt-v2-verify "/usr/sbin/supivpn -verify-profile-metadata required"
-```
-
-These are fragments, not complete server configurations. Do not append duplicate
-`server`, `management`, `port` or `dev` options to an existing file. The helper
-reads only OpenVPN's authenticated `metadata_type` and `metadata_file`. Unknown
-formats, missing metadata and timestamps more than five minutes in the future
-fail closed. To enforce an age
-limit, add `-profile-max-age 2160h` to either command; zero defaults to no age limit.
-Use the same wrapping key when intended by your deployment. Never put the
-wrapping key or profile secret in command arguments, logs or support tickets.
-
-A new profile presented to the old listener is rejected before SAML, even if its
-inline proof was removed. An old profile on the new listener is also rejected.
-Do not offer legacy fallback on the same port, on proof failure, or for a blocked
-profile. An operator retaining the legacy listener accepts the legacy login risk
-for users who still possess legacy profiles. Disable that listener to enforce
-ownership everywhere; blocking a new profile cannot revoke an old format key.
+**Bound UDP-only profiles issued by v0.8.x remain valid.** They do not need new
+secrets or tls-crypt-v2 keys. Keep their UDP endpoint/port and trust material.
+A profile without the opaque inline proof must be downloaded again after its
+owner signs in through SAML; adding an arbitrary username is not a migration.
+Unknown metadata, stripped or wrong proofs, blocked profiles, owner mismatches
+and infrastructure errors never trigger a less restrictive path.
 
 ## VM and systemd configuration
 
-1. Back up the database, run the normal explicit migration to schema 12, and
-   upgrade all controllers and agents together. Reapply restricted runtime grants
-   for separate roles. Old binaries are not promised to accept the new schema;
-   the compatibility window is for client profiles, not arbitrary binary/schema
-   skew. Test restore procedures before deployment.
-2. Add the legacy metadata gate above to the existing OpenVPN configuration and
-   restart that pair during a maintenance window. Verify an existing profile can
-   still connect before enabling new issuance.
-3. Put the second pair's reviewed configuration under
-   `/etc/supivpn/nodes/bound/agent.json` and `openvpn.conf`. Use the installed
-   `supivpn-node@bound.service` and `supivpn-openvpn@bound.service` templates.
-   They retain the same hardening and lifecycle dependency as the existing units.
-   The node unit creates `/run/supivpn-bound` and `/var/lib/supivpn-node-bound`.
-   Set the second agent's `profile_binding` to `required`, `management_socket`
-   to `/run/supivpn-bound/management.sock`, and all generation/state paths under
-   its own state directory. Give its HTTPS health listener a distinct loopback
-   address/port, for example `listen: 127.0.0.1:9444` and
-   `public_url: https://vpn.example.test:9444`; retain the common browser-login
-   URL in `remote_controller.public_url`. Keep its `vpn_network` and every group
-   pool inside `10.204.0.0/24`. Preserve the remaining validated agent settings.
-4. In the controller's `vm` block, retain the existing socket/UID/node and add:
+1. Back up the database and use schema 12. A deployment already on v0.8.1 or
+   later needs no schema change for v0.9.0. Keep the restricted runtime grants.
+   Upgrade the controller and agent together in a maintenance window; mixed
+   v0.8/v0.9 server components are not a supported rolling-upgrade combination.
+2. While still on v0.8.x, issue bound profiles to every user. Verify owner match,
+   blocked-profile refusal and reconnect. Preserve the existing bound listener's
+   UDP port when consolidating to one agent; do not silently move old bound
+   profiles to another port. Stop and disable the former unbound listener.
+3. Configure one node with `profile_binding: "required"`, its existing private
+   management socket, node identity, state directory and group pools. Use the
+   required gate in every OpenVPN server configuration:
 
-   ```json
-   "additional_agents": [
-     {"socket": "/run/supivpn-controller/agent-bound.sock", "uid": 0, "node_id": "vm-bound"}
-   ]
+   ```text
+   script-security 2
+   tls-crypt-v2-verify "/usr/sbin/supivpn -verify-profile-metadata required"
    ```
 
-   Use your existing controller-owned 0700 runtime directory. The new agent's
-   remote controller configuration must point to this socket and `vm-bound`.
-   Its UID must match the trusted local agent process. The second socket cannot
-   reuse the first socket or node identity. No agent API is added to public HTTPS.
-5. Set the public controller's `profile` block:
+   The helper checks authenticated tls-crypt-v2 metadata, format and timestamp.
+   Unknown/missing metadata and timestamps over five minutes in the future fail
+   closed. Optionally add `-profile-max-age 2160h`; the default has no age limit.
+4. Configure the controller's `profile` block using the actual existing paths
+   and bound UDP port (1194 is the new-install default):
 
    ```json
    {
@@ -137,31 +90,29 @@ ownership everywhere; blocking a new profile cannot revoke an old format key.
      "template_file": "/etc/supivpn/controller/client.ovpn.example",
      "server_key_file": "/etc/supivpn/keys/tls-crypt-v2-server.key",
      "binding": "required",
-     "port": 1195,
+     "port": 1194,
      "server_url": true
    }
    ```
 
-   Keep existing absolute template/key paths if different. Lambda keeps its
-   existing deferred wrapping-key loader and must omit `server_key_file`.
-   Bound downloads include `verify-x509-name vpn.example.test name`: provision a
-   VPN server certificate with that **exact common name**, plus the valid trusted
-   chain and TLS-server purpose. This is OpenVPN's exact CN comparison, not a
-   wildcard/SAN hostname matcher. Test certificate renewal before rotating it.
-   Bound profiles also enable `push-peer-info` for client diagnostics. Do not add
-   `auth-nocache` or replace their inline credential block: rekey needs the proof.
-6. Restart the controller, start `supivpn-node@bound`, and enable that unit only
-   after the checks below pass. The node unit brings up its OpenVPN instance.
-   The package does not automatically restart working services during upgrade.
+   Lambda retains its deferred wrapping-key loader and omits `server_key_file`.
+   Every bound profile verifies the exact certificate common name against
+   `endpoint`. Provision the VPN server certificate with that exact CN and a
+   valid trusted chain; this is not DNS SAN or wildcard matching. Retain the
+   inline credential block and do not add `auth-nocache`: rekey needs the proof.
+5. Start the controller and node, check readiness, and repeat the acceptance
+   checks below. Packages do not automatically restart working services.
 
-The existing setup helper creates the minimal single-listener deployment. It
-**does not perform this two-port conversion automatically**. Use the explicit
-configuration above; do not rerun setup to overwrite a working deployment.
+The v0.9.0 setup helper creates a bound UDP-only deployment by default. Optional
+TCP fallback uses a second unchanged OpenVPN process controlled by the **same
+agent and node**, with the same address pools and security checks. See
+[UDP and optional TCP fallback](TRANSPORTS.md) for configuration and host routing.
+The two transports are unrelated to the removed legacy/new-profile migration.
 
-For Lambda/EC2, use distinct old/new node instances and trusted IAM identities,
-with separate port/target-group routing and nonoverlapping pools. The existing
-fencing identity is an EC2 instance ID. Two agents on one EC2 instance sharing a
-single IAM identity are not a supported substitute for two node identities.
+For Lambda/EC2, upgrade both controller Lambdas and the agent on each VPN host;
+a Lambda update alone cannot enforce the host's metadata gate or create TCP.
+Keep the existing trusted IAM/node identity and wrapping key. The same one-agent
+transport arrangement applies; no additional EC2 identity is needed for TCP.
 
 ## Server URL and Linux import
 
@@ -252,7 +203,7 @@ must remain restricted to trusted administrators.
 `vpn.tunnel_established` records `profile_id` for a bound session and, when
 provided, `client_device_id` plus `client_device_id_source` (`UV_UUID` or
 `IV_HWADDR`). This supports grouping connections by profile to spot several
-claimed devices. Legacy sessions have no profile ID. Connect/Linux versions may
+claimed devices. Connect/Linux versions may
 omit identifiers; missing, malformed or duplicate labels are omitted. No access
 is refused solely because a Device ID is absent. Keep log access and retention
 appropriate for pseudonymous device/user activity.
@@ -261,25 +212,22 @@ These values are client claims, can be cloned or changed, and are not attestatio
 Device enforcement is not implemented. Future enforcement must account for
 reinstalls, lost devices, rotation and administrative recovery.
 
-## Acceptance and compatibility window
+## Acceptance before upgrading
 
-Before enabling issuance, verify:
-
-1. A fresh SAML profile download contains an opaque proof and the new port; it
-   connects as its owner and is rejected after login as a different user.
-2. A blocked profile, wrong/missing proof, and a new profile edited to the old
-   port are denied. An old profile still works only on the legacy port.
-3. Reconnect and rekey preserve the binding; shared per-user connection limits
-   apply across both listeners. Test interrupted browser login as well.
+1. A SAML-authorized download contains an opaque proof, connects as its owner
+   and is rejected after login as a different user.
+2. Unbound, stripped, unknown and blocked profiles fail on every enabled
+   transport. Wrong proof or controller/database failure never opens access.
+3. Existing bound UDP-only profiles reconnect and rekey. New dual-transport
+   profiles prefer UDP and can authenticate over TCP when UDP is unavailable.
+   Per-user limits apply across both transports and nodes.
 4. Connect imports a one-use link; retries/expiry require a new SAML login.
    Linux file import establishes a tunnel and completes delayed SAML login.
 5. Journald contains the verified username, opaque profile ID and available
    device label, but no proof, SAML assertion or import token.
-6. Exercise block/reactivate with stale revisions and the least-privileged roles.
+6. Exercise block/reactivate with stale revisions and least-privileged roles.
 
-The first minor release shipping this feature is **M**. Legacy profile support
-remains available during **M and M+1**; default enforcement/removal is planned
-no earlier than **M+2**, after explicit release notes and migration guidance.
-Operators can enforce sooner by disabling their legacy listener. There is no
-calendar-triggered port shutdown. Only a critical vulnerability may require an
-earlier breaking security change, documented in its advisory and upgrade notes.
+Do not down-migrate the database or restore stale authorization state as a
+rollback shortcut. Preserve configuration backups and test an explicit rollback
+of the complete server pair; re-enabling an old legacy listener restores its old
+risk and is not ownership-enforced operation.

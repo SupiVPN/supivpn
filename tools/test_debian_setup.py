@@ -85,6 +85,58 @@ class SetupTests(unittest.TestCase):
         run.assert_not_called()
         self.assertFalse((self.root / "host").exists())
 
+    def test_tcp_fallback_uses_one_agent_identity_and_aggregate(self):
+        c = self.load(tcp_fallback={"enabled": True}, groups=["admins", "engineers"])
+        with patch.object(setup, "EXAMPLES", REPO / "debian/examples"):
+            agent, controller, server = setup.configs(c, 987)
+            tcp_server = setup.tcp_server_config(c, server)
+        self.assertEqual(controller["profile"]["tcp_fallback_port"], 443)
+        self.assertEqual(controller["profile"]["binding"], "required")
+        self.assertEqual(agent["profile_binding"], "required")
+        self.assertEqual(agent["vpn_network"], "10.203.0.0/24")
+        self.assertNotIn("additional_agents", controller["vm"])
+        self.assertEqual(agent["remote_controller"]["node_id"], controller["vm"]["node_id"])
+        self.assertEqual(agent["group_pools"][0]["cidr"], "10.203.0.0/25")
+        self.assertEqual(agent["group_pools"][1]["cidr"], "10.203.0.128/25")
+        self.assertIn("port 443\nproto tcp4-server\n", tcp_server)
+        self.assertIn("server 10.203.0.0 255.255.255.0 nopool", server)
+        self.assertIn("server 10.203.0.0 255.255.255.0 nopool", tcp_server)
+        self.assertIn('-learn-address -route-device supivpn0 -route-network 10.203.0.0/24', server)
+        self.assertIn('-learn-address -route-device supivpn1 -route-network 10.203.0.0/24', tcp_server)
+        self.assertIn('client-disconnect "/usr/sbin/supivpn -route-disconnect', tcp_server)
+        self.assertIn(agent["tcp_management_socket"], tcp_server)
+        for configuration in (server, tcp_server):
+            self.assertIn('-verify-profile-metadata required', configuration)
+            self.assertIn('tls-crypt-v2 /etc/supivpn/keys/tls-crypt-v2-server.key', configuration)
+        rules = setup.firewall(c)
+        self.assertIn("udp dport 1194 accept", rules)
+        self.assertIn("tcp dport 443 accept", rules)
+        self.assertLess(rules.index('iifname "supivpn1" drop'), rules.index("ct state established"))
+        self.assertEqual(setup.service_units(c), ["supivpn-controller", "supivpn-node", "supivpn-openvpn", "supivpn-openvpn-tcp"])
+        plain = self.load()
+        self.assertNotIn("tcp dport 443", setup.firewall(plain))
+        self.assertNotIn("supivpn-openvpn-tcp", setup.service_units(plain))
+        for value in ({}, {"enabled": False}, {"enabled": False, "port": 443}):
+            disabled = self.load(tcp_fallback=value)
+            self.assertNotIn("tcp_fallback", disabled)
+            with patch.object(setup, "EXAMPLES", REPO / "debian/examples"):
+                a, ctl, cfg = setup.configs(disabled, 987)
+            self.assertNotIn("tcp_management_socket", a)
+            self.assertNotIn("tcp_fallback_port", ctl["profile"])
+            self.assertNotIn("route-device", cfg)
+            self.assertNotIn("supivpn1", setup.firewall(disabled))
+        # A disabled optional listener must not reserve the operator's SSH port.
+        self.load(ssh_port=443, tcp_fallback={"enabled": False, "port": 443})
+
+    def test_tcp_rejects_conflicts_and_ambiguous_inputs(self):
+        for value in (True, None, {"enabled": "true"}, {"vpn_network": "10.204.0.0/24"},
+                      {"port": True}, {"enabled": True, "port": 8443}, {"enabled": True, "port": 22}, {"port": 0},
+                      {"port": 65536}, {"port": 443, "typo": 1}):
+            with self.subTest(value=value), self.assertRaises((setup.SetupError, ValueError)):
+                self.load(tcp_fallback=value)
+        # Enabling TCP must not impose an additional per-transport pool limit.
+        self.load(tcp_fallback={"enabled": True}, vpn_network="10.203.0.0/26", groups=["a","b","c","d"])
+
     def test_existing_output_and_links_are_preserved(self):
         path = self.root / "key"
         path.write_text("synthetic sentinel")

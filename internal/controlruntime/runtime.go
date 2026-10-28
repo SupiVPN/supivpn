@@ -54,11 +54,12 @@ type Config struct {
 }
 
 type ProfileConfig struct {
-	Binding      string `json:"binding,omitempty"`
-	Port         uint16 `json:"port,omitempty"`
-	ServerURL    bool   `json:"server_url,omitempty"`
-	Endpoint     string `json:"endpoint"`
-	TemplateFile string `json:"template_file"`
+	TCPFallbackPort uint16 `json:"tcp_fallback_port,omitempty"`
+	Binding         string `json:"binding,omitempty"`
+	Port            uint16 `json:"port,omitempty"`
+	ServerURL       bool   `json:"server_url,omitempty"`
+	Endpoint        string `json:"endpoint"`
+	TemplateFile    string `json:"template_file"`
 	// VM mode reads the provisioned local key. Lambda supplies a loader instead.
 	ServerKeyFile string `json:"server_key_file,omitempty"`
 }
@@ -228,12 +229,12 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 			return nil, err
 		}
 	}
+	if !store.ProfileSchemaReady(ctx) {
+		pool.Close()
+		return nil, errors.New("mandatory profile ownership requires schema 12")
+	}
 	var downloads []controller.ProfileDownloads
 	if c.Profile != nil {
-		if (c.Profile.Binding == "required" || c.Profile.ServerURL) && !store.ProfileSchemaReady(ctx) {
-			pool.Close()
-			return nil, errors.New("profile ownership and Server URL require schema 12")
-		}
 		download, profileErr := profileDownload(c.Profile, key, store)
 		if profileErr != nil {
 			pool.Close()
@@ -298,24 +299,17 @@ func profileIssuer(c *ProfileConfig, key func(context.Context) ([]byte, error)) 
 }
 func profileDownload(c *ProfileConfig, key func(context.Context) ([]byte, error), s *postgres.Store) (controller.ProfileDownloads, error) {
 	var d controller.ProfileDownloads
-	if c.Binding != "" && c.Binding != "legacy" && c.Binding != "required" {
-		return d, errors.New("profile binding must be legacy or required")
+	if c.Binding != "" && c.Binding != "required" {
+		return d, errors.New("unbound profiles are no longer supported; use binding required")
 	}
-	if c.Binding != "required" && c.Port != 0 && c.Port != 1194 {
-		return d, errors.New("legacy profiles use port 1194")
+	if c.Port == 0 {
+		return d, errors.New("bound profiles require an explicit UDP port")
 	}
 	template, load, err := profileMaterial(c, key)
 	if err != nil {
 		return d, err
 	}
-	if c.Binding == "required" {
-		if c.Port == 0 {
-			return d, errors.New("bound profiles require an explicit port")
-		}
-		d.IssueForSubject, err = profile.BoundDownloadIssuer(template, c.Endpoint, c.Port, load, s.CreateProfile)
-	} else {
-		d.Issue, err = profile.DownloadIssuer(template, c.Endpoint, load)
-	}
+	d.IssueForSubject, err = profile.BoundTransportIssuer(template, c.Endpoint, c.Port, c.TCPFallbackPort, load, s.CreateProfile)
 	if c.ServerURL {
 		d.Imports = s
 	}

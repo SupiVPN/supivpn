@@ -30,7 +30,7 @@ def main():
             processes.append(subprocess.Popen(command, stdout=subprocess.DEVNULL,
                                                stderr=subprocess.DEVNULL))
         time.sleep(1)
-        return subprocess.run(['/test/openvpn.test', '-test.run', '^TestOpenVPNTLSCryptV2$',
+        return subprocess.run(['/test/openvpn.test', '-test.run', '^TestOpenVPN(TLSCryptV2|TransportFallback)$',
                                '-test.v', '-test.timeout', '180s'], check=False).returncode
     finally:
         for process in reversed(processes):

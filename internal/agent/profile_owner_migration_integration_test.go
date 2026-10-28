@@ -8,12 +8,9 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"testing"
-	"time"
 
-	"supivpn/internal/controller"
 	"supivpn/internal/postgres"
 	"supivpn/internal/profile"
 )
@@ -58,23 +55,8 @@ func TestProfileOwnerMigrationPreservesExistingCredentials(t *testing.T) {
 		label string
 	}{{0, labels[0]}, {2, "conflict-a"}, {2, "conflict-b"}, {3, labels[3]}, {4, "pruned-owner@example.test"}} {
 		ticket := fmt.Sprintf("owner-migration-ticket-%043d", n)
-		browser := sha256.Sum256([]byte(ticket))
 		conn := postgres.Connection{CID: int64(n + 1), KID: 1}
-		if err := s.Register(ctx, actor, conn, ticket, time.Minute); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Start(ctx, ticket, fmt.Sprintf("owner-request-%d", n), browser); err != nil {
-			t.Fatal(err)
-		}
-		pending, err := s.Lookup(ctx, ticket, browser)
-		if err != nil {
-			t.Fatal(err)
-		}
-		now := time.Now()
-		decision := controller.Authorization{Username: entry.label, SubjectHash: subjects[entry.index], GroupName: coreGroup, MaxConnections: 16, AssertionHash: sha256.Sum256([]byte("assertion-" + ticket)), AssertionExpiresAt: now.Add(time.Minute), NotBefore: now.Add(-time.Minute), NotOnOrAfter: now.Add(time.Minute), SessionExpiresAt: now.Add(time.Hour)}
-		if err := s.Complete(ctx, pending, decision); !errors.Is(err, controller.ErrDecisionPending) {
-			t.Fatal("verified login fixture", err)
-		}
+		seedHistoricalGrant(t, pool, actor, conn, ticket, subjects[entry.index], entry.label, 11)
 	}
 	if _, err := pool.Exec(ctx, "DELETE FROM supivpn.logins WHERE subject_hash=$1", subjects[4][:]); err != nil {
 		t.Fatal("prune old owner evidence")

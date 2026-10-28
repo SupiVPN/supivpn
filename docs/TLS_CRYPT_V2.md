@@ -97,21 +97,16 @@ requires new SAML login and IP, interrupting TCP sessions.
 Deployment installs `supivpn-profile` and `client.ovpn.template`.
 Set your VPN endpoint in the template. Using standard CLI paths:
 
-```bash
-sudo /opt/supivpn/supivpn-profile -out /root/supivpn-device.ovpn
-```
+For v0.9.0, obtain a profile through the controller's SAML-authorized
+[download or Connect import](PROFILES.md). The retained `supivpn-profile -out`
+utility generates only a historical unbound format; it cannot verify a SAML
+owner and its output is refused by v0.9.0 listeners. Do not use it to provision
+current users. The `-init` wrapping-key bootstrap remains supported.
 
-Retrieve the file through secure administrative access. Each issuance creates a
-fresh client key; existing files are not overwritten. Profiles without tls-crypt-v2
-must be reissued. Profiles do not fix the user's group or IP.
-
-Current legacy-template limitation: the client checks CA and certificate validity,
-but not server name. There are no explicit KU/EKU directives; see
-[client template compatibility](PROFILES.md#client-template-compatibility).
-Bound downloads additionally check the exact server CN. tls-crypt-v2 does not
-replace server identity verification.
-The selected replacement is [public CA plus DNS SAN verification](#planned-dns-san-verification);
-client support must be established before changing the production template.
+Bound downloads check CA, certificate validity and the exact server CN.
+No explicit KU/EKU directives are included for client compatibility.
+TLS-crypt-v2 does not replace server identity verification. The planned
+[DNS SAN verification](#planned-dns-san-verification) remains a separate limitation.
 
 Locally from the repository root:
 

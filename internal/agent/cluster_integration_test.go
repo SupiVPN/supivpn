@@ -101,9 +101,11 @@ func TestClusterTwoNodes(t *testing.T) {
 		a, ch := remoteFixture(t, client)
 		a.remote.node = node
 		a.config = clusterGroupConfig(i)
+		a.config.ProfileBinding = "required"
 		a.pools = newPoolAllocator(a.config)
 		agents[i], commands[i] = a, ch
-		connectRemote(t, a, ch)
+		owner := sha256.Sum256([]byte(assertionFor(fixture).Issuer.Value + "\x00" + fmt.Sprintf("cluster-user-%d", i)))
+		connectRemote(t, a, ch, ownedFixtureProof(t, stores[i], owner, t.Name()+":"+node))
 	}
 	// Both requests coexist before either browser finishes; second controller
 	// handles the callback even though the first one initiated it.

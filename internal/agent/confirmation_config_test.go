@@ -58,51 +58,13 @@ func confirmationConfigFile(t *testing.T, value string, remote bool) string {
 	return path
 }
 
-func TestVPNConfirmationConfigurationWiring(t *testing.T) {
-	_, metadata := testIdP(t)
+// The embedded agent has no persistent profile registry and is no longer a
+// supported production authentication path. Confirmation is owned by the controller.
+func TestUnboundEmbeddedConfigurationIsRejected(t *testing.T) {
 	for _, value := range []string{"", "null", "true", "false"} {
-		t.Run("value="+value, func(t *testing.T) {
-			configuration, _, err := readConfig(confirmationConfigFile(t, value, false))
-			if err != nil {
-				t.Fatal("valid confirmation setting rejected", err)
-			}
-			if value == "" || value == "null" {
-				if configuration.VPNLoginConfirmation != nil {
-					t.Fatal("omitted or null setting changed the default")
-				}
-			} else if configuration.VPNLoginConfirmation == nil || *configuration.VPNLoginConfirmation != (value == "true") {
-				t.Fatal("explicit confirmation setting was lost")
-			}
-			app, commands := testApp(t, metadata)
-			app.config = configuration
-			pending := app.tickets["test-ticket"]
-			pending.requestID, pending.browserHash = "", [32]byte{}
-			control, err := newController(app.agent, app.sp)
-			if err != nil {
-				t.Fatal(err)
-			}
-			response := httptest.NewRecorder()
-			control.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, app.origin.String()+"/login/test-ticket", nil))
-			want := http.StatusOK
-			if value == "false" {
-				want = http.StatusFound
-			}
-			if response.Code != want || (pending.requestID != "") != (value == "false") {
-				t.Fatal("parsed agent configuration did not reach the browser handler")
-			}
-			select {
-			case <-commands:
-				t.Fatal("login navigation authorized a VPN connection")
-			default:
-			}
-		})
-	}
-	for _, value := range []string{`"false"`, `"true"`, "0", "1", "[]", "{}"} {
-		t.Run("invalid="+value, func(t *testing.T) {
-			if _, _, err := readConfig(confirmationConfigFile(t, value, false)); err == nil {
-				t.Fatal("non-boolean confirmation setting accepted")
-			}
-		})
+		if _, _, err := readConfig(confirmationConfigFile(t, value, false)); err == nil {
+			t.Fatal("embedded configuration bypassed mandatory profile ownership")
+		}
 	}
 }
 
@@ -116,6 +78,49 @@ func TestRemoteNodeRejectsVPNConfirmationSetting(t *testing.T) {
 				}
 			} else if err != nil {
 				t.Fatal("remote node without a confirmation override was refused", err)
+			}
+		})
+	}
+}
+
+func TestTransportConfigurationDefaultsAndBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, socket, binding string
+		valid                 bool
+	}{
+		{"default", "", "", true},
+		{"explicit UDP", "", "required", true},
+		{"TCP", "/run/supivpn/management-tcp.sock", "required", true},
+		{"relative", "management-tcp.sock", "required", false},
+		{"same socket", "/run/supivpn/management.sock", "required", false},
+		{"other directory", "/run/other/management.sock", "required", false},
+		{"noncanonical", "/run/supivpn/../supivpn/tcp.sock", "required", false},
+		{"legacy", "", "legacy", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := confirmationConfigFile(t, "", true)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var c config
+			if err := json.Unmarshal(data, &c); err != nil {
+				t.Fatal(err)
+			}
+			c.TCPManagementSocket, c.ProfileBinding = tc.socket, tc.binding
+			data, err = json.Marshal(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, _, err := readConfig(path)
+			if (err == nil) != tc.valid {
+				t.Fatal("unexpected transport validation result", err)
+			}
+			if tc.valid && (got.TCPManagementSocket != tc.socket || got.ProfileBinding != "required") {
+				t.Fatal("unsafe defaults")
 			}
 		})
 	}

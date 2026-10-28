@@ -15,6 +15,7 @@ cert /etc/supivpn/node/crt.pem
 extra-certs /etc/supivpn/node/chain.pem
 key /etc/supivpn/node/key.pem
 tls-crypt-v2 /etc/supivpn/keys/tls-crypt-v2-server.key
+tls-crypt-v2-verify "/usr/sbin/supivpn -verify-profile-metadata required"
 ca /etc/ssl/certs/ca-certificates.crt
 dh none
 tls-version-min 1.2

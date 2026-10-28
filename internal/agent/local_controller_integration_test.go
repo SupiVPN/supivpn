@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,6 +38,7 @@ func TestLocalControllerPostgresLifecycle(t *testing.T) {
 	start := func() (*agent, func()) {
 		t.Helper()
 		c := groupConfig()
+		c.ProfileBinding = "required"
 		c.RemoteController = localControllerConfig()
 		c.RemoteController.NodeID = "runtime-node"
 		c.RemoteController.AgentSocket, c.RemoteController.StateDirectory = server.socket, state
@@ -51,7 +53,8 @@ func TestLocalControllerPostgresLifecycle(t *testing.T) {
 	defer closeFirst()
 	old := first.remote.generation
 	cid, kid := int64(7), int64(2)
-	request := agentclient.Request{Generation: old, CID: &cid, KID: &kid, Ticket: strings.Repeat("a", 43)}
+	proof := ownedFixtureProof(t, postgres.New(pool), sha256.Sum256([]byte("synthetic owner")), t.Name())
+	request := agentclient.Request{Generation: old, CID: &cid, KID: &kid, Ticket: strings.Repeat("a", 43), ProfileID: proof.ID, ProfileSecret: proof.Secret}
 	if _, err := first.remote.api.Call(ctx, "register", request); err != nil {
 		t.Fatal("registration failed", err)
 	}
@@ -63,6 +66,7 @@ func TestLocalControllerPostgresLifecycle(t *testing.T) {
 		t.Fatal("controller restart lost the lease", err)
 	}
 	request.Ticket = ""
+	request.ProfileID, request.ProfileSecret = "", ""
 	if decision, err := first.remote.api.Call(ctx, "fetch", request); err != nil || decision != nil {
 		t.Fatal("controller restart lost the pending login")
 	}

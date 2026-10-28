@@ -43,7 +43,7 @@ type Config struct {
 
 func (c Config) Validate() error {
 	if len(c.AdditionalAgents) > 1 {
-		return errors.New("at most one additional migration listener is supported")
+		return errors.New("at most one additional local agent is supported")
 	}
 	for _, a := range c.AdditionalAgents {
 		if a.UID == nil || !filepath.IsAbs(a.Socket) || a.Socket == c.AgentSocket || !agentapi.ValidNode(a.NodeID) || a.NodeID == c.NodeID {

@@ -246,7 +246,10 @@ func testRuntimeSAML(t *testing.T, rest bool, prefix string, encrypted bool, con
 			}
 			defer client.Close()
 			node, commands := remoteFixture(t, client)
-			connectRemote(t, node, commands)
+			node.config.ProfileBinding = "required"
+			subject := assertionFor(fixture)
+			owner := sha256.Sum256([]byte(subject.Issuer.Value + "\x00" + subject.Subject.NameID.Value))
+			connectRemote(t, node, commands, ownedFixtureProof(t, postgres.New(p), owner, t.Name()))
 			ticket := node.connections[7].ticket
 			var cookie *http.Cookie
 			if confirmationEnabled != nil && !*confirmationEnabled {

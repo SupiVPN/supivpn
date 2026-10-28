@@ -4,9 +4,9 @@
 set -eu
 # --no-start also suppresses debhelper's stop snippet. Stop only on removal.
 if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
-    deb-systemd-invoke stop supivpn-node.service supivpn-openvpn.service
+    deb-systemd-invoke stop supivpn-node.service supivpn-openvpn.service supivpn-openvpn-tcp.service
     # Stop only instantiated units belonging to this package, including the
-    # second listener used during a profile-format migration.
+    # instances retained from an earlier deployment layout.
     systemctl list-units --all --plain --no-legend 'supivpn-node@*.service' 'supivpn-openvpn@*.service' |
         while read -r unit rest; do
             case "$unit" in

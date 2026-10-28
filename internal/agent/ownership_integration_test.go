@@ -7,9 +7,9 @@
 package agent
 
 import (
- "github.com/jackc/pgx/v5/pgxpool"
 	"context"
-    "crypto/sha256"
+	"crypto/sha256"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"net/url"
 	"os"
 	"strings"
@@ -115,20 +115,20 @@ func TestMigrationOwnerAndDefaultPrivileges(t *testing.T) {
 	if !store.Ready(ctx) {
 		t.Fatal("runtime cannot read migration metadata")
 	}
-    profiles := postgres.NewProfileBackend(store, time.Minute)
-    ticket := "profile_" + strings.Repeat("p", 43)
-    browser := sha256.Sum256([]byte("owner-test-browser"))
-    if profiles.Start(ctx, ticket, "owner-profile-request", browser) != nil {
-        t.Fatal("runtime cannot insert into the new profile table")
-    }
-    if _, err := profiles.Lookup(ctx, ticket, browser); err != nil {
-        t.Fatal("runtime cannot lock/read the new profile table")
-    }
+	profiles := postgres.NewProfileBackend(store, time.Minute)
+	ticket := "profile_" + strings.Repeat("p", 43)
+	browser := sha256.Sum256([]byte("owner-test-browser"))
+	if profiles.Start(ctx, ticket, "owner-profile-request", browser) != nil {
+		t.Fatal("runtime cannot insert into the new profile table")
+	}
+	if _, err := profiles.Lookup(ctx, ticket, browser); err != nil {
+		t.Fatal("runtime cannot lock/read the new profile table")
+	}
 	if err = store.RotateNode(ctx, "owner-test-node", "", "g1"); err != nil {
 		t.Fatal("runtime cannot write under default table privileges")
 	}
-	if err = store.Register(ctx, postgres.Agent{NodeID: "owner-test-node", Generation: "g1"},
-		postgres.Connection{CID: 1, KID: 1}, strings.Repeat("o", 43), time.Minute); err != nil {
+	if err = registerOwnedFixture(t, store, ctx, postgres.Agent{NodeID: "owner-test-node", Generation: "g1"},
+		postgres.Connection{CID: 1, KID: 1}, strings.Repeat("o", 43), time.Minute, [32]byte{1}); err != nil {
 		t.Fatal("runtime cannot use the migrated identity sequence")
 	}
 	for _, query := range []string{

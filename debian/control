@@ -11,7 +11,7 @@ Vcs-Browser: https://github.com/SupiVPN/supivpn
 
 Package: supivpn-node
 Architecture: amd64 arm64
-Depends: ${misc:Depends}, ca-certificates, openvpn (>= 2.7.8), openvpn (<< 2.7.9~), systemd (>= 257)
+Depends: ${misc:Depends}, ca-certificates, iproute2, openvpn (>= 2.7.8), openvpn (<< 2.7.9~), systemd (>= 257)
 Description: SupiVPN node agent and OpenVPN integration
  Authorizes OpenVPN sessions through a SupiVPN controller. Includes the
  profile/key bootstrap CLI and a dedicated pair of systemd services.

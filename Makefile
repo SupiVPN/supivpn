@@ -26,6 +26,7 @@ FUZZ_SAML_TIME ?= $(FUZZ_TIME)
 GOVULNCHECK_VERSION := v1.9.0
 VULNCHECK := $(LOCAL)/tools/$(GOVULNCHECK_VERSION)/govulncheck
 OPENVPN_IMAGE ?= supivpn-openvpn-test:2.7.8-$(ARCH)
+OPENVPN_RUN ?= TestOpenVPN
 LINUX_CLIENT_IMAGE ?= supivpn-linux-client-test:$(ARCH)
 XMLSEC_IMAGE ?= supivpn-xmlsec-test:$(ARCH)
 POSTGRES_IMAGE ?= postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
@@ -257,7 +258,7 @@ test-openvpn: agent
 	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/openvpn.test,target=/test/openvpn.test,readonly" \
 	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/supivpn,target=/test/supivpn,readonly" \
 	 --env SUPIVPN_TEST_OPENVPN=/usr/sbin/openvpn --env SUPIVPN_TEST_AGENT=/test/supivpn \
-	 "$(OPENVPN_IMAGE)" /test/openvpn.test -test.run TestOpenVPN -test.v -test.timeout 300s
+	 "$(OPENVPN_IMAGE)" /test/openvpn.test -test.run "$(OPENVPN_RUN)" -test.v -test.timeout 300s
 
 .PHONY: linux-client-image test-linux-client
 linux-client-image:

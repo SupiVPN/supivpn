@@ -15,6 +15,7 @@ import (
 
 	"supivpn/internal/agentapi"
 	"supivpn/internal/agentclient"
+	"supivpn/internal/profile"
 )
 
 type remoteAPIFunc func(context.Context, string, agentclient.Request) (*agentapi.Decision, error)
@@ -51,9 +52,13 @@ func allowedRemoteDecision(group string) *agentapi.Decision {
 	return &agentapi.Decision{ID: "decision-1", NodeID: "runtime-node", Generation: "g1", CID: 7, KID: 2,
 		GroupName: group, ExpiresAt: time.Now().Add(time.Minute), SessionExpiresAt: time.Now().Add(10 * time.Minute)}
 }
-func connectRemote(t *testing.T, a *agent, commands chan string) {
+func connectRemote(t *testing.T, a *agent, commands chan string, proofs ...profile.Credential) {
 	t.Helper()
-	a.handleEvent(clientEvent{kind: "CONNECT", cid: 7, kid: 2, sso: "webauth"})
+	e := clientEvent{kind: "CONNECT", cid: 7, kid: 2, sso: "webauth"}
+	if len(proofs) != 0 {
+		e.proof = proofs[0]
+	}
+	a.handleEvent(e)
 	if len(commands) != 0 {
 		t.Fatal("browser opened before registration")
 	}

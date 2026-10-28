@@ -12,6 +12,9 @@
   "session_seconds": 43200,
   "max_connections_per_user": 1,
   "profile": {
+    "binding": "required",
+    "port": 1194,
+    "server_url": true,
     "endpoint": "vpn.example.test",
     "template_file": "/etc/supivpn/controller/client.ovpn.template",
     "server_key_file": "/etc/supivpn/keys/tls-crypt-v2-server.key"

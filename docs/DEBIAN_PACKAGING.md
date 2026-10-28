@@ -269,11 +269,22 @@ automatically and has no independent enablement. Stopping only the OpenVPN unit
 is not a maintenance stop: the node's `Upholds=` dependency starts it again.
 Use `systemctl stop supivpn-node.service` to leave both stopped.
 
+For the optional TCP configuration planned for v0.9.0, the same node unit also
+manages `supivpn-openvpn-tcp.service`. It starts only when
+`/etc/supivpn/node/openvpn-tcp.conf` exists. Its `Wants=` dependency is evaluated
+once per node start, avoiding continuous attempts when TCP is disabled.
+An active TCP daemon's failure closes management and restarts the whole node.
+Keep TCP disabled by default and
+configure the [shared allocator and route hooks](TRANSPORTS.md) before enabling
+it. Both transports share one agent, generation and node ID; do not run another
+agent for TCP. Stop the node for maintenance so neither daemon remains active.
+
 The agent notifies systemd after binding its management, operator and HTTPS
 listeners. `After=` then allows OpenVPN to start; no fixed startup sleep or probe
 consumes the management connection. In managed mode the agent allows 30 seconds
 for OpenVPN to connect. This listener signal does not mean the tunnel is ready:
 use `/readyz` after the controller lease and management negotiation complete.
+With TCP configured, both management peers and TUN interfaces must be ready.
 
 OpenVPN is bound to the agent and stops if it dies. Management disconnect makes
 the agent exit; its rate-limited restart restores the pair. `PartOf=` propagates
@@ -285,7 +296,8 @@ the existing lease-expiry behavior still applies during prolonged outages.
 All examples log to stderr for journald. Inspect `journalctl -u supivpn-node`,
 `-u supivpn-openvpn` and `-u supivpn-controller`; configure journal retention at
 the host level. Services restrict filesystem writes and capabilities. The agent
-has no NET_ADMIN or TUN access; OpenVPN has TUN and NET_ADMIN. Packages do not
+has no NET_ADMIN or TUN access; OpenVPN has TUN and NET_ADMIN. Only the optional
+TCP unit additionally receives NET_BIND_SERVICE to bind TCP/443. Packages do not
 change routing, forwarding, firewall, DNS, reverse proxies or NAT.
 
 ## Upgrades and removal

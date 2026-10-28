@@ -22,7 +22,7 @@ and communicates with the agent through a management Unix socket.
 
 ## Configuration
 
-- [config.example.json](../examples/config.example.json): isolated local agent mode.
+- [config.example.json](../examples/config.example.json): node agent with a local controller socket.
 - [server.conf.example](../examples/server.conf.example): OpenVPN fixture without production routing.
 - [controller.vm.example.json](../examples/controller.vm.example.json): VM controller.
 - [controller.lambda.example.json](../examples/controller.lambda.example.json): public AWS controller.
@@ -37,7 +37,7 @@ In remote mode, the controller handles SAML and the agent applies verified
 decisions; its local HTTPS listener serves health/readiness.
 
 `vpn_login_confirmation` defaults to enabled when omitted, null, or true.
-Set it on the public controller (VM/Lambda), or a legacy local-SAML agent;
+Set it on the public controller (VM/Lambda);
 omit it from remote nodes and agent-only/recovery Lambdas. Setting it to false
 skips the pre-SAML page and reintroduces the risk of a relayed login link using
 another person's IdP session to authorize the requesting VPN client. Profile
@@ -66,13 +66,13 @@ After verified SAML login, the agent includes the exact NameID as `username`:
 Quotes and control characters are escaped in JSON; username never comes from
 the profile or OpenVPN peer info. It is empty for old grants or NameIDs over
 1024 bytes. Disconnects before authorization log only the CID. Logs contain personal data.
-Audit usernames require [database schema 8 or later](POSTGRES.md). The current VM
-runtime supports 7/8/9, returning an empty username on 7. Isolated Lambdas require 9.
-Update controllers before agents. The `username` field is sent only for an allowed
+Current controllers require [database schema 12](POSTGRES.md) and bound profiles.
+Follow the [upgrade order](PROFILE_BINDING.md) before updating agents.
+The `username` field is sent only for an allowed
 `fetch` decision with `include_username=true`.
 New agents are incompatible with old controllers that do not recognize that parameter.
-The early native OpenVPN log `authentication deferred for username ''` remains:
-it occurs before SAML, and the profile contains no username/password.
+Before SAML, OpenVPN sees the opaque profile ID, not the verified user's name.
+Profiles carry an opaque ID and secret; never collect raw management credentials.
 
 VM services now default to rotating JSON files; Lambda and CLI commands use
 stderr. See [logging destinations, retention and collection](LOGGING.md)
@@ -116,9 +116,8 @@ The ZIP contains no private keys.
 To check your public metadata separately, specify its actual deployment path:
 
 ```bash
-SUPIVPN_TEST_IDP_METADATA=/path/to/idp-metadata.xml go test -race -run '^TestLocalIDPMetadata
+SUPIVPN_TEST_IDP_METADATA=/path/to/idp-metadata.xml go test -race -run '^TestLocalIDPMetadata' ./internal/agent
 ```
- ./internal/agent
 Without this variable, the metadata test is skipped. The rest of the unit suite
 needs no live IdP or database. PostgreSQL tests use the `integration` build tag:
 [instructions](POSTGRES.md#running-integration-tests).
@@ -135,6 +134,6 @@ See [IdP setup](IDENTITY_PROVIDER.md) and [API](CONTROLLER_API.md).
 Profiles contain a secret and must be stored/transferred as private files.
 See [keys](TLS_CRYPT_V2.md) and [HTTPS download](PROFILES.md).
 
-The current template checks the CA, validity period, and certificate purpose,
-but does not yet verify the VPN server name. This is a known production blocker.
+Issued bound profiles verify the CA, validity period and exact VPN server name.
+Optional [UDP/TCP fallback](TRANSPORTS.md) retains these checks for both endpoints.
 [SECURITY.md](SECURITY.md) describes security and dependency checks.

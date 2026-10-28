@@ -55,7 +55,8 @@ real stop operations and IAM/EC2/database failures need deployment testing.
    CA and validity period, but does not verify a specific VPN server. Explicit
    KU/EKU directives are omitted for [client compatibility](PROFILES.md#client-template-compatibility).
    Bound downloads additionally enforce an exact CN match before sending their
-   profile proof; legacy downloads do not receive that guarantee.
+   profile proof. From v0.9.0, all supported admission requires these bound
+   profiles; the raw template alone is not an issued profile.
    The selected direction (2026-10-05) is a public CA plus client-side DNS SAN
    verification, without CN fallback. This is not implemented: stock OpenVPN
    Connect profile support is a blocker. See the [client compatibility evidence

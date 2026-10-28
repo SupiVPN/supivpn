@@ -35,7 +35,9 @@ Absolute OpenVPN executable path. Default: /usr/sbin/openvpn.
 Client template. Default: /etc/supivpn/client.ovpn.template.
 .TP
 .BI \-out " file"
-Create a new client profile at this path.
+Create a historical unbound client profile at this path.
+This output is refused by v0.9.0 listeners. Current users must obtain a
+SAML-authorized bound profile through the controller.
 .TP
 .BI \-secret-arn " arn"
 Use an AWS Secrets Manager cluster wrapping key. Only valid with \-init.

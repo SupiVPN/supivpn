@@ -28,7 +28,18 @@ operator socket selected by the configuration. Requires local authorization.
 Validate the source address supplied by the OpenVPN learn-address hook.
 This mode is intended for invocation by OpenVPN.
 .TP
-.BI \-verify-profile-metadata " legacy|required"
+.BI \-route-device " device"
+TUN interface used by the shared UDP/TCP pool hooks. Requires \-route-network.
+.TP
+.BI \-route-network " CIDR"
+Private VPN network for per-client host routes. With \-learn-address, validates
+and installs only the assigned client address using fixed iproute2 commands.
+.TP
+.B \-route-disconnect
+Remove this client's shared-pool route on OpenVPN disconnect.
+Use only with explicit \-route-device and \-route-network.
+.TP
+.BI \-verify-profile-metadata " required"
 Validate authenticated tls-crypt-v2 metadata for the selected listener format.
 Intended for OpenVPN's tls-crypt-v2-verify hook; starts no services.
 .TP
@@ -43,7 +54,8 @@ Show command-line help.
 .br
 /usr/share/doc/supivpn-node/DEBIAN_PACKAGING.md.gz
 .SH NOTES
-Use supivpn-node.service to start, stop or restart the node and OpenVPN pair.
+Use supivpn-node.service to start, stop or restart the node and its transports.
+TCP is disabled by default. See TRANSPORTS.md for configuration.
 Installation never activates a VPN or modifies host networking.
 .SH SEE ALSO
 .BR supivpn-controller (8),

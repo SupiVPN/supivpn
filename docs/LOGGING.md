@@ -179,6 +179,7 @@ identifies just one Lambda invocation and must not replace it.
 | `operator.action_completed`, `operator.tunnel_drop_requested` | Operator action audit; INFO / WARN |
 | `session.unlimited_configured` | Unlimited-session security warning; WARN |
 | `logging.output_failed` | File sink failure and stderr fallback; ERROR |
+| `component.stopped` | Component failure; the node reports a fixed startup stage or management/listener failure reason, never raw credentials or driver errors |
 | `component.initialization_failed`, `component.stopped`, `configuration.refused`, `invocation.failed` | Runtime failure; ERROR |
 | `operator.request_failed`, `database.migration_failed`, `profile.issue_failed`, `package.failed`, `manifest.failed` | CLI/operation failure; ERROR |
 | `database.schema_current`, `profile.file_ready` | CLI completion; INFO |

@@ -439,6 +439,8 @@ Edit `/etc/supivpn/controller/controller.json` to contain:
   "session_seconds": 43200,
   "max_connections_per_user": 1,
   "profile": {
+    "binding": "required",
+    "port": 1194,
     "endpoint": "vpn.example.test",
     "template_file": "/etc/supivpn/controller/client.ovpn.template",
     "server_key_file": "/etc/supivpn/keys/tls-crypt-v2-server.key"
@@ -467,6 +469,7 @@ Edit `/etc/supivpn/node/agent.json` to contain:
   "tls_private_key": "/etc/supivpn/node/key.pem",
   "idp_metadata": "/etc/supivpn/node/idp-metadata.xml",
   "management_socket": "/run/supivpn/management.sock",
+  "profile_binding": "required",
   "pending_seconds": 180,
   "session_seconds": 43200,
   "max_connections_per_user": 1,
@@ -492,6 +495,10 @@ Edit `/etc/supivpn/node/agent.json` to contain:
 the packaged node agent runs as root with restricted capabilities. These checks
 authenticate the Unix peer; do not change socket permissions to bypass them.
 All names, URLs, group priorities and policy limits must agree between files.
+
+This baseline remains UDP-only. The optional [TCP fallback](TRANSPORTS.md) uses
+the same node and group pools; it is disabled unless explicitly configured.
+For HA, also apply the [load-balancer and per-node pool requirements](HA.md).
 
 The packaged OpenVPN file already supplies `server 10.203.0.0 255.255.255.0 nopool`,
 `dev supivpn0`, UDP 1194, the matching management socket, `learn-address`, and

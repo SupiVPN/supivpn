@@ -21,18 +21,21 @@ import (
 var errManagementRejected = errors.New("OpenVPN rejected command")
 
 type clientEvent struct {
-	proof   profile.Credential
-	kind    string
-	cid     uint64
-	kid     uint64
-	sso     string
-	peer    netip.AddrPort
-	client  clientInfo
-	metrics disconnectMetrics
-	clients map[uint64]struct{}
+	transport int
+	scoped    bool
+	proof     profile.Credential
+	kind      string
+	cid       uint64
+	kid       uint64
+	sso       string
+	peer      netip.AddrPort
+	client    clientInfo
+	metrics   disconnectMetrics
+	clients   map[uint64]struct{}
 }
 
 type management struct {
+	children        []*management
 	conn            net.Conn
 	events          chan clientEvent
 	replies         chan bool
@@ -56,11 +59,25 @@ func newManagement(conn net.Conn) *management {
 func (m *management) close() {
 	m.closeOnce.Do(func() {
 		close(m.done)
-		m.conn.Close()
+		if m.conn != nil {
+			m.conn.Close()
+		}
+		for _, child := range m.children {
+			child.close()
+		}
 	})
 }
 
 func (m *management) negotiate() error {
+	if len(m.children) != 0 {
+		for _, child := range m.children {
+			if err := child.negotiate(); err != nil {
+				m.close()
+				return err
+			}
+		}
+		return nil
+	}
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 	select {
@@ -84,10 +101,20 @@ func (m *management) command(cmd string) error {
 	if strings.ContainsAny(cmd, "\r\n") {
 		return errors.New("multiline management command refused")
 	}
+	if len(m.children) != 0 {
+		return m.transportCommand(cmd)
+	}
 	return m.exchange(cmd)
 }
 
 func (m *management) authorizeIPv4(cid, kid uint64, address netip.Addr, netmask string) error {
+	if len(m.children) != 0 {
+		child, localCID, err := m.transportClient(cid)
+		if err != nil {
+			return err
+		}
+		return child.authorizeIPv4(localCID, kid, address, netmask)
+	}
 	mask, err := netip.ParseAddr(netmask)
 	if !address.Is4() || err != nil || !mask.Is4() {
 		return errors.New("invalid client IPv4 configuration")

@@ -7,23 +7,24 @@ package agentapi
 import (
 	"net/http/httptest"
 	"strings"
+	"supivpn/internal/profile"
 	"testing"
 	"time"
 )
 
 func TestSecurityAgentJSONAmbiguity(t *testing.T) {
 	for name, body := range map[string]string{
-		"escaped-duplicate": `{"generation":"g1","\u0067eneration":"g2","cid":0,"kid":2}`,
-		"case-alias": `{"Generation":"g1","cid":0,"kid":2}`,
+		"escaped-duplicate":    `{"generation":"g1","\u0067eneration":"g2","cid":0,"kid":2}`,
+		"case-alias":           `{"Generation":"g1","cid":0,"kid":2}`,
 		"mixed-case-duplicate": `{"generation":"g1","GENERATION":"g2","cid":0,"kid":2}`,
-		"fractional-id": `{"generation":"g1","cid":0.0,"kid":2}`,
-		"exponent-id": `{"generation":"g1","cid":1e0,"kid":2}`,
-		"overflow-id": `{"generation":"g1","cid":9223372036854775808,"kid":2}`,
-		"string-id": `{"generation":"g1","cid":"0","kid":2}`,
-		"unicode-digit": `{"generation":"g1","cid":０,"kid":2}`,
-		"generation-command": `{"generation":"g1\nclient-auth-nt 7 2","cid":0,"kid":2}`,
-		"nul-generation": `{"generation":"g1\u0000","cid":0,"kid":2}`,
-		"escaped-node-spoof": `{"generation":"g1","cid":0,"kid":2,"\u006eode_id":"node-b"}`,
+		"fractional-id":        `{"generation":"g1","cid":0.0,"kid":2}`,
+		"exponent-id":          `{"generation":"g1","cid":1e0,"kid":2}`,
+		"overflow-id":          `{"generation":"g1","cid":9223372036854775808,"kid":2}`,
+		"string-id":            `{"generation":"g1","cid":"0","kid":2}`,
+		"unicode-digit":        `{"generation":"g1","cid":０,"kid":2}`,
+		"generation-command":   `{"generation":"g1\nclient-auth-nt 7 2","cid":0,"kid":2}`,
+		"nul-generation":       `{"generation":"g1\u0000","cid":0,"kid":2}`,
+		"escaped-node-spoof":   `{"generation":"g1","cid":0,"kid":2,"\u006eode_id":"node-b"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := &recordedStore{}
@@ -44,15 +45,19 @@ func TestSecurityAgentJSONAmbiguity(t *testing.T) {
 
 func TestSecurityAllAgentOperationsRequireTransportIdentity(t *testing.T) {
 	for operation, body := range map[string]string{
-		"rotate": `{"generation":"g1"}`,
+		"rotate":    `{"generation":"g1"}`,
 		"heartbeat": `{"generation":"g1"}`,
-		"register": `{"generation":"g1","cid":0,"kid":2,"ticket":"` + strings.Repeat("a", 43) + `"}`,
-		"fetch": `{"generation":"g1","cid":0,"kid":2}`,
-		"ack": `{"generation":"g1","decision_id":"d1","outcome":"applied"}`,
-		"cancel": `{"generation":"g1","cid":0,"kid":2}`,
+		"register":  `{"generation":"g1","cid":0,"kid":2,"ticket":"` + strings.Repeat("a", 43) + `"}`,
+		"fetch":     `{"generation":"g1","cid":0,"kid":2}`,
+		"ack":       `{"generation":"g1","decision_id":"d1","outcome":"applied"}`,
+		"cancel":    `{"generation":"g1","cid":0,"kid":2}`,
 	} {
 		t.Run(operation, func(t *testing.T) {
-			s := &recordedStore{}
+			s := &proofStore{}
+			if operation == "register" {
+				proof, _ := profile.NewCredential()
+				body = strings.TrimSuffix(body, "}") + `,"profile_id":"` + proof.ID + `","profile_secret":"` + proof.Secret + `"}`
+			}
 			handler := New(s, time.Minute)
 			for _, identity := range []string{"", "node-a"} {
 				r := requestFor("/agent/v1/"+operation, body, identity)
