@@ -172,18 +172,22 @@ passed through the chosen proxy. See [AWS requirements](CONTROLLER.md),
 [HTTP API IAM](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-access-control-iam.html),
 and [Lambda integration format](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-lambda.html).
 
-## Agent API contract
+## Agent API
 
 All requests use POST, Content-Type application/json, and bodies up to 8 KiB.
 Unknown/duplicate/nested/null fields are rejected. Requests must not contain
 `node_id`. `generation` is a required unique process generation; CID/KID are
-non-negative integers. Retries do not extend the original deadline.
+non-negative signed 64-bit integers. With TCP enabled, the agent reserves bit 62
+of CID to distinguish identical daemon-local IDs; all services must preserve the
+integer exactly. Retries do not extend the original deadline. From v0.9.0,
+registration without a valid active profile proof is refused; no unbound fallback
+is available. Never log the profile secret.
 
 | Path | JSON fields besides generation | Success |
 | --- | --- | --- |
 | /agent/v1/rotate | previous_generation; empty only for initial registration | 204 |
 | /agent/v1/heartbeat | optional ready: boolean; OpenVPN pair readiness, extends only an unexpired node lease | 204 |
-| /agent/v1/register | cid, kid, ticket: base64url encoding of 32 random bytes | 204 |
+| /agent/v1/register | cid, kid, ticket: base64url encoding of 32 random bytes; profile_id, profile_secret | 204 |
 | /agent/v1/fetch | cid, kid | 200 with decision; 204 if no decision is ready |
 | /agent/v1/ack | decision_id, outcome: applied / denied / failed | 204 |
 | /agent/v1/cancel | cid, kid | 204 |

@@ -21,7 +21,9 @@
   "max_connections_per_user": 1,
   "profile": {
     "endpoint": "vpn.example.test",
-    "template_file": "/var/task/client.ovpn.template"
+    "template_file": "/var/task/client.ovpn.template",
+    "binding": "required",
+    "port": 1194
   },
   "gateway": {
     "api_id": "replace-with-api-id",

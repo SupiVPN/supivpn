@@ -3,5 +3,6 @@
   "certificate_directory": "/etc/letsencrypt/live/supivpn",
   "idp_metadata_file": "/root/idp-metadata.xml",
   "groups": ["admins-vpn", "engineers-production-vpn"],
+  "tcp_fallback": {"enabled": false, "port": 443},
   "admin_cidr": "198.51.100.10/32"
 }

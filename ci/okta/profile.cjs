@@ -64,6 +64,9 @@ function validateProfile(data, cookie) {
   check((text.match(/^remote /gm)||[]).length===1 && /^remote test\.supivpn\.com 1194$/m.test(text),'profile_endpoint');
   check(!text.includes('{{') && !text.includes('OpenVPN tls-crypt-v2 server key'),'profile_placeholder_or_server_key');
   check(!/^\s*(auth-user-pass|auth-token|cert|key)\b/m.test(text) && !/<(?:cert|key)>/.test(text),'embedded_client_credentials');
+  check((text.match(/<auth-user-pass>/g)||[]).length===1 &&
+    /<auth-user-pass>\nsvp1_[0-9a-f]{32}\n[A-Za-z0-9_-]{43}\n<\/auth-user-pass>/.test(text),'profile_owner_proof');
+  check(/^verify-x509-name test\.supivpn\.com name$/m.test(text),'profile_verified_server_name');
   for(const secret of [login,password(),cookie.split('=').slice(1).join('='),'SAMLResponse=','RelayState=','<saml','SSWS ']) {
     check(secret && !text.includes(secret),'authentication_material_in_profile');
   }
@@ -72,7 +75,7 @@ function validateProfile(data, cookie) {
   const match=text.match(/<tls-crypt-v2>\s*-----BEGIN OpenVPN tls-crypt-v2 client key-----\s*([A-Za-z0-9+/=\r\n]+)\s*-----END OpenVPN tls-crypt-v2 client key-----\s*<\/tls-crypt-v2>/);
   check(match && (text.match(/<tls-crypt-v2>/g)||[]).length===1,'profile_client_key');
   const key=Buffer.from(match[1].replace(/\s/g,''),'base64');
-  check(key.length===555,'client_key_size');
+  check(key.length===555+Buffer.byteLength('SupiVPN/profile-auth/v1\0'),'client_key_size');
   const digest=crypto.createHash('sha256').update(key).digest('hex');
   key.fill(0);
   return digest;
@@ -216,6 +219,8 @@ async function signInAndDownload(expectDenied, expectedCount, encrypted=false) {
     const after=await status();
     check(after.key_loads===before.key_loads && after.allowed===before.allowed,'replay_issued_profile');
     check(after.vpn_logins===0 && after.nodes===0,'profile_created_vpn_session');
+    if (!expectDenied) check(after.issued_profiles-initial.issued_profiles===1 &&
+      after.verified_profile_owners-initial.verified_profile_owners===1,'profile_owner_not_persisted');
     // Earlier intentionally rejected logins remain pending. Measure this login's
     // state changes instead of treating unrelated pending rows as consumed.
     check(after.profile_logins-initial.profile_logins===1 &&

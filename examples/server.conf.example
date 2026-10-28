@@ -10,6 +10,7 @@ max-clients 16
 max-routes-per-client 1
 script-security 2
 learn-address "/opt/supivpn/supivpn -learn-address"
+tls-crypt-v2-verify "/opt/supivpn/supivpn -verify-profile-metadata required"
 
 # Deliver server certificate and key using the deployment's secret mechanism.
 cert /etc/supivpn/tls/crt.pem

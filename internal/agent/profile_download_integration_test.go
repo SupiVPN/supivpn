@@ -342,7 +342,7 @@ func TestProfileMigrationUpgradeAndExpiry(t *testing.T) {
 		t.Fatal("missing v1 migration")
 	}
 	// Recreate the already deployed v1 state, preserving its node and checksum.
- removeProfileSchema(t,pool)
+	removeProfileSchema(t, pool)
 	if _, err := pool.Exec(ctx, `DROP FUNCTION supivpn.lock_node(text),supivpn.agent_heartbeat(text,text,boolean),supivpn.agent_rotate(text,text,text),supivpn.prune_auth(integer);
         DROP TABLE supivpn.profile_logins;
         DROP TABLE supivpn.node_recovery, supivpn.node_recovery_starts,supivpn.node_recovery_stops,
@@ -437,7 +437,7 @@ func TestProfileMigrationUpgradeAndExpiry(t *testing.T) {
 	}
 	actor := postgres.Agent{NodeID: "migration-node", Generation: "generation-b"}
 	vpnTicket := strings.Repeat("v", 43)
-	if store.Register(ctx, actor, postgres.Connection{CID: 1, KID: 1}, vpnTicket, time.Minute) != nil ||
+	if registerOwnedFixture(t, store, ctx, actor, postgres.Connection{CID: 1, KID: 1}, vpnTicket, time.Minute, decision.SubjectHash) != nil ||
 		store.Start(ctx, vpnTicket, "vpn-request", browser) != nil {
 		t.Fatal("VPN fixture registration failed")
 	}

@@ -83,6 +83,7 @@ def permitted(path):
             "supivpn.8", "supivpn-profile.8", "supivpn-controller.8", "supivpn-migrate.8", "supivpn-setup.8", "supivpn-cli.8",
         }) or (path.parent == Path("debian/units") and path.name in {
             "supivpn-node.service", "supivpn-openvpn.service", "supivpn-controller.service",
+            "supivpn-openvpn-tcp.service",
             "supivpn-node@.service", "supivpn-openvpn@.service",
         }) or (path.parent == Path("debian/examples") and path.name in {
             "agent.example.json", "controller.example.json", "server.conf.example", "setup.example.json",

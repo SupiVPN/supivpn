@@ -18,8 +18,15 @@ var (
 	ErrUnavailable     = errors.New("authorization backend unavailable")
 	ErrGroupDenied     = errors.New("VPN group authorization refused")
 	ErrConnectionLimit = errors.New("VPN connection limit reached")
+	ErrConnectionRetry = errors.New("VPN transport retry scheduled")
 	ErrDecisionPending = errors.New("authorization saved; awaiting agent acknowledgement")
 )
+
+// This is a refusal of the current attempt, never a deferred authorization.
+const ConnectionRetryReason = "connection_limit_retry"
+const ConnectionRetrySeconds = 60
+
+const connectionRetryMessage = "Previous VPN connection still occupies your slot. Your VPN client will retry once in 60 seconds. Complete the new sign-in when it opens; this attempt has not opened a tunnel."
 
 // Pending is a value snapshot, never a pointer into mutable agent/store state.
 // Revision distinguishes a replaced connection even if its local CID is reused.
@@ -45,7 +52,7 @@ type Authorization struct {
 	NotBefore          time.Time
 	NotOnOrAfter       time.Time
 	SessionExpiresAt   time.Time
-    SessionUnlimited   bool
+	SessionUnlimited   bool
 }
 
 // ValidLogUsername bounds audit data without restricting ordinary Unicode names.

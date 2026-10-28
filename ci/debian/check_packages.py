@@ -107,7 +107,7 @@ def check(packages):
     run("supivpn-setup", "plan", "--config", "/usr/share/supivpn/examples/setup.example.json")
     assert not Path("/etc/supivpn").exists(), "plan changed the host"
     run("systemd-analyze", "verify", "supivpn-node.service", "supivpn-openvpn.service", "supivpn-controller.service",
-        "supivpn-node@bound.service", "supivpn-openvpn@bound.service")
+        "supivpn-openvpn-tcp.service", "supivpn-node@bound.service", "supivpn-openvpn@bound.service")
     # Operator files are synthetic sentinels, never credentials.
     sentinels = [Path("/etc/supivpn/node/operator-sentinel"),
                  Path("/etc/supivpn/controller/operator-sentinel"),
@@ -147,6 +147,7 @@ def check(packages):
     assert len(stopped) == 4, stopped
     assert any("stop supivpn-controller.service" in line for line in stopped), stopped
     assert any("supivpn-node.service" in line and "supivpn-openvpn.service" in line for line in stopped), stopped
+    assert any("supivpn-openvpn-tcp.service" in line for line in stopped), stopped
     assert "deb-systemd-invoke stop supivpn-node@bound.service" in stopped, stopped
     assert "deb-systemd-invoke stop supivpn-openvpn@bound.service" in stopped, stopped
     assert all("unrelated.service" not in line for line in stopped), stopped

@@ -194,6 +194,18 @@ func TestProfileBindingAdmission(t *testing.T) {
 			browser := sha256.Sum256([]byte("browser"))
 			if scenario == "legacy" || scenario == "upgrade" {
 				err = s.Register(ctx, actor, conn, ticket, time.Minute)
+				if !errors.Is(err, postgres.ErrConflict) {
+					t.Fatal("unbound registration accepted", err)
+				}
+				if scenario == "legacy" {
+					return
+				}
+				// Historical registrations have no profile binding. A retry with
+				// a valid new proof must not attach it to somebody else's ticket.
+				hash := sha256.Sum256([]byte(ticket))
+				if _, err = pool.Exec(ctx, `INSERT INTO supivpn.logins(ticket_hash,node_id,generation,cid,kid,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '1 minute')`, hash[:], actor.NodeID, actor.Generation, conn.CID, conn.KID); err != nil {
+					t.Fatal("historical login fixture", err)
+				}
 			} else {
 				err = s.RegisterProfile(ctx, actor, conn, ticket, time.Minute, proof)
 			}

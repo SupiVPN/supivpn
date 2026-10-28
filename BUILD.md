@@ -81,11 +81,13 @@ syntax and the package installation/removal lifecycle. Outputs stay under
 `local/debian/<arch>/`; nothing is installed on the development host.
 `make deb-vm-test ARCH=arm64` (or `amd64`) additionally boots an isolated Debian
 VM and checks real systemd lifecycle, signed SAML login, VPN traffic, dependency
-outages, session expiry/reconnect, and the two-port profile migration (owner,
-cross-port refusal, block/reactivate and Server URL protocol). Reboot and live
-package upgrades cover both installed node/OpenVPN pairs. It uses
+outages, session expiry/reconnect, and optional UDP/TCP fallback (owner checks,
+unbound-profile refusal, block/reactivate and Server URL protocol). Reboot and
+live package upgrades cover the single agent with both OpenVPN transports. It uses
 software CPU emulation and needs Internet access for guest prerequisites; VM
 disks and evidence stay in `local/debian-vm/`.
+Use `VM_TRANSPORT=dual` for fresh TCP-enabled setup, disable/reenable, established
+UDP loss, and concurrent UDP/TCP outage, rekey and session-expiry acceptance.
 See [Debian packaging](docs/DEBIAN_PACKAGING.md) for prerequisites and the
 distinction between container checks and clean-VM acceptance.
 Native Connect Server URL acceptance uses the separate

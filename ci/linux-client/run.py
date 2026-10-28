@@ -13,6 +13,12 @@ def main():
     os.makedirs('/run/dbus', exist_ok=True)
     # A synthetic container identity, never a host machine ID or mounted data.
     subprocess.run(['dbus-uuidgen', '--ensure=/etc/machine-id'], check=True)
+    # Debian delegates hostnamed activation to systemd (Exec=/bin/false).
+    # This disposable container has no systemd PID 1; activate it directly via
+    # D-Bus so new VPN clients still work after hostnamed's idle exit.
+    Path('/usr/share/dbus-1/system-services/org.freedesktop.hostname1.service').write_text(
+        '[D-BUS Service]\nName=org.freedesktop.hostname1\n'
+        'Exec=/lib/systemd/systemd-hostnamed\nUser=root\n')
     processes = []
     try:
         processes.append(subprocess.Popen(
@@ -25,15 +31,16 @@ def main():
             time.sleep(0.05)
         for command in (
                 ['/usr/libexec/openvpn3-linux/openvpn3-service-log', '--log-level', '3'],
-                ['/lib/systemd/systemd-hostnamed'],
                 ['/usr/libexec/openvpn3-linux/openvpn3-service-netcfg']):
             processes.append(subprocess.Popen(command, stdout=subprocess.DEVNULL,
                                                stderr=subprocess.DEVNULL))
         time.sleep(1)
-        return subprocess.run(['/test/openvpn.test', '-test.run', '^TestOpenVPNTLSCryptV2$',
+        return subprocess.run(['/test/openvpn.test', '-test.run', '^TestOpenVPN(TLSCryptV2|TransportFallback)$',
                                '-test.v', '-test.timeout', '180s'], check=False).returncode
     finally:
         for process in reversed(processes):
+            if process.poll() is not None:
+                print('Test service exited:', Path(process.args[0]).name, process.returncode, flush=True)
             if process.poll() is None:
                 process.terminate()
             try:

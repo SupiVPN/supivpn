@@ -166,10 +166,10 @@ func run() error {
 	clear(key)
 	defer clear(wrapping)
 	var keyLoads atomic.Int32
-	issue, err := profile.DownloadIssuer(template, "test.supivpn.com", func(context.Context) ([]byte, error) {
+	issue, err := profile.BoundDownloadIssuer(template, "test.supivpn.com", 1194, func(context.Context) ([]byte, error) {
 		keyLoads.Add(1)
 		return bytes.Clone(wrapping), nil
-	})
+	}, store.CreateProfile)
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func run() error {
 	}
 	c, err := controller.New(controller.Config{Policy: controller.Policy{SAMLGroupsAttribute: "groups", Groups: groups},
 		PendingSeconds: 180, SessionSeconds: 900}, base, sp, store, time.Now,
-		controller.ProfileDownloads{Backend: backend, Issue: issue})
+		controller.ProfileDownloads{Backend: backend, IssueForSubject: issue})
 	if err != nil {
 		return err
 	}
@@ -197,13 +197,16 @@ func run() error {
 				w.WriteHeader(405)
 				return
 			}
-			var total, consumed, assertions, vpnLogins, nodes int
+			var total, consumed, assertions, vpnLogins, nodes, issued, owned int
 			e := pool.QueryRow(r.Context(), `
     SELECT (SELECT count(*) FROM supivpn.profile_logins),
      (SELECT count(*) FROM supivpn.profile_logins WHERE consumed),
      (SELECT count(*) FROM supivpn.assertions),
      (SELECT count(*) FROM supivpn.logins),
-     (SELECT count(*) FROM supivpn.nodes)`).Scan(&total, &consumed, &assertions, &vpnLogins, &nodes)
+     (SELECT count(*) FROM supivpn.nodes),
+     (SELECT count(*) FROM supivpn.issued_profiles),
+     (SELECT count(*) FROM supivpn.issued_profiles WHERE subject_hash=$1 AND owner_username=$2 AND state='active')`,
+				backend.expectedSubject[:], testUser).Scan(&total, &consumed, &assertions, &vpnLogins, &nodes, &issued, &owned)
 			if e != nil {
 				http.Error(w, "probe unavailable", 503)
 				return
@@ -216,6 +219,7 @@ func run() error {
 				"verified_identity_and_group": backend.verified, "key_loads": keyLoads.Load(),
 				"profile_logins": total, "consumed_logins": consumed, "assertions": assertions,
 				"vpn_logins": vpnLogins, "nodes": nodes,
+				"issued_profiles": issued, "verified_profile_owners": owned,
 			})
 			return
 		}

@@ -179,6 +179,7 @@ identifies just one Lambda invocation and must not replace it.
 | `operator.action_completed`, `operator.tunnel_drop_requested` | Operator action audit; INFO / WARN |
 | `session.unlimited_configured` | Unlimited-session security warning; WARN |
 | `logging.output_failed` | File sink failure and stderr fallback; ERROR |
+| `component.stopped` | Component failure; the node reports a fixed startup stage or management/listener failure reason, never raw credentials or driver errors |
 | `component.initialization_failed`, `component.stopped`, `configuration.refused`, `invocation.failed` | Runtime failure; ERROR |
 | `operator.request_failed`, `database.migration_failed`, `profile.issue_failed`, `package.failed`, `manifest.failed` | CLI/operation failure; ERROR |
 | `database.schema_current`, `profile.file_ready` | CLI completion; INFO |
@@ -300,6 +301,7 @@ or reused CID cannot inherit earlier diagnostics, metrics or reasons.
 | `pending_auth_expired` | A pending authentication deadline expired |
 | `reauthentication_refused` | Rekey was refused for an ineligible tracked connection |
 | `connection_limit` | Local authorization exceeded the user's connection limit |
+| `connection_limit_retry` | Same-profile transport switch refused; one delayed retry requires fresh SAML and a free cluster slot |
 | `invalid_groups_claim`, `no_vpn_group`, `pool_full` | Authorization or allocation was refused |
 | `controller_refused` | The remote-controller path refused a pending login |
 

@@ -65,6 +65,7 @@ var events = map[string]definition{
 	"component.initialization_failed": {slog.LevelError, "Component initialization failed; check configuration, schema and privileges", ""},
 	"component.stopped":               {slog.LevelError, "Component stopped unexpectedly", "reason"},
 	"configuration.refused":           {slog.LevelError, "Configuration validation failed", ""},
+	"network.route_refused":           {slog.LevelError, "Shared VPN pool route unavailable; check route hooks and interface permissions", ""},
 	"operator.request_failed":         {slog.LevelError, "Local operator request failed", ""},
 	"invocation.failed":               {slog.LevelError, "Lambda invocation failed", ""},
 	"database.migration_failed":       {slog.LevelError, "Database migration failed; check configuration, schema and privileges", ""},
@@ -147,7 +148,7 @@ func (l *Logger) Emit(ctx context.Context, event string, attrs ...slog.Attr) {
 		clean = append(clean, slog.String("request_id", id))
 	}
 	for _, a := range attrs {
-		if seen[a.Key] || !(oneOf(a.Key, "node_id generation cid kid") || oneOf(a.Key, d.fields)) || !safe(a) {
+		if seen[a.Key] || !(oneOf(a.Key, "node_id generation cid kid transport") || oneOf(a.Key, d.fields)) || !safe(a) {
 			continue
 		}
 		seen[a.Key] = true
@@ -238,6 +239,8 @@ func safe(a slog.Attr) bool {
 		return err == nil && ip.Zone() == ""
 	case "operation":
 		return oneOf(s, "register fetch ack cancel heartbeat")
+	case "transport":
+		return oneOf(s, "udp tcp")
 	case "client_version":
 		return ValidClientVersion(s)
 	case "client_platform":
@@ -249,7 +252,7 @@ func safe(a slog.Attr) bool {
 	case "disconnect_source":
 		return oneOf(s, "management_event status_snapshot")
 	case "disconnect_reason":
-		return oneOf(s, "session_expired pending_auth_expired operator_requested reauthentication_refused connection_limit invalid_groups_claim no_vpn_group pool_full controller_refused")
+		return oneOf(s, "session_expired pending_auth_expired operator_requested reauthentication_refused connection_limit connection_limit_retry invalid_groups_claim no_vpn_group pool_full controller_refused")
 	case "action":
 		return oneOf(s, "maintenance-begin maintenance-end maintenance-renew maintenance-replace recovery-resume recovery-resolve")
 	case "phase":
@@ -257,9 +260,9 @@ func safe(a slog.Attr) bool {
 	case "purpose":
 		return oneOf(s, "vpn_connect profile_download")
 	case "outcome":
-		return oneOf(s, "allowed denied applied failed")
+		return oneOf(s, "allowed denied applied failed retry")
 	case "reason":
-		return oneOf(s, "profile_refused capacity_or_missing_webauth connection_limit invalid_groups_claim no_vpn_group pool_full deadline stop_budget start_budget retired_stopped retired_running already_stopped fenced terminated start_disabled healthy observation_timeout management_unavailable listener_unavailable startup_failed")
+		return oneOf(s, "profile_refused capacity_or_missing_webauth connection_limit connection_limit_retry invalid_groups_claim no_vpn_group pool_full deadline stop_budget start_budget retired_stopped retired_running already_stopped fenced terminated start_disabled healthy observation_timeout management_unavailable listener_unavailable startup_failed startup_config startup_tls startup_idp startup_management_socket startup_operator startup_https startup_management_peer startup_controller")
 	}
 	return false
 }

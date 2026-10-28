@@ -189,7 +189,7 @@ func pendingForReconnect(t *testing.T, s *postgres.Store) (postgres.Agent, postg
 	if err := s.RotateNode(ctx, actor.NodeID, "", actor.Generation); err != nil {
 		t.Fatal("cannot create test node")
 	}
-	if err := s.Register(ctx, actor, conn, ticket, 180*time.Second); err != nil {
+	if err := registerOwnedFixture(t, s, ctx, actor, conn, ticket, 180*time.Second, sha256.Sum256([]byte("test-user-"+id))); err != nil {
 		t.Fatal("cannot register test login")
 	}
 	if err := s.Start(ctx, ticket, "request-"+id, browser); err != nil {

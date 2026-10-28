@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"supivpn/internal/controller"
 	"supivpn/internal/postgres"
 )
 
@@ -87,35 +86,25 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 		actor := postgres.Agent{NodeID: fmt.Sprintf("bridge-%d", version), Generation: "generation-a"}
 		conn := postgres.Connection{CID: int64(version), KID: 1}
 		ticket := fmt.Sprintf("bridge-ticket-%043d", version)
-		browser := sha256.Sum256([]byte("test-browser"))
 		if err := s.RotateNode(ctx, actor.NodeID, "", actor.Generation); err != nil {
 			t.Fatal("rotate failed")
 		}
-		if err := s.Register(ctx, actor, conn, ticket, time.Minute); err != nil {
-			t.Fatal("register failed")
+		if err := s.Register(ctx, actor, conn, ticket, time.Minute); !errors.Is(err, postgres.ErrConflict) {
+			t.Fatal("unbound registration accepted", err)
 		}
-		if err := s.Start(ctx, ticket, fmt.Sprintf("bridge-request-%d", version), browser); err != nil {
-			t.Fatal("start failed")
+		seedHistoricalGrant(t, p, actor, conn, ticket, sha256.Sum256([]byte(ticket)), "alice", version)
+		beforeGrant := historicalGrantSnapshot(t, p, ticket)
+		checkPreserved := func() {
+			t.Helper()
+			if historicalGrantSnapshot(t, p, ticket) != beforeGrant {
+				t.Fatal("migration changed historical authorization")
+			}
+			if _, err := s.Fetch(ctx, actor, conn); err == nil {
+				t.Fatal("historical unbound grant became usable")
+			}
 		}
-		pending, err := s.Lookup(ctx, ticket, browser)
-		if err != nil {
-			t.Fatal("lookup failed")
-		}
-		now := time.Now().UTC()
-		d := controller.Authorization{Username: "alice", SubjectHash: sha256.Sum256([]byte(ticket)),
-			MaxConnections: 1, GroupName: "admins-vpn", AssertionHash: sha256.Sum256([]byte(ticket)),
-			AssertionExpiresAt: now.Add(time.Minute), NotBefore: now.Add(-time.Minute),
-			NotOnOrAfter: now.Add(time.Minute), SessionExpiresAt: now.Add(time.Hour)}
-		if err = s.Complete(ctx, pending, d); !errors.Is(err, controller.ErrDecisionPending) {
-			t.Fatal("complete failed")
-		}
-		decision, err := s.Fetch(ctx, actor, conn)
-		if err != nil || decision.GroupName != "admins-vpn" || decision.SubjectHash != d.SubjectHash {
-			t.Fatal("authorization changed")
-		}
-		if (version == 7 && decision.Username != "") || (version >= 8 && decision.Username != "alice") {
-			t.Fatal("audit field compatibility failed")
-		}
+		var err error
+		checkPreserved()
 		if version == 7 {
 			// A busy table must abort the migration instead of blocking heartbeats indefinitely.
 			tx, err := p.Begin(ctx)
@@ -143,10 +132,7 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 			if err = postgres.Migrate(ctx, p); err != nil {
 				t.Fatal("retry after committed migration failed", err)
 			}
-			old, err := s.Fetch(ctx, actor, conn)
-			if err != nil || old.ID != decision.ID || old.SubjectHash != decision.SubjectHash {
-				t.Fatal("upgrade lost pending decision")
-			}
+			checkPreserved()
 			removeProfileSchema(t, p)
 			if _, err = p.Exec(ctx, `DROP FUNCTION supivpn.lock_node(text),supivpn.agent_rotate(text,text,text),supivpn.agent_heartbeat(text,text,boolean),supivpn.prune_auth(integer);
                 DELETE FROM public.supivpn_schema_migrations WHERE version>=9`); err != nil {
@@ -157,12 +143,14 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 			if err = postgres.Migrate(ctx, p); err != nil {
 				t.Fatal("schema 8 upgrade failed", err)
 			}
-			old, err := s.Fetch(ctx, actor, conn)
-			if err != nil || old != decision {
-				t.Fatal("schema 8 upgrade changed live authorization")
+			checkPreserved()
+			if err := s.Acknowledge(ctx, actor, "decision-"+ticket, postgres.Applied); err == nil {
+				t.Fatal("unbound historical grant acknowledged")
 			}
-			if err := s.Acknowledge(ctx, actor, old.ID, postgres.Applied); err != nil {
-				t.Fatal("cannot acknowledge pre-upgrade decision")
+			// Historical acknowledged slots also remain intact during migration.
+			hash := sha256.Sum256([]byte(ticket))
+			if _, err = p.Exec(ctx, "UPDATE supivpn.logins SET state='acknowledged',ack_result='applied' WHERE ticket_hash=$1", hash[:]); err != nil {
+				t.Fatal("historical acknowledged fixture", err)
 			}
 			restoreSchema9Functions(t, p)
 		}
@@ -192,30 +180,21 @@ func TestPostgresRollingSchemaCompatibility(t *testing.T) {
 					t.Fatal("function migration changed authorization, replay, generation or old migration data")
 				}
 			}
-			old, err := s.Fetch(ctx, actor, conn)
-			if err != nil || old != decision {
-				t.Fatal("schema 10 upgrade lost live decision")
-			}
+			checkPreserved()
 			removeProfileSchema(t, p)
 		}
 		if version == 10 {
 			if err := postgres.Migrate(ctx, p); err != nil {
 				t.Fatal("schema 10 to 11 upgrade failed", err)
 			}
-			old, err := s.Fetch(ctx, actor, conn)
-			if err != nil || old != decision {
-				t.Fatal("profile migration changed an existing authorization")
-			}
+			checkPreserved()
 			removeProfileOwnerSchema(t, p)
 		}
 		if version == 11 {
 			if err := postgres.Migrate(ctx, p); err != nil {
 				t.Fatal("profile owner migration failed", err)
 			}
-			old, err := s.Fetch(ctx, actor, conn)
-			if err != nil || old != decision {
-				t.Fatal("owner metadata migration changed authorization")
-			}
+			checkPreserved()
 		}
 	}
 	if _, err := p.Exec(ctx, "INSERT INTO public.supivpn_schema_migrations(version,checksum) VALUES(13,''::bytea)"); err != nil {

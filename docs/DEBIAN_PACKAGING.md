@@ -102,6 +102,8 @@ make deb-vm-test ARCH=amd64
 # The same real-VM suite with PostgreSQL outside the guest:
 make deb-vm-test ARCH=arm64 VM_DATABASE=remote
 make deb-vm-test ARCH=amd64 VM_DATABASE=remote
+# Start with TCP enabled, then exercise transport lifecycle and outages:
+make deb-vm-test ARCH=arm64 VM_TRANSPORT=dual
 ```
 
 This includes `deb-test`, then boots the pinned official Debian 13 generic image
@@ -171,7 +173,23 @@ The VM suite verifies:
 
 The VM suite is opt-in; ordinary CI's Debian job still runs the faster container
 package checks. A successful `result.json` is written only after all VM phases
-pass. It records image and package digests and both boot IDs.
+pass. It records image and package digests, database/transport mode and both boot IDs.
+
+`VM_TRANSPORT=dual` selects a separate fresh-install acceptance path. Setup
+enables TCP from its input configuration, then the suite checks disabling and
+reenabling it, previously issued profiles, loss of an established UDP tunnel,
+and simultaneous UDP/TCP sessions during controller/database outages. Real TLS
+rekeys and independent signed session expiry must preserve the sibling tunnel
+and release only confirmed closed sessions. Outage and expiry cases keep the
+same client processes running; tests do not shorten installed keepalive or lease
+deadlines. Rekey checks accelerate only the server interval (20 seconds for
+steady traffic, 60 seconds for outages with a new browser login after recovery);
+the issued client's rekey interval and handshake window remain unchanged.
+Established UDP loss separately checks automatic fallback under the
+default one-slot limit. A successful later manual retry does not make that
+automatic-fallback check pass; see the [bounded transport retry](TRANSPORTS.md#loss-of-an-established-udp-tunnel).
+The ordinary `udp` path retains its default-setup and profile-security checks.
+These modes can be combined with `VM_DATABASE=remote`.
 
 ## Files and identities
 
@@ -269,11 +287,22 @@ automatically and has no independent enablement. Stopping only the OpenVPN unit
 is not a maintenance stop: the node's `Upholds=` dependency starts it again.
 Use `systemctl stop supivpn-node.service` to leave both stopped.
 
+For the optional TCP configuration planned for v0.9.0, the same node unit also
+manages `supivpn-openvpn-tcp.service`. It starts only when
+`/etc/supivpn/node/openvpn-tcp.conf` exists. Its `Wants=` dependency is evaluated
+once per node start, avoiding continuous attempts when TCP is disabled.
+An active TCP daemon's failure closes management and restarts the whole node.
+Keep TCP disabled by default and
+configure the [shared allocator and route hooks](TRANSPORTS.md) before enabling
+it. Both transports share one agent, generation and node ID; do not run another
+agent for TCP. Stop the node for maintenance so neither daemon remains active.
+
 The agent notifies systemd after binding its management, operator and HTTPS
 listeners. `After=` then allows OpenVPN to start; no fixed startup sleep or probe
 consumes the management connection. In managed mode the agent allows 30 seconds
 for OpenVPN to connect. This listener signal does not mean the tunnel is ready:
 use `/readyz` after the controller lease and management negotiation complete.
+With TCP configured, both management peers and TUN interfaces must be ready.
 
 OpenVPN is bound to the agent and stops if it dies. Management disconnect makes
 the agent exit; its rate-limited restart restores the pair. `PartOf=` propagates
@@ -285,7 +314,8 @@ the existing lease-expiry behavior still applies during prolonged outages.
 All examples log to stderr for journald. Inspect `journalctl -u supivpn-node`,
 `-u supivpn-openvpn` and `-u supivpn-controller`; configure journal retention at
 the host level. Services restrict filesystem writes and capabilities. The agent
-has no NET_ADMIN or TUN access; OpenVPN has TUN and NET_ADMIN. Packages do not
+has no NET_ADMIN or TUN access; OpenVPN has TUN and NET_ADMIN. Only the optional
+TCP unit additionally receives NET_BIND_SERVICE to bind TCP/443. Packages do not
 change routing, forwarding, firewall, DNS, reverse proxies or NAT.
 
 ## Upgrades and removal

@@ -32,7 +32,7 @@ func TestPostgresAgentIdentityIsolation(t *testing.T) {
 		ticket := strings.Repeat(string(rune('a'+i)), 43)
 		browser := sha256.Sum256([]byte(actor.NodeID))
 		if store.RotateNode(ctx, actor.NodeID, "", actor.Generation) != nil ||
-			store.Register(ctx, actor, connection, ticket, time.Minute) != nil ||
+			registerOwnedFixture(t, store, ctx, actor, connection, ticket, time.Minute, browser) != nil ||
 			store.Start(ctx, ticket, "request-"+actor.NodeID, browser) != nil {
 			t.Fatal("cannot register independent logins with the same connection IDs")
 		}
@@ -70,7 +70,7 @@ func TestPostgresAgentIdentityIsolation(t *testing.T) {
 	}
 	current := postgres.Agent{NodeID: actors[1].NodeID, Generation: "generation-b"}
 	if store.RotateNode(ctx, current.NodeID, actors[1].Generation, current.Generation) != nil ||
-		store.Register(ctx, current, connection, strings.Repeat("c", 43), time.Minute) != nil {
+		registerOwnedFixture(t, store, ctx, current, connection, strings.Repeat("c", 43), time.Minute, sha256.Sum256([]byte("node-b"))) != nil {
 		t.Fatal("cannot reuse connection IDs in the new generation")
 	}
 	if _, err := store.Fetch(ctx, actors[1], connection); !errors.Is(err, controller.ErrLoginExpired) {
@@ -82,7 +82,7 @@ func TestPostgresAgentIdentityIsolation(t *testing.T) {
 	if err := store.Cancel(ctx, actors[1], connection); !errors.Is(err, controller.ErrLoginExpired) {
 		t.Fatal("retired generation cancelled a connection")
 	}
-	if err := store.Register(ctx, current, connection, strings.Repeat("c", 43), time.Minute); err != nil {
+	if err := registerOwnedFixture(t, store, ctx, current, connection, strings.Repeat("c", 43), time.Minute, sha256.Sum256([]byte("node-b"))); err != nil {
 		t.Fatal("retired generation changed the current pending login")
 	}
 }

@@ -21,6 +21,13 @@ import (
 // SAML, and persists ownership before returning a profile. Failed persistence
 // never produces a usable download.
 func BoundDownloadIssuer(template []byte, endpoint string, port uint16, load func(context.Context) ([]byte, error), save func(context.Context, Credential, Owner) error) (func(context.Context, Owner) ([]byte, error), error) {
+	return BoundTransportIssuer(template, endpoint, port, 0, load, save)
+}
+
+// BoundTransportIssuer optionally adds TCP after UDP. Both connections share
+// the same verified server name, CA, wrapping key and owner-bound credential.
+// A zero TCP port preserves the existing UDP-only profile format.
+func BoundTransportIssuer(template []byte, endpoint string, port, tcpPort uint16, load func(context.Context) ([]byte, error), save func(context.Context, Credential, Owner) error) (func(context.Context, Owner) ([]byte, error), error) {
 	if save == nil || port == 0 {
 		return nil, errors.New("invalid bound profile configuration")
 	}
@@ -32,7 +39,40 @@ func BoundDownloadIssuer(template []byte, endpoint string, port uint16, load fun
 	source = strings.ReplaceAll(source, "# TEMPORARY: server certificate name verification is intentionally disabled.\n", "# Verify the VPN server's exact certificate common name before sending the profile proof.\n")
 	source = strings.ReplaceAll(source, "# This can accept other servers with certificates chaining to the same trusted CA.\n", "")
 	source = strings.ReplaceAll(source, "# Deliberately no client cert/key or auth-user-pass. SAML still authorizes access.\n", "# No client certificate. The opaque profile proof and its verified SAML owner authorize access.\n")
-	configured := []byte(strings.Replace(source, "remote supivpn.example.test 1194\n", "remote "+endpoint+" "+strconv.Itoa(int(port))+"\n", 1))
+	remote := "remote " + endpoint + " " + strconv.Itoa(int(port)) + "\n"
+	if tcpPort != 0 {
+		// Only transform an unambiguous UDP template. An extra connection,
+		// random ordering or proxy must not silently override the failover policy.
+		remotes, protocols := 0, 0
+		for _, line := range strings.Split(source, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 || strings.HasPrefix(fields[0], "#") || strings.HasPrefix(fields[0], ";") {
+				continue
+			}
+			switch fields[0] {
+			case "remote":
+				remotes++
+			case "proto":
+				protocols++
+				if len(fields) != 2 || fields[1] != "udp4" {
+					return nil, errors.New("TCP fallback requires the standard UDP template")
+				}
+			case "<connection>", "remote-random", "remote-random-hostname", "http-proxy", "socks-proxy", "server-poll-timeout", "connect-timeout":
+				return nil, errors.New("TCP fallback requires an ordered direct connection template")
+			}
+		}
+		if remotes != 1 || protocols != 1 || !strings.Contains(source, "\nproto udp4\n") {
+			return nil, errors.New("TCP fallback requires one UDP remote and protocol")
+		}
+		source = strings.Replace(source, "\nproto udp4\n", "\n", 1)
+		// Poll an unresponsive endpoint briefly without shortening the separate
+		// TLS/SAML handshake window once the server has responded.
+		// OpenVPN 3 reads server-poll-timeout globally, not connect-timeout
+		// inside connection blocks. Set both supported forms consistently.
+		remote = "server-poll-timeout 3\n<connection>\nproto udp4\n" + remote + "connect-timeout 3\n</connection>\n" +
+			"<connection>\nproto tcp4-client\nremote " + endpoint + " " + strconv.Itoa(int(tcpPort)) + "\nconnect-timeout 3\n</connection>\n"
+	}
+	configured := []byte(strings.Replace(source, "remote supivpn.example.test 1194\n", remote, 1))
 	// A profile now contains a bearer proof. Validate the VPN server identity
 	// before sending it, in addition to the template's CA validation.
 	configured = append(configured, []byte("\nverify-x509-name "+endpoint+" name\n")...)
@@ -103,8 +143,8 @@ func (c Credential) Digest() ([32]byte, error) {
 	return sha256.Sum256([]byte("SupiVPN/profile-proof/v1\x00" + c.ID + "\x00" + c.Secret)), nil
 }
 
-// GenerateBoundClientKey uses authenticated user metadata to prevent a new
-// profile from being replayed against a separately configured legacy listener.
+// GenerateBoundClientKey identifies the required bound format through
+// authenticated user metadata, independently of editable profile options.
 // The metadata contains only a format marker and creation time, never identity.
 func GenerateBoundClientKey(serverPEM []byte, now time.Time) ([]byte, error) {
 	if now.Unix() < 0 {
@@ -117,19 +157,14 @@ func GenerateBoundClientKey(serverPEM []byte, now time.Time) ([]byte, error) {
 }
 
 // VerifyClientMetadata consumes OpenVPN's metadata_file (which omits the type
-// byte), after OpenVPN has authenticated it using the wrapping key. Bound and
-// legacy listeners accept disjoint formats. maxAge zero means no age limit.
+// byte), after OpenVPN has authenticated it using the wrapping key. Only the
+// identity-bound format is accepted. maxAge zero means no age limit.
 func VerifyClientMetadata(mode string, kind string, data []byte, now time.Time, maxAge time.Duration) bool {
 	if maxAge < 0 || now.Unix() < 0 {
 		return false
 	}
 	var timestamp []byte
 	switch mode {
-	case "legacy":
-		if kind != "1" || len(data) != 8 {
-			return false
-		}
-		timestamp = data
 	case "required":
 		if kind != "0" || len(data) != len(bindingMarker)+8 || string(data[:len(bindingMarker)]) != bindingMarker {
 			return false

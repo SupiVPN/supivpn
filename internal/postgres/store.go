@@ -72,7 +72,7 @@ func publicError(err error) error {
 	}
 	for _, known := range []error{ErrConflict, ErrGeneration, ErrNoDecision,
 		controller.ErrLoginExpired, controller.ErrLoginStarted,
-		controller.ErrDecisionPending, controller.ErrGroupDenied, controller.ErrConnectionLimit} {
+		controller.ErrDecisionPending, controller.ErrGroupDenied, controller.ErrConnectionLimit, controller.ErrConnectionRetry} {
 		if errors.Is(err, known) {
 			return known
 		}
@@ -188,11 +188,10 @@ func (s *Store) lockNode(ctx context.Context, tx pgx.Tx, nodeID string) (string,
 	return generation, err
 }
 
-// Register is idempotent for the same ticket and connection. It never extends an
-// existing deadline, resurrects consumed state or accepts a second ticket for the
-// same connection. The future agent retains its random ticket across retries.
+// Register refuses the removed unbound protocol, including callers using an
+// older API adapter. RegisterProfile is the only supported admission path.
 func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration) error {
-	return s.register(ctx, a, c, ticket, lifetime, nil)
+	return ErrConflict
 }
 
 func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration, proof *profile.Credential) error {
@@ -380,7 +379,7 @@ func (s *Store) withLogin(ctx context.Context, hash []byte, actor *Agent,
 		return publicError(err)
 	}
 	result := fn(tx, r, now)
-	if result != nil && !errors.Is(result, controller.ErrDecisionPending) && !errors.Is(result, controller.ErrGroupDenied) && !errors.Is(result, controller.ErrConnectionLimit) {
+	if result != nil && !errors.Is(result, controller.ErrDecisionPending) && !errors.Is(result, controller.ErrGroupDenied) && !errors.Is(result, controller.ErrConnectionLimit) && !errors.Is(result, controller.ErrConnectionRetry) {
 		return publicError(result)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -493,7 +492,10 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		id, err := loginProfile(ctx, tx, hash)
 		if err != nil {
 			return err
-		} else if id != "" {
+		} else if id == "" {
+			// Also reject pending unbound logins created before the upgrade.
+			d.GroupName, d.DenialReason = "", "profile_refused"
+		} else {
 			ok, err := s.profileOwnerActive(ctx, tx, id, d.SubjectHash)
 			if err != nil {
 				return err
@@ -535,6 +537,13 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 			}
 			if count >= d.MaxConnections {
 				d.GroupName, d.DenialReason = "", "connection_limit"
+				retry, err := transportRetryAllowed(ctx, tx, r.conn.CID, id, d.SubjectHash)
+				if err != nil {
+					return err
+				}
+				if retry {
+					d.DenialReason = controller.ConnectionRetryReason
+				}
 			}
 		}
 		profileID := id
@@ -568,6 +577,9 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 			if _, err = tx.Exec(ctx, "UPDATE supivpn.logins SET username=$2 WHERE ticket_hash=$1", hash, d.Username); err != nil {
 				return err
 			}
+		}
+		if d.DenialReason == controller.ConnectionRetryReason {
+			return controller.ErrConnectionRetry
 		}
 		if d.DenialReason == "connection_limit" {
 			return controller.ErrConnectionLimit

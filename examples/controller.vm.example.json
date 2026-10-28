@@ -28,7 +28,9 @@
   "profile": {
     "endpoint": "vpn.example.test",
     "template_file": "/etc/supivpn/client.ovpn.template",
-    "server_key_file": "/var/lib/supivpn/tls-crypt-v2-server.key"
+    "server_key_file": "/var/lib/supivpn/tls-crypt-v2-server.key",
+    "binding": "required",
+    "port": 1194
   },
   "vm": {
     "listen": ":8443",

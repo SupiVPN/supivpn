@@ -48,6 +48,13 @@ class ImageIntegrityTests(unittest.TestCase):
 
 
 class RemoteDatabaseTests(unittest.TestCase):
+    def test_unknown_transport_never_downloads_or_runs_a_vm(self):
+        with patch.object(debian_vm, "run") as run, patch.object(debian_vm, "image") as image:
+            with self.assertRaisesRegex(ValueError, "transport mode"):
+                debian_vm.run_vm(Path("unused"), Path("unused"), "arm64", "docker", "go", transport="unknown")
+            run.assert_not_called()
+            image.assert_not_called()
+
     def test_unknown_mode_never_downloads_or_runs_a_vm(self):
         with patch.object(debian_vm, "run") as run, patch.object(debian_vm, "image") as image:
             with self.assertRaisesRegex(ValueError, "database mode"):

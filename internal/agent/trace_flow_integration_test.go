@@ -55,7 +55,7 @@ func TestTraceFullFlowAcrossReplicas(t *testing.T) {
 		}
 		f.deliver(t, login, group)
 		a.handleEvent(clientEvent{kind: "ESTABLISHED", cid: 7})
-		a.handleEvent(clientEvent{kind: "REAUTH", cid: 7, kid: 4})
+		a.handleEvent(clientEvent{kind: "REAUTH", cid: 7, kid: 4, proof: login.proof})
 		if lifecycleCommand(t, f.commands[login.node]) != "client-auth-nt 7 4" {
 			t.Fatal("rekey binding changed")
 		}

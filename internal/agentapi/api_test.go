@@ -16,6 +16,7 @@ import (
 
 	"supivpn/internal/controller"
 	"supivpn/internal/postgres"
+	"supivpn/internal/profile"
 )
 
 type recordedStore struct {
@@ -30,29 +31,43 @@ type recordedStore struct {
 }
 
 // Only boolean readiness on the authenticated heartbeat can become a witness.
-type readinessStore struct { recordedStore; ready bool }
-func(s *readinessStore)HeartbeatStatus(ctx context.Context,a postgres.Agent,ready bool)error{
-    s.ready=ready;return s.Heartbeat(ctx,a)
-}
-func TestHeartbeatReadiness(t *testing.T){
-    for _,tc:=range []struct{body string;status int;ready bool}{
-        { `{"generation":"g1","ready":true}`,204,true},
-        { `{"generation":"g1","ready":false}`,204,false},
-        { `{"generation":"g1"}`,204,false},
-        { `{"generation":"g1","ready":null}`,400,false},
-        { `{"generation":"g1","ready":"true"}`,400,false},
-        { `{"generation":"g1","Ready":true}`,400,false},
-        { `{"generation":"g1","ready":true,"ready":false}`,400,false},
-    }{
-        s:=&readinessStore{};w:=httptest.NewRecorder()
-        New(s,time.Minute).ServeHTTP(w,requestFor("/agent/v1/heartbeat",tc.body,"node-a"))
-        if w.Code!=tc.status || s.ready!=tc.ready || tc.status==400 && s.calls!=0{t.Fatal("unsafe readiness handling")}
-    }
-    s:=&readinessStore{};w:=httptest.NewRecorder()
-    New(s,time.Minute).ServeHTTP(w,requestFor("/agent/v1/rotate",`{"generation":"g1","ready":true}`,"node-a"))
-    if w.Code!=400 || s.calls!=0{t.Fatal("readiness allowed outside heartbeat")}
+type readinessStore struct {
+	recordedStore
+	ready bool
 }
 
+func (s *readinessStore) HeartbeatStatus(ctx context.Context, a postgres.Agent, ready bool) error {
+	s.ready = ready
+	return s.Heartbeat(ctx, a)
+}
+func TestHeartbeatReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status int
+		ready  bool
+	}{
+		{`{"generation":"g1","ready":true}`, 204, true},
+		{`{"generation":"g1","ready":false}`, 204, false},
+		{`{"generation":"g1"}`, 204, false},
+		{`{"generation":"g1","ready":null}`, 400, false},
+		{`{"generation":"g1","ready":"true"}`, 400, false},
+		{`{"generation":"g1","Ready":true}`, 400, false},
+		{`{"generation":"g1","ready":true,"ready":false}`, 400, false},
+	} {
+		s := &readinessStore{}
+		w := httptest.NewRecorder()
+		New(s, time.Minute).ServeHTTP(w, requestFor("/agent/v1/heartbeat", tc.body, "node-a"))
+		if w.Code != tc.status || s.ready != tc.ready || tc.status == 400 && s.calls != 0 {
+			t.Fatal("unsafe readiness handling")
+		}
+	}
+	s := &readinessStore{}
+	w := httptest.NewRecorder()
+	New(s, time.Minute).ServeHTTP(w, requestFor("/agent/v1/rotate", `{"generation":"g1","ready":true}`, "node-a"))
+	if w.Code != 400 || s.calls != 0 {
+		t.Fatal("readiness allowed outside heartbeat")
+	}
+}
 
 func (s *recordedStore) RotateNode(_ context.Context, node, prev, next string) error {
 	s.calls++
@@ -102,7 +117,7 @@ func requestFor(path, body, node string) *http.Request {
 	return r
 }
 func TestAgentIdentityAndOperations(t *testing.T) {
-	s := &recordedStore{}
+	s := &proofStore{}
 	h := New(s, time.Minute)
 	r := requestFor("/agent/v1/rotate", `{"generation":"g1"}`, "")
 	r.Header.Set("X-Node-ID", "node-a")
@@ -119,6 +134,10 @@ func TestAgentIdentityAndOperations(t *testing.T) {
 		{"/cancel", `{"generation":"g1","cid":0,"kid":2}`},
 		{"/ack", `{"generation":"g1","decision_id":"decision-a","outcome":"applied"}`},
 	} {
+		if tc.path == "/register" {
+			proof, _ := profile.NewCredential()
+			tc.body = strings.TrimSuffix(tc.body, "}") + `,"profile_id":"` + proof.ID + `","profile_secret":"` + proof.Secret + `"}`
+		}
 		out = httptest.NewRecorder()
 		h.ServeHTTP(out, requestFor("/agent/v1"+tc.path, tc.body, "node-a"))
 		if out.Code != 204 || s.actor != (postgres.Agent{NodeID: "node-a", Generation: "g1"}) {
@@ -192,14 +211,20 @@ func TestAgentErrorsAreBoundedAndGeneric(t *testing.T) {
 }
 
 func TestUnlimitedDecisionEnvelope(t *testing.T) {
-    base := Decision{ID:"d1",NodeID:"node-a",Generation:"g1",CID:1,KID:2,
-        GroupName:"admins-vpn",ExpiresAt:time.Now().Add(time.Minute),SessionUnlimited:true}
-    data,err:=json.Marshal(base)
-    if err!=nil {t.Fatal(err)}
-    got,err:=DecodeDecision(data)
-    if err!=nil || !got.SessionUnlimited || !got.SessionExpiresAt.IsZero() {t.Fatal("explicit unlimited lost in transport")}
-    for _,field:=range []string{`"session_unlimited":null`,`"session_unlimited":"true"`,`"session_unlimited":1`,`"ticket_hash":"old"`} {
-        encoded:=strings.Replace(string(data),`"session_unlimited":true`,field,1)
-        if _,err:=DecodeDecision([]byte(encoded));err==nil {t.Fatal("malformed or obsolete decision accepted")}
-    }
+	base := Decision{ID: "d1", NodeID: "node-a", Generation: "g1", CID: 1, KID: 2,
+		GroupName: "admins-vpn", ExpiresAt: time.Now().Add(time.Minute), SessionUnlimited: true}
+	data, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeDecision(data)
+	if err != nil || !got.SessionUnlimited || !got.SessionExpiresAt.IsZero() {
+		t.Fatal("explicit unlimited lost in transport")
+	}
+	for _, field := range []string{`"session_unlimited":null`, `"session_unlimited":"true"`, `"session_unlimited":1`, `"ticket_hash":"old"`} {
+		encoded := strings.Replace(string(data), `"session_unlimited":true`, field, 1)
+		if _, err := DecodeDecision([]byte(encoded)); err == nil {
+			t.Fatal("malformed or obsolete decision accepted")
+		}
+	}
 }

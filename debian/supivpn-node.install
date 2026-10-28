@@ -2,6 +2,7 @@ debian/bin/supivpn usr/sbin
 debian/bin/supivpn-profile usr/sbin
 debian/units/supivpn-node.service usr/lib/systemd/system
 debian/units/supivpn-openvpn.service usr/lib/systemd/system
+debian/units/supivpn-openvpn-tcp.service usr/lib/systemd/system
 debian/examples/agent.example.json usr/share/doc/supivpn-node/examples
 debian/examples/server.conf.example usr/share/doc/supivpn-node/examples
 debian/units/supivpn-node@.service usr/lib/systemd/system

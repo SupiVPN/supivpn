@@ -31,6 +31,10 @@ For example:
 One group is selected by priority; limits from different groups are not added.
 Reaching the limit rejects the **new** attempt (`connection_limit`), preserving
 existing sessions. Reducing the limit does not disconnect existing devices.
+An opposite-transport attempt for the same active profile can receive one
+`connection_limit_retry` refusal followed by a bounded automatic retry;
+[transport retry](TRANSPORTS.md#loss-of-an-established-udp-tunnel) describes its
+fresh-SAML requirement and cluster-wide budget. This never grants an extra slot.
 
 Global/per-group `session_seconds` accepts **60..43200 seconds**, default
 **43200 (12 hours)**. Explicit **0** disables the local duration limit.
@@ -262,12 +266,14 @@ Contract: [docs/RECOVERY.md](RECOVERY.md).
 
 ## Upgrades and verification
 
-The v0.8.1 VM controller supports **schemas 7/8/9/10/11/12**; isolated Lambda
-components and opt-in profile features require **schema 12** (v0.8.0 uses 11).
+The upcoming v0.9.0 controller requires **schema 12** and bound profiles for
+both VM and Lambda deployments. The older v0.8.1 VM controller supports
+**schemas 7/8/9/10/11/12**; its isolated Lambda components and opt-in profile
+features require **schema 12** (v0.8.0 uses 11).
 Migration 012 adds persistent operator-visible owner labels without changing
 profile proofs or session authorization; existing profiles need no reissue.
 Migration 011 adds the profile registry, session binding and one-use import grants;
-follow the [two-port migration](PROFILE_BINDING.md). Migration 010 rechecks heartbeat expiry after row-lock
+follow the [profile ownership upgrade guide](PROFILE_BINDING.md). Migration 010 rechecks heartbeat expiry after row-lock
 waits and improves cleanup queries without releasing active grants.
 Migration 009 adds restricted SQL functions and separate
 role grants. A combined-Lambda deployment requires the [controlled cutover](LAMBDA_ISOLATION.md#upgrade-and-rollback).

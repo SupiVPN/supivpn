@@ -21,8 +21,8 @@ type ProfileState struct {
 	OwnerUsername string    `json:"owner_username"`
 }
 
-// ProfileSchemaReady gates opt-in profile features even in a VM deployment
-// whose legacy authorization can still run against an older supported schema.
+// ProfileSchemaReady gates runtime admission, which requires the persistent
+// owner registry and owner labels. Historical migrations retain older schemas.
 func (s *Store) ProfileSchemaReady(ctx context.Context) bool {
 	if s == nil || s.pool == nil {
 		return false
@@ -153,8 +153,11 @@ func loginProfile(ctx context.Context, tx pgx.Tx, hash []byte) (string, error) {
 
 func (s *Store) activeLoginProfile(ctx context.Context, tx pgx.Tx, hash []byte) error {
 	id, err := loginProfile(ctx, tx, hash)
-	if err != nil || id == "" {
+	if err != nil {
 		return err
+	}
+	if id == "" {
+		return controller.ErrLoginExpired
 	}
 	var active bool
 	// The combined VM role uses its existing table privileges. Isolated

@@ -23,10 +23,10 @@ import (
 	"supivpn/internal/agentapi"
 	"supivpn/internal/agentclient"
 	"supivpn/internal/controller"
+	"supivpn/internal/logging"
 	"supivpn/internal/postgres"
 	"supivpn/internal/profile"
 	"supivpn/internal/saml"
-	"supivpn/internal/logging"
 )
 
 var lifecycleGroups = []string{"admins-vpn", "engineers-production-vpn", "testers-vpn", "helpdesk-vpn"}
@@ -48,13 +48,13 @@ func lifecycleConfig(node int, names ...string) config {
 
 type groupLifecycleFixture struct {
 	publicLogger *logging.Logger
-	pool *pgxpool.Pool
-	stores [2]*postgres.Store
-	signer *saml.ServiceProvider
-	app *testApplication
-	control *controller.Controller
-	agents [2]*agent
-	commands [2]chan string
+	pool         *pgxpool.Pool
+	stores       [2]*postgres.Store
+	signer       *saml.ServiceProvider
+	app          *testApplication
+	control      *controller.Controller
+	agents       [2]*agent
+	commands     [2]chan string
 }
 
 func newGroupLifecycleFixture(t *testing.T, policy, first, second []string) *groupLifecycleFixture {
@@ -78,13 +78,20 @@ func newGroupLifecycleFixture(t *testing.T, policy, first, second []string) *gro
 			handler.ServeHTTP(w, r.WithContext(agentapi.WithNode(r.Context(), node)))
 			return w.Result(), nil
 		}), nil)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		t.Cleanup(client.Close)
-		if _, err = client.Call(context.Background(), "rotate", agentclient.Request{Generation: "g1"}); err != nil { t.Fatal(err) }
+		if _, err = client.Call(context.Background(), "rotate", agentclient.Request{Generation: "g1"}); err != nil {
+			t.Fatal(err)
+		}
 		a, commands := remoteFixture(t, client)
 		a.remote.node = node
 		a.config = lifecycleConfig(index, names...)
-		if err := validateAuthorization(a.config); err != nil { t.Fatal(err) }
+		a.config.ProfileBinding = "required"
+		if err := validateAuthorization(a.config); err != nil {
+			t.Fatal(err)
+		}
 		a.pools = newPoolAllocator(a.config)
 		f.agents[index], f.commands[index] = a, commands
 	}
@@ -97,25 +104,34 @@ func (f *groupLifecycleFixture) setPolicy(t *testing.T, names []string) {
 	var err error
 	f.control, err = controller.New(controller.Config{Policy: controllerPolicy(c), PendingSeconds: 180, SessionSeconds: 900},
 		f.app.origin, f.app.sp, f.stores[1], time.Now)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 type groupLifecycleLogin struct {
-	node int
-	cid uint64
+	proof   profile.Credential
+	node    int
+	cid     uint64
 	request *http.Request
 }
 
 func lifecycleCommand(t *testing.T, ch chan string) string {
 	t.Helper()
 	select {
-	case command := <-ch: return command
-	case <-time.After(3*time.Second): t.Fatal("management command missing"); return ""
+	case command := <-ch:
+		return command
+	case <-time.After(3 * time.Second):
+		t.Fatal("management command missing")
+		return ""
 	}
 }
 
 func (f *groupLifecycleFixture) begin(t *testing.T, node int, cid uint64, subject string, members ...string) groupLifecycleLogin {
-	return f.beginWithProof(t, node, cid, subject, profile.Credential{}, members...)
+	assertion := assertionFor(f.app)
+	owner := sha256.Sum256([]byte(assertion.Issuer.Value + "\x00" + subject))
+	proof := ownedFixtureProof(t, f.stores[0], owner, t.Name()+":"+subject)
+	return f.beginWithProof(t, node, cid, subject, proof, members...)
 }
 
 func (f *groupLifecycleFixture) beginWithProof(t *testing.T, node int, cid uint64, subject string, proof profile.Credential, members ...string) groupLifecycleLogin {
@@ -130,40 +146,54 @@ func (f *groupLifecycleFixture) beginWithProof(t *testing.T, node int, cid uint6
 		f.control.Handler().ServeHTTP(w, r.WithContext(logging.WithLogger(r.Context(), f.publicLogger)))
 	})
 	w := confirmVPNLogin(t, handler, f.app.origin, ticket)
-	if w.Code != http.StatusFound || len(w.Result().Cookies()) != 2 { t.Fatal("SAML redirect failed") }
+	if w.Code != http.StatusFound || len(w.Result().Cookies()) != 2 {
+		t.Fatal("SAML redirect failed")
+	}
 	cookie := samlLoginCookie(t, w.Result(), ticket)
 	pending, err := f.stores[0].Lookup(context.Background(), ticket, sha256.Sum256([]byte(cookie.Value)))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertion := assertionFor(f.app)
 	assertion.ID = fmt.Sprintf("lifecycle-assertion-%d-%d", node, cid)
 	assertion.Subject.NameID.Value = subject
 	assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo = pending.RequestID
 	values := make([]saml.AttributeValue, len(members))
-	for i, member := range members { values[i] = saml.AttributeValue{Value: member} }
+	for i, member := range members {
+		values[i] = saml.AttributeValue{Value: member}
+	}
 	assertion.AttributeStatements = []saml.AttributeStatement{{Attributes: []saml.Attribute{{Name: "groups", Values: values}}}}
 	response := saml.Response{ID: fmt.Sprintf("lifecycle-response-%d-%d", node, cid), InResponseTo: pending.RequestID,
 		Version: "2.0", IssueInstant: time.Now().UTC(), Destination: f.app.sp.AcsURL.String(), Issuer: &assertion.Issuer,
 		Status: saml.Status{StatusCode: saml.StatusCode{Value: "urn:oasis:names:tc:SAML:2.0:status:Success"}}, Assertion: assertion}
 	signing, err := saml.GetSigningContext(f.signer)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	element, err := signing.SignEnveloped(response.Element())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	doc := etree.NewDocument()
 	doc.SetRoot(element)
 	xml, err := doc.WriteToBytes()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	body := url.Values{"RelayState": {ticket}, "SAMLResponse": {base64.StdEncoding.EncodeToString(xml)}}.Encode()
 	request := httptest.NewRequest("POST", f.app.sp.AcsURL.String(), strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.AddCookie(cookie)
-	return groupLifecycleLogin{node: node, cid: cid, request: request}
+	return groupLifecycleLogin{node: node, cid: cid, request: request, proof: proof}
 }
 
 func (f *groupLifecycleFixture) callback(t *testing.T, login groupLifecycleLogin, status int) {
 	t.Helper()
 	w := httptest.NewRecorder()
 	f.control.Handler().ServeHTTP(w, login.request.WithContext(logging.WithLogger(login.request.Context(), f.publicLogger)))
-	if w.Code != status { t.Fatalf("SAML callback: got %d, want %d", w.Code, status) }
+	if w.Code != status {
+		t.Fatalf("SAML callback: got %d, want %d", w.Code, status)
+	}
 }
 
 func (f *groupLifecycleFixture) deliver(t *testing.T, login groupLifecycleLogin, group string) {
@@ -177,18 +207,24 @@ func (f *groupLifecycleFixture) deliver(t *testing.T, login groupLifecycleLogin,
 		if !strings.HasPrefix(command, fmt.Sprintf("client-deny %d 2 ", login.cid)) || c.active {
 			t.Fatal("refused group reached the tunnel")
 		}
-		if _, ok := a.pools.leases[login.cid]; ok { t.Fatal("denial allocated an IP") }
+		if _, ok := a.pools.leases[login.cid]; ok {
+			t.Fatal("denial allocated an IP")
+		}
 	} else {
 		wantIP := ""
 		for index, name := range lifecycleGroups {
 			if name == group {
-				host := login.node*128+1
-				if index == 0 && login.node == 0 { host++ }
+				host := login.node*128 + 1
+				if index == 0 && login.node == 0 {
+					host++
+				}
 				wantIP = fmt.Sprintf("10.200.%d.%d", index, host)
 			}
 		}
 		want := fmt.Sprintf("client-auth %d 2\nifconfig-push %s 255.255.240.0\nEND", login.cid, wantIP)
-		if command != want || !c.active || c.groupName != group { t.Fatalf("wrong authorization for %s: %s", group, command) }
+		if command != want || !c.active || c.groupName != group {
+			t.Fatalf("wrong authorization for %s: %s", group, command)
+		}
 	}
 	f.settle(t, login)
 	var ack string
@@ -204,7 +240,9 @@ func (f *groupLifecycleFixture) disconnect(t *testing.T, login groupLifecycleLog
 	a := f.agents[login.node]
 	a.handleEvent(clientEvent{kind: "DISCONNECT", cid: login.cid})
 	f.settle(t, login)
-	if _, ok := a.pools.leases[login.cid]; ok { t.Fatal("disconnected IP retained") }
+	if _, ok := a.pools.leases[login.cid]; ok {
+		t.Fatal("disconnected IP retained")
+	}
 }
 
 // The production mailbox is round-robin: an earlier pending browser request
@@ -229,9 +267,13 @@ func (f *groupLifecycleFixture) settle(t *testing.T, login groupLifecycleLogin) 
 	for range 16 {
 		pending := false
 		for _, job := range a.remote.jobs {
-			if job.conn.cid == login.cid { pending = true }
+			if job.conn.cid == login.cid {
+				pending = true
+			}
 		}
-		if !pending { return }
+		if !pending {
+			return
+		}
 		remoteStepNow(a)
 	}
 	t.Fatal("connection ACK/cancel did not settle")
@@ -246,7 +288,7 @@ func TestGroupLifecycleIntegration(t *testing.T) {
 			next := lifecycleGroups[:2+count]
 			f := newGroupLifecycleFixture(t, old, old, next)
 			for index, name := range next[2:] {
-				cid := uint64(10+index)
+				cid := uint64(10 + index)
 				before := f.begin(t, 1, cid, "before-"+name, name)
 				f.callback(t, before, http.StatusForbidden)
 				f.deliver(t, before, "")
@@ -297,8 +339,10 @@ func TestGroupLifecycleIntegration(t *testing.T) {
 			// heartbeat do not revoke an already active tunnel on an old node.
 			a := f.agents[0]
 			before := *a.connections[7]
-			if err := f.stores[0].Heartbeat(context.Background(), postgres.Agent{NodeID: a.remote.node, Generation: "g1"}); err != nil { t.Fatal(err) }
-			a.handleEvent(clientEvent{kind: "REAUTH", cid: 7, kid: 3})
+			if err := f.stores[0].Heartbeat(context.Background(), postgres.Agent{NodeID: a.remote.node, Generation: "g1"}); err != nil {
+				t.Fatal(err)
+			}
+			a.handleEvent(clientEvent{kind: "REAUTH", cid: 7, kid: 3, proof: active.proof})
 			if lifecycleCommand(t, f.commands[0]) != "client-auth-nt 7 3" || !a.connections[7].active ||
 				a.connections[7].address != before.address || a.connections[7].expires != before.expires {
 				t.Fatal("unexpected active-session behavior after policy removal")
@@ -344,7 +388,9 @@ func TestGroupLifecycleIntegration(t *testing.T) {
 		for index, member := range []string{"admins-vpn", "engineers-production-vpn", "unrelated-vpn"} {
 			login := f.begin(t, 0, uint64(7+index), "same-member", member)
 			status, group := http.StatusAccepted, member
-			if index == 2 { status, group = http.StatusForbidden, "" }
+			if index == 2 {
+				status, group = http.StatusForbidden, ""
+			}
 			f.callback(t, login, status)
 			f.deliver(t, login, group)
 			f.disconnect(t, login)

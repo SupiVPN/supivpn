@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,8 +18,13 @@ import (
 )
 
 func TestServiceReadinessWaitsForListeners(t *testing.T) {
-	for _, validTLS := range []bool{true, false} {
-		t.Run(map[bool]string{true: "listeners-ready", false: "invalid-tls"}[validTLS], func(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		validTLS, tcp bool
+	}{
+		{"listeners-ready", true, false}, {"both-listeners-ready", true, true}, {"invalid-tls", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			dir, err := os.MkdirTemp("", "supi-ready-")
 			if err != nil {
 				t.Fatal(err)
@@ -38,7 +44,14 @@ func TestServiceReadinessWaitsForListeners(t *testing.T) {
 				TLSChain: filepath.Join(dir, "chain.pem"), IDPMetadata: filepath.Join(dir, "idp.xml"),
 				ManagementSocket: filepath.Join(dir, "management.sock"), PendingSeconds: 180,
 				SessionSeconds: 3600, AllowedSubjects: []string{"test-user"}}
-			if !validTLS {
+			c.RemoteController = localControllerConfig()
+			c.RemoteController.StateDirectory = filepath.Join(dir, "state")
+			c.SAMLGroupsAttribute, c.VPNNetwork, c.GroupPools = "groups", groupConfig().VPNNetwork, groupConfig().GroupPools
+			c.AllowedSubjects = nil
+			if tc.tcp {
+				c.TCPManagementSocket = filepath.Join(dir, "management-tcp.sock")
+			}
+			if !tc.validTLS {
 				c.TLSPrivateKey = filepath.Join(dir, "absent.pem")
 			}
 			raw, err := json.Marshal(c)
@@ -58,11 +71,12 @@ func TestServiceReadinessWaitsForListeners(t *testing.T) {
 			defer cancel()
 			done := make(chan error, 1)
 			go func() { done <- run(ctx, path) }()
-			if !validTLS {
+			if !tc.validTLS {
 				select {
 				case err := <-done:
-					if err == nil {
-						t.Fatal("invalid TLS accepted")
+					var staged *runtimeStageError
+					if !errors.As(err, &staged) || staged.stage != "startup_tls" {
+						t.Fatal("invalid TLS did not report a fixed startup failure stage")
 					}
 				case <-time.After(3 * time.Second):
 					t.Fatal("invalid startup did not stop")
@@ -84,7 +98,11 @@ func TestServiceReadinessWaitsForListeners(t *testing.T) {
 					t.Fatal("service did not report listener readiness", err)
 				}
 			}
-			for _, socket := range []string{c.ManagementSocket, operatorSocket(c.ManagementSocket)} {
+			sockets := []string{c.ManagementSocket, operatorSocket(c.ManagementSocket)}
+			if tc.tcp {
+				sockets = append(sockets, c.TCPManagementSocket)
+			}
+			for _, socket := range sockets {
 				info, err := os.Lstat(socket)
 				if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0600 {
 					t.Fatal("readiness preceded private listener", err)

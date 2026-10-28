@@ -9,7 +9,7 @@ For `public_url=https://login.example.test/supivpn`, this is
 One Okta SAML App can provide both VPN authentication and the dashboard tile;
 a separate Bookmark App is optional.
 
-See the [profile ownership and two-port migration guide](PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
+See the [profile ownership and upgrade guide](PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
 
 ## Client template compatibility
@@ -23,17 +23,16 @@ The template no longer requires explicit KU/EKU extensions through these
 directives; TLS-library validation is client-specific. Continue provisioning
 VPN server certificates for TLS server authentication.
 
-Legacy profiles still lack server-name verification: another certificate under
-the trusted CA may be accepted. This patch does not add that guarantee to the
-legacy path. Follow the [two-port migration](PROFILE_BINDING.md) for bound
-profiles; DNS SAN verification remains a separate [client limitation](TLS_CRYPT_V2.md#planned-dns-san-verification).
+The v0.9.0 controller issues only bound profiles; unbound profiles must be
+replaced before upgrading. See [required ownership](PROFILE_BINDING.md).
+DNS SAN verification remains a separate [client limitation](TLS_CRYPT_V2.md#planned-dns-san-verification).
 
 Updating the package or Lambda ZIP does not rewrite an existing template copied
 to `/etc` or an already imported profile. Apply the same two-line removal to
 the configured template and affected `.ovpn` files, then re-import as needed.
 Keep the CA, `verify-x509-name`, inline credential and `tls-crypt-v2` blocks
 unchanged. No database migration, profile-secret rotation or profile-registry
-change is required. Working older profiles remain valid. A new download is also
+change is required. Working older bound profiles remain valid. A new download is also
 possible, but creates a separate profile credential.
 
 ## One Okta SAML App
@@ -134,7 +133,7 @@ Keep API body tracing disabled. Never log SAML or profile bodies.
 
 ## VM mode and AWS independence
 
-`internal/profile.DownloadIssuer` contains no AWS SDK and accepts a key loader
+`internal/profile.BoundTransportIssuer` contains no AWS SDK and accepts a key loader
 function. The Lambda adapter reads the ARN from `SUPIVPN_TLS_CRYPT_V2_SECRET_ARN`;
 IAM grants only GetSecretValue for one wrapping key, without Put/Create/rotation.
 
@@ -144,7 +143,9 @@ Optional VM JSON section:
 "profile": {
   "endpoint": "vpn.example.test",
   "template_file": "/etc/supivpn/client.ovpn.template",
-  "server_key_file": "/var/lib/supivpn/tls-crypt-v2-server.key"
+  "server_key_file": "/var/lib/supivpn/tls-crypt-v2-server.key",
+  "binding": "required",
+  "port": 1194
 }
 ```
 
@@ -155,7 +156,7 @@ be able to read it without broadening file permissions.
 Without `profile`, both download entry and launch return 404. The Lambda ZIP contains the executable
 and template, optionally public metadata, but no private keys.
 
-Key format: 256 random client-key bytes plus a wrapped copy with timestamp metadata;
+Key format: 256 random client-key bytes plus a wrapped copy with authenticated bound-format and timestamp metadata;
 standard Go AES-256-CTR/HMAC-SHA256.
 Format reference:
 [OpenVPN 2.7.8 tls-crypt-v2](https://github.com/OpenVPN/openvpn/blob/v2.7.8/src/openvpn/tls_crypt.c).
@@ -192,6 +193,7 @@ After deployment:
   Configure selective forwarding when private wildcards exist.
   See [setup and checks](HOST.md#client-dns-through-the-local-node).
 
-Individual client-key revocation and binding profiles to specific devices are
-not implemented. Profiles admit clients to TLS/SAML; they do not identify users.
+Profiles are bound to their verified SAML owner and support active/blocked state.
+Blocking prevents new admission, not continuous revocation of established tunnels.
+Binding to a physical device is not implemented.
 [TLS_CRYPT_V2.md](TLS_CRYPT_V2.md) describes the current TLS hostname verification limitation.

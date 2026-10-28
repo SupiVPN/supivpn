@@ -93,6 +93,15 @@ func (s *managementStatus) line(line string) (bool, error) {
 }
 
 func (m *management) requestStatus() error {
+	if len(m.children) != 0 {
+		for _, child := range m.children {
+			if err := child.requestStatus(); err != nil {
+				m.close()
+				return err
+			}
+		}
+		return nil
+	}
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 	m.statusRequested.Store(true)

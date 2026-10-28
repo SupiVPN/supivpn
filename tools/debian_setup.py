@@ -77,7 +77,7 @@ def absolute_path(value):
 def configuration(path):
     c = json.loads(read(path, 16384), object_pairs_hook=unique_object)
     allowed = {"hostname", "login_hostname", "certificate_directory", "idp_metadata_file",
-               "groups", "vpn_network", "admin_cidr", "ssh_port", "database_name", "database"}
+               "groups", "vpn_network", "admin_cidr", "ssh_port", "database_name", "database", "tcp_fallback"}
     if not isinstance(c, dict) or set(c) - allowed:
         raise SetupError("Unknown setup fields; see the packaged setup example")
     c.setdefault("login_hostname", c.get("hostname"))
@@ -111,6 +111,20 @@ def configuration(path):
         raise SetupError("SSH port must be between 1 and 65535")
     if c["ssh_port"] in (80, 8443, 9443, PORT):
         raise SetupError("SSH port conflicts with a SupiVPN or database port")
+    if "tcp_fallback" in c:
+        tcp = c["tcp_fallback"]
+        if not isinstance(tcp, dict) or set(tcp) - {"enabled", "port"}:
+            raise SetupError("TCP fallback accepts enabled and port; it shares the configured VPN network")
+        tcp.setdefault("enabled", False)
+        if type(tcp["enabled"]) is not bool:
+            raise SetupError("TCP fallback enabled must be true or false")
+        tcp.setdefault("port", 443)
+        if type(tcp["port"]) is not int or not 1 <= tcp["port"] <= 65535:
+            raise SetupError("TCP fallback port must be between 1 and 65535")
+        if tcp["enabled"] and tcp["port"] in (80, 8443, 9443, PORT, c["ssh_port"]):
+            raise SetupError("TCP fallback port must be unused and must not conflict with another service")
+        if not tcp["enabled"]:
+            del c["tcp_fallback"]
     if not isinstance(c["database_name"], str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", c["database_name"]):
         raise SetupError("Invalid database name")
     if c["database_name"] in {"postgres", "template0", "template1"}:
@@ -138,6 +152,8 @@ def configs(c, uid):
     controller["groups"] = groups
     controller["public_url"] = "https://" + c["login_hostname"] + ":8443"
     controller["profile"]["endpoint"] = c["hostname"]
+    if "tcp_fallback" in c:
+        controller["profile"]["tcp_fallback_port"] = c["tcp_fallback"]["port"]
     controller["database_tls"] = {
         "mode": "verify-full", "ca_file": str(ROOT / "controller/database-ca.pem"),
         "server_name": c["database"]["host"] if "database" in c else "127.0.0.1",
@@ -146,16 +162,41 @@ def configs(c, uid):
     agent["vpn_network"] = str(network)
     agent["group_pools"] = [{"group_name": g["name"], "priority": g["priority"], "cidr": str(pool)}
                             for g, pool in zip(groups, pools)]
+    if "tcp_fallback" in c:
+        agent["tcp_management_socket"] = "/run/supivpn/management-tcp.sock"
     agent["remote_controller"]["controller_uid"] = uid
     agent["remote_controller"]["public_url"] = controller["public_url"]
     server = read(EXAMPLES / "server.conf.example").decode()
     server = server.replace("server 10.203.0.0 255.255.255.0 nopool",
                             f"server {network.network_address} {network.netmask} nopool")
+    if "tcp_fallback" in c:
+        route_args = f"-route-device supivpn0 -route-network {network}"
+        server = server.replace('-learn-address"', f'-learn-address {route_args}"')
+        server += f'client-disconnect "/usr/sbin/supivpn -route-disconnect {route_args}"\n'
     return agent, controller, server
+
+
+def tcp_server_config(c, server):
+    """Both transports use the same pool; per-client /32 routes select their TUN."""
+    server = server.replace("port 1194\n", f"port {c['tcp_fallback']['port']}\n")
+    server = server.replace("proto udp4\n", "proto tcp4-server\n").replace("supivpn0", "supivpn1")
+    return server.replace("/run/supivpn/management.sock", "/run/supivpn/management-tcp.sock")
+
+
+def service_units(c):
+    units = ["supivpn-controller", "supivpn-node", "supivpn-openvpn"]
+    if "tcp_fallback" in c:
+        units += ["supivpn-openvpn-tcp"]
+    return units
 
 
 def firewall(c):
     gateway = ipaddress.IPv4Network(c["vpn_network"])[1]
+    tcp_input = tcp_port = ""
+    if "tcp_fallback" in c:
+        network = ipaddress.IPv4Network(c["vpn_network"])
+        tcp_input = f'    iifname "supivpn1" ip saddr {network} ip daddr {network[1]} icmp type echo-request accept\n    iifname "supivpn1" drop\n'
+        tcp_port = f"    tcp dport {c['tcp_fallback']['port']} accept\n"
     return f"""#!/usr/sbin/nft -f
 # Fresh dedicated host only: review before replacing the existing ruleset.
 flush ruleset
@@ -166,11 +207,11 @@ table inet supivpn {{
     ct state invalid drop
     iifname "supivpn0" ip saddr {c['vpn_network']} ip daddr {gateway} icmp type echo-request accept
     iifname "supivpn0" drop
-    ct state established,related accept
+{tcp_input}    ct state established,related accept
     ip saddr {c['admin_cidr']} tcp dport {c['ssh_port']} accept
     tcp dport {{ 80, 8443 }} accept
     udp dport 1194 accept
-    ip protocol icmp accept
+{tcp_port}    ip protocol icmp accept
     meta l4proto ipv6-icmp accept
     udp sport 67 udp dport 68 accept
     udp sport 547 udp dport 546 accept
@@ -272,6 +313,8 @@ def preflight(c=None):
     if not stat.S_ISCHR(Path("/dev/net/tun").stat().st_mode):
         raise SetupError("The VM must provide /dev/net/tun")
     ports = [("0.0.0.0", 8443), ("127.0.0.1", 9443)]
+    if c is not None and "tcp_fallback" in c:
+        ports.append(("0.0.0.0", c["tcp_fallback"]["port"]))
     if not remote:
         ports.append(("127.0.0.1", PORT))
     for address, port in ports:
@@ -470,6 +513,8 @@ def initialize(c):
     write(ROOT / "controller/controller.json", json.dumps(controller, indent=2) + "\n", 0o640, gid=user.pw_gid)
     write(ROOT / "controller/client.ovpn.template", template, 0o640, gid=user.pw_gid)
     write(ROOT / "node/openvpn.conf", server)
+    if "tcp_fallback" in c:
+        write(ROOT / "node/openvpn-tcp.conf", tcp_server_config(c, server))
     write(ROOT / "firewall.nft", firewall(c))
     run(["/usr/sbin/supivpn-profile", "-init", "-server-key", str(ROOT / "keys/tls-crypt-v2-server.key")])
     os.chown(ROOT / "keys/tls-crypt-v2-server.key", user.pw_uid, user.pw_gid)
@@ -483,13 +528,13 @@ def initialize(c):
     else:
         print("Creating dedicated PostgreSQL 18/supivpn and applying migrations", flush=True)
         database(c, user.pw_gid)
-    run(["systemd-analyze", "verify", "supivpn-controller.service", "supivpn-node.service", "supivpn-openvpn.service"])
+    run(["systemd-analyze", "verify"] + [unit + ".service" for unit in service_units(c)])
     write(ROOT / "setup-complete", "Setup completed; services remain stopped.\n")
     print("Setup complete. Review /etc/supivpn/firewall.nft, then follow DEPLOYMENT.md to start and check services.")
 
 
 def check(c):
-    units = ["supivpn-controller", "supivpn-node", "supivpn-openvpn"]
+    units = service_units(c)
     if "database" not in c:
         units.insert(0, "postgresql@18-supivpn")
     for unit in units:
@@ -513,6 +558,10 @@ def main():
         c = configuration(args.config)
         if args.action == "plan":
             print("Create /etc/supivpn; configure one controller and node; generate wrapping key.")
+            print("All profiles require verified SAML ownership. UDP/1194 is primary.")
+            if "tcp_fallback" in c:
+                print(f"Add TCP/{c['tcp_fallback']['port']} fallback; one agent manages two daemons within the configured VPN network.")
+                print("The node service starts both OpenVPN transports; no second agent or node identity.")
             if "database" in c:
                 print("Use the pre-provisioned remote PostgreSQL 18 writer; verify TLS and restricted roles, apply migrations.")
                 print("No local database cluster will be created, started or checked.")
@@ -536,7 +585,7 @@ def main():
                 check(c)
             else:
                 # Stop first so no process can observe a partially replaced pair.
-                for unit in ("supivpn-controller", "supivpn-node", "supivpn-openvpn"):
+                for unit in service_units(c):
                     if run(["systemctl", "show", "--property=ActiveState", "--value", unit]).strip() not in (b"inactive", b"failed"):
                         raise SetupError("Stop the controller and node before refreshing certificate copies")
                 values, _ = certificate_inputs(c)

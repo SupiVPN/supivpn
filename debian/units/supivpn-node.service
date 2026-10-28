@@ -3,7 +3,7 @@
 [Unit]
 Description=SupiVPN node agent
 Documentation=https://github.com/SupiVPN/supivpn/blob/main/docs/DEBIAN_PACKAGING.md
-Wants=network-online.target
+Wants=network-online.target supivpn-openvpn-tcp.service
 After=network-online.target
 Upholds=supivpn-openvpn.service
 StartLimitIntervalSec=120

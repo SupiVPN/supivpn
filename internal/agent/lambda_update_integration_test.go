@@ -142,7 +142,7 @@ func testLambdaUpdateCancellation(t *testing.T, admin, publicPool, agentPool *pg
 							t.Fatal(err)
 						}
 						browser := sha256.Sum256([]byte(ticket))
-						if err := agentStore.Register(ctx, target, postgres.Connection{CID: cid, KID: 1}, ticket, 180*time.Second); err != nil {
+						if err := registerOwnedFixture(t, agentStore, ctx, target, postgres.Connection{CID: cid, KID: 1}, ticket, 180*time.Second, subject); err != nil {
 							t.Fatal(err)
 						}
 						if err := public.Start(ctx, ticket, "request-"+ticket, browser); err != nil {

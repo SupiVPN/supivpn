@@ -276,8 +276,8 @@ failure must stop the deployment before traffic resumes.
 
 v0.8.0 binaries reject schema 12. Mixed v0.8.0/v0.8.1 Lambdas are unsupported;
 after commit, use only a verified schema-12-compatible build for runtime rollback.
-Do not down-migrate or restore stale authorization state. The two-minor legacy
-client transition remains unchanged (0.8.x and 0.9.x); it does not promise mixed
+Do not down-migrate or restore stale authorization state. The v0.9.0 change ends unbound-profile support after 0.8.x; see the
+[required migration](PROFILE_BINDING.md#required-ownership-in-v090). This does not promise mixed
 binary/schema versions. Check profile list/status and one existing bound profile
 login after upgrade, then check block/reactivate with the current revision.
 
@@ -288,7 +288,7 @@ one-use import grants. Existing logins, decisions and replay state are retained;
 old profiles are not assigned an owner retroactively. Upgrade controllers and
 agents, migrate explicitly, and reapply isolated-role grants before enabling the
 new profile mode. Profile ownership and Server URL refuse startup without schema
-11. Follow the [two-port transition](PROFILE_BINDING.md) before issuing bound
+11. Follow the [profile ownership upgrade guide](PROFILE_BINDING.md) before issuing bound
 profiles. v0.7.1 cannot be used for runtime rollback after migration; use a
 verified schema-11-compatible build and keep committed authorization state.
 

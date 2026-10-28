@@ -32,5 +32,14 @@
       "session_seconds": 3600,
       "cidr": "10.203.0.64/26"
     }
-  ]
+  ],
+  "profile_binding": "required",
+  "remote_controller": {
+    "transport": "unix",
+    "agent_socket": "/run/supivpn-controller/agent.sock",
+    "controller_uid": 1001,
+    "public_url": "https://login.example.test",
+    "node_id": "node-a",
+    "state_directory": "/var/lib/supivpn-node"
+  }
 }

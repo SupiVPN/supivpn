@@ -101,9 +101,12 @@ Checks cover the following matrix with fresh password logins:
 | Encrypted with an unrelated recipient key | optional and required | Rejected before authorization or wrapping-key access |
 | Encrypted | disabled | Rejected before authorization or wrapping-key access |
 
-Successful downloads check profile headers/format/CA/endpoint, unique client keys
-across all six downloads, absence of authentication material, missing/wrong
-cookie rejection, replay and no wrapping-key access before authorization.
+Successful downloads check profile headers/format/CA/endpoint and exact server
+name, unique client keys across all six downloads, and the bound profile ID and
+secret format. Each issuance must persist an active record owned by the verified
+SAML subject and username. SAML assertions and IdP passwords must not appear in
+profiles. Checks also cover missing/wrong cookie rejection, replay and no
+wrapping-key access before authorization.
 Group denial is checked with both plaintext and encrypted assertions. Profile
 issuance and rejected encryption must not create a VPN session.
 

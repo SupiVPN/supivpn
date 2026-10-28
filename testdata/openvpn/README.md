@@ -34,9 +34,10 @@ Coverage:
 - Actual client PUSH_REPLY with the selected IP and established tunnel.
 - The deployed learn-address binary is used unchanged.
 
-The Community CLI requires synthetic auth-user-pass values when omitting a client
-certificate. OpenVPN Connect uses CLIENT_CERT=0 and needs no such file. The test
-values do not authorize access: signed SAML remains mandatory.
+Historical protocol fixtures use synthetic auth-user-pass values when omitting
+a client certificate. Current bound profiles instead carry an opaque profile
+proof and require the matching verified SAML owner; no IdP password is embedded.
+Do not use a historical protocol fixture as a deployment example.
 
 This is not an OpenVPN Connect UI/Okta live test. Repeat that check in the target deployment.
 
@@ -44,3 +45,17 @@ This is not an OpenVPN Connect UI/Okta live test. Repeat that check in the targe
 uses one issued profile, stops node 1 and verifies automatic reconnect + a new
 SAML login with an address from node 2. Its local UDP relay and 1/3-second
 keepalive do not simulate AWS NLB timing. See [HA](../../docs/HA.md).
+
+`TestOpenVPNTransportFallback` uses the production bound-profile issuer, two
+upstream daemons and one agent: UDP is preferred, silent UDP falls back to TCP,
+and an existing bound UDP-only profile remains usable. It checks distinct IPs
+from the same full pool and retains a pending browser login beyond the endpoint
+polling timeout. `TestOpenVPNSharedPoolRoutes` checks the real Linux /32 routes,
+conflicting-route refusal and delayed cleanup. `make test-linux-client` repeats
+the transport cases with OpenVPN 3 Linux.
+
+The PostgreSQL integration suite's `TestProfileHATransportAdmission` checks all
+four UDP/TCP combinations across two logical nodes using the same profile,
+signed SAML, shared limits, confirmed disconnect, distinct node IPs and blocked
+credentials. Its management peers are simulated. Cloud target health, routing
+and native Connect remain separate deployment acceptance checks.

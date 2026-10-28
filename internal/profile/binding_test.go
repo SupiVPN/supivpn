@@ -103,13 +103,14 @@ func TestProfileListenerFormatsAndAge(t *testing.T) {
 	ts := make([]byte, 8)
 	binary.BigEndian.PutUint64(ts, uint64(now.Unix()))
 	bound := append([]byte(bindingMarker), ts...)
-	if !VerifyClientMetadata("legacy", "1", ts, now, time.Hour) || !VerifyClientMetadata("required", "0", bound, now, time.Hour) {
+	if !VerifyClientMetadata("required", "0", bound, now, time.Hour) {
 		t.Fatal("current metadata refused")
 	}
 	for _, tc := range []struct {
 		mode, kind string
 		data       []byte
 	}{
+		{"legacy", "1", ts},
 		{"legacy", "0", bound}, {"required", "1", ts}, {"required", "0", append([]byte("SupiVPN/profile-auth/v2\x00"), ts...)},
 		{"required", "0", bound[:len(bound)-1]}, {"legacy", "1", append(ts, 0)}, {"unknown", "1", ts},
 	} {

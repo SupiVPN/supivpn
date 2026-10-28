@@ -302,6 +302,9 @@ func (a *Controller) acs(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrConnectionLimit):
 			logging.Emit(r.Context(), "saml.authorization_decided", slog.String("purpose", loginPurpose(ticket)), slog.String("outcome", "denied"), slog.String("reason", "connection_limit"))
 			browserMessage(w, r, "VPN connection limit reached. If you just cancelled or disconnected, wait for the previous connection to close, then reconnect. Otherwise, disconnect another VPN session and try again.", http.StatusForbidden)
+		case errors.Is(err, ErrConnectionRetry):
+			logging.Emit(r.Context(), "saml.authorization_decided", slog.String("purpose", loginPurpose(ticket)), slog.String("outcome", "retry"), slog.String("reason", ConnectionRetryReason))
+			browserMessage(w, r, connectionRetryMessage, http.StatusAccepted)
 		default:
 			browserMessage(w, r, "VPN unavailable. Reconnect.", http.StatusServiceUnavailable)
 		}

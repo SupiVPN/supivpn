@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +33,7 @@ import (
 )
 
 type config struct {
+	TCPManagementSocket   string                 `json:"tcp_management_socket,omitempty"`
 	ProfileBinding        string                 `json:"profile_binding,omitempty"`
 	VPNLoginConfirmation  *bool                  `json:"vpn_login_confirmation,omitempty"`
 	AssertionEncryption   *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
@@ -85,8 +87,12 @@ func readConfig(path string) (config, *url.URL, error) {
 		return c, nil, errors.New("use a dedicated SAML encryption key separate from TLS")
 	}
 	u, err := url.Parse(c.PublicURL)
-	if c.ProfileBinding != "" && c.ProfileBinding != "legacy" && c.ProfileBinding != "required" || c.ProfileBinding == "required" && c.RemoteController == nil {
-		return c, nil, errors.New("profile_binding must be legacy or required; required needs a remote controller")
+	if c.ProfileBinding != "" && c.ProfileBinding != "required" || c.RemoteController == nil {
+		return c, nil, errors.New("identity-bound profiles require profile_binding required and a remote controller; unbound mode is no longer supported")
+	}
+	c.ProfileBinding = "required"
+	if c.TCPManagementSocket != "" && (!filepath.IsAbs(c.TCPManagementSocket) || filepath.Clean(c.TCPManagementSocket) != c.TCPManagementSocket || c.TCPManagementSocket == c.ManagementSocket || filepath.Dir(c.TCPManagementSocket) != filepath.Dir(c.ManagementSocket) || c.SAMLGroupsAttribute == "") {
+		return c, nil, errors.New("TCP management requires groups and a distinct canonical socket in the primary management directory")
 	}
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
 		u.Path != "" || u.RawQuery != "" || u.Fragment != "" ||
@@ -118,7 +124,21 @@ func readConfig(path string) (config, *url.URL, error) {
 	return c, u, nil
 }
 
-func run(ctx context.Context, path string) error {
+type runtimeStageError struct {
+	stage string
+	err   error
+}
+
+func (e *runtimeStageError) Error() string { return e.err.Error() }
+func (e *runtimeStageError) Unwrap() error { return e.err }
+
+func run(ctx context.Context, path string) (runErr error) {
+	stage := "startup_config"
+	defer func() {
+		if runErr != nil {
+			runErr = &runtimeStageError{stage: stage, err: runErr}
+		}
+	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	c, origin, err := readConfig(path)
@@ -130,6 +150,7 @@ func run(ctx context.Context, path string) error {
 		return err
 	}
 	defer closeLogs()
+	stage = "startup_tls"
 	keyPair, err := tls.LoadX509KeyPair(c.TLSCertificate, c.TLSPrivateKey)
 	if err != nil {
 		return errors.New("cannot load server TLS certificate and key")
@@ -147,6 +168,7 @@ func run(ctx context.Context, path string) error {
 		chain = rest
 	}
 	var sp *saml.ServiceProvider
+	stage = "startup_idp"
 	metadataBytes, err := os.ReadFile(c.IDPMetadata)
 	if err != nil || len(metadataBytes) > 1<<20 {
 		return errors.New("cannot read IdP metadata (maximum 1 MiB)")
@@ -176,20 +198,35 @@ func run(ctx context.Context, path string) error {
 	}
 
 	// An existing socket is an error: never unlink another process's socket.
+	stage = "startup_management_socket"
 	dir := filepath.Dir(c.ManagementSocket)
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return errors.New("management socket directory must exist with mode 0700")
 	}
-	unix, err := net.ListenUnix("unix", &net.UnixAddr{Name: c.ManagementSocket, Net: "unix"})
-	if err != nil {
-		return errors.New("cannot listen on management socket; check for an existing process")
+	paths := []string{c.ManagementSocket}
+	if c.TCPManagementSocket != "" {
+		paths = append(paths, c.TCPManagementSocket)
 	}
-	defer unix.Close()
-	if err := os.Chmod(c.ManagementSocket, 0600); err != nil {
-		return errors.New("cannot restrict management socket")
+	var sockets []*net.UnixListener
+	closeSockets := func() {
+		for _, socket := range sockets {
+			socket.Close()
+		}
+	}
+	defer closeSockets()
+	for _, path := range paths {
+		socket, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+		if err != nil {
+			return errors.New("cannot listen on management socket; check for an existing process")
+		}
+		sockets = append(sockets, socket)
+		if err := os.Chmod(path, 0600); err != nil {
+			return errors.New("cannot restrict management socket")
+		}
 	}
 	a := newAgent(c, origin)
+	stage = "startup_operator"
 	operator, operatorStopped, err := a.listenOperator(metadata.EntityID)
 	if err != nil {
 		return err
@@ -208,6 +245,7 @@ func run(ctx context.Context, path string) error {
 	} else {
 		handler = a.remoteHealth()
 	}
+	stage = "startup_https"
 	listener, err := tls.Listen("tcp", c.Listen, &tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{keyPair},
@@ -230,14 +268,14 @@ func run(ctx context.Context, path string) error {
 	go func() {
 		server.Serve(listener)
 		close(httpStopped)
-		unix.Close()
+		closeSockets()
 	}()
 	go func() {
 		select {
 		case <-ctx.Done():
-			unix.Close()
+			closeSockets()
 		case <-httpStopped:
-			unix.Close()
+			closeSockets()
 		}
 	}()
 	a.logEvent("agent.https_ready", nil)
@@ -245,23 +283,36 @@ func run(ctx context.Context, path string) error {
 	// Bound the wait in managed mode so a failed OpenVPN launch cannot leave an
 	// apparently active agent waiting forever. Standalone behavior is unchanged.
 	if os.Getenv("NOTIFY_SOCKET") != "" {
-		if err := unix.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-			return err
+		for _, socket := range sockets {
+			if err := socket.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				return err
+			}
 		}
 	}
 	if _, err := servicenotify.Ready(); err != nil {
 		return err
 	}
-	conn, err := unix.Accept()
-	if err != nil {
-		return errors.New("stopped before OpenVPN connected")
+	var managers []*management
+	stage = "startup_management_peer"
+	for _, socket := range sockets {
+		conn, err := socket.Accept()
+		if err != nil {
+			return errors.New("stopped before every OpenVPN transport connected")
+		}
+		child := newManagement(conn)
+		defer child.close()
+		managers = append(managers, child)
 	}
-	m := newManagement(conn)
+	m := managers[0]
+	if len(managers) == 2 {
+		m = newTransportManagement(managers[0], managers[1])
+	}
 	defer m.close()
 	if err := m.negotiate(); err != nil {
 		return fmt.Errorf("OpenVPN management version 5 negotiation failed: %w", err)
 	}
 	if c.RemoteController != nil {
+		stage = "startup_controller"
 		cleanup, err := a.startRemote(ctx)
 		if err != nil {
 			return err
@@ -276,6 +327,7 @@ func run(ctx context.Context, path string) error {
 		go func() { defer close(done); a.remoteEvents(workerCtx, m) }()
 		defer func() { stop(); <-done }()
 	}
+	stage = "management_unavailable"
 	if err := m.command("state on"); err != nil {
 		return fmt.Errorf("cannot enable OpenVPN readiness notifications: %w", err)
 	}
@@ -289,8 +341,10 @@ func run(ctx context.Context, path string) error {
 	case <-m.done:
 		return errors.New("OpenVPN management disconnected; restart the SupiVPN pair")
 	case <-httpStopped:
+		stage = "listener_unavailable"
 		return errors.New("HTTPS listener stopped")
 	case <-operatorStopped:
+		stage = "listener_unavailable"
 		return errors.New("local operator listener stopped")
 	}
 }
@@ -300,11 +354,31 @@ func Main() {
 	logging.Configure("agent")
 	path := flag.String("config", "/etc/supivpn/config.json", "configuration file")
 	learn := flag.Bool("learn-address", false, "validate an OpenVPN learned source address")
+	routeDevice := flag.String("route-device", "", "TUN interface for shared UDP/TCP pool routes")
+	routeNetwork := flag.String("route-network", "", "private VPN CIDR for shared pool routes")
+	routeDisconnect := flag.Bool("route-disconnect", false, "remove this client's shared pool route on OpenVPN disconnect")
 	check := flag.Bool("check-config", false, "validate configuration without starting services")
 	operator := flag.Bool("operator-request", false, "send a local user-session request from stdin")
-	metadataMode := flag.String("verify-profile-metadata", "", "OpenVPN tls-crypt-v2-verify mode: legacy or required")
+	metadataMode := flag.String("verify-profile-metadata", "", "OpenVPN tls-crypt-v2-verify mode: required (unbound profiles are refused)")
 	metadataAge := flag.Duration("profile-max-age", 0, "maximum profile age; zero disables age expiry")
 	flag.Parse()
+	if *routeDisconnect || (*learn && (*routeDevice != "" || *routeNetwork != "")) {
+		args := flag.Args()
+		if *routeDisconnect {
+			if *learn || len(args) != 0 {
+				os.Exit(1)
+			}
+			args = []string{"disconnect", os.Getenv("ifconfig_pool_remote_ip")}
+		}
+		if err := updateClientRoute(args, os.Getenv("ifconfig_pool_remote_ip"), *routeDevice, *routeNetwork, runRouteCommand); err != nil {
+			logging.Emit(context.Background(), "network.route_refused")
+			os.Exit(1)
+		}
+		return
+	}
+	if *routeDevice != "" || *routeNetwork != "" {
+		os.Exit(1)
+	}
 	if *metadataMode != "" {
 		f, err := os.Open(os.Getenv("metadata_file"))
 		if err != nil {
@@ -344,7 +418,12 @@ func Main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, *path); err != nil {
-		logging.Emit(ctx, "component.stopped")
+		reason := "startup_failed"
+		var staged *runtimeStageError
+		if errors.As(err, &staged) {
+			reason = staged.stage
+		}
+		logging.Emit(ctx, "component.stopped", slog.String("reason", reason))
 		os.Exit(1)
 	}
 }

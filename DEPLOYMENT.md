@@ -19,9 +19,8 @@ code (IaC) are next on the roadmap, including an **HA active-active cluster**.
 The [existing cluster capabilities](docs/HA.md) describe the runtime and network
 requirements; the production guide and IaC are not delivered by this walkthrough.
 
-**Evaluation status:** the default legacy VPN client template verifies the certificate
-chain but does not enforce the server DNS name. Opt-in bound profiles in v0.8.0
-add an exact certificate common-name check; they do not implement DNS SAN matching.
+**Evaluation status:** v0.9.0 requires bound profiles and verifies the VPN
+server's exact certificate common name. This is not DNS SAN matching;
 [DNS SAN verification](docs/TLS_CRYPT_V2.md#planned-dns-san-verification)
 remains a production blocker. The helper does not remove that limitation.
 
@@ -29,10 +28,10 @@ The short path below establishes a split tunnel and a ping to the VPN gateway.
 Private-network access is an explicit follow-up. Client Internet traffic and DNS
 continue through the client's normal connection.
 
-See the [profile ownership and two-port migration guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
+See the [profile ownership and upgrade guide](docs/PROFILE_BINDING.md) for the account-bound profile format available from **v0.8.0**,
 active/blocked controls, Server URL import and Linux file-import support.
 For an existing installation, follow the [v0.8.1 / schema 12 upgrade steps](docs/POSTGRES.md#schema-11-to-12-v081)
-before using the persistent owner labels. Existing profiles do not need reissue;
+before using the persistent owner labels. Existing bound profiles do not need reissue;
 labels without retained login history remain empty until a successful owner login.
 
 ## Choose your access policy
@@ -284,6 +283,11 @@ reported step locally using the [manual reference](docs/DEPLOYMENT_MANUAL.md);
 do not delete state or rerun setup blindly. `init` is not an upgrade command.
 
 ### Customize the generated configuration
+
+For the upcoming v0.9.0 setup, TCP fallback is **disabled by default**. Set
+`"tcp_fallback": {"enabled": true, "port": 443}` in the setup input to add it.
+Both transports share the existing address pool; no half is reserved for TCP.
+See [transport configuration and existing-host migration](docs/TRANSPORTS.md).
 
 For a fresh host, this is the point to apply your policy, **before starting the
 VPN**. Keep the remaining generated settings, paths and service identities.

@@ -22,7 +22,11 @@ import (
 
 // All callers first pass requireDebianVM. This client remains running across
 // outages and expiry, so a new process cannot hide broken automatic reconnect.
-type vmVPN struct{ log *protocolLog }
+type vmVPN struct {
+	log                *protocolLog
+	namespace, subject string
+	stop               func()
+}
 
 func startVMVPN(t *testing.T, name string, args ...string) *protocolLog {
 	t.Helper()
@@ -81,16 +85,45 @@ func (vpn *vmVPN) challenge(t *testing.T, previous string) string {
 }
 
 func (vpn *vmVPN) canSend() bool {
+	ok, _, _ := vpn.probe()
+	return ok
+}
+
+func (vpn *vmVPN) probe() (bool, int, time.Duration) {
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ip", "netns", "exec", "supivpn-vm-client", "curl",
+	namespace := vpn.namespace
+	if namespace == "" {
+		namespace = "supivpn-vm-client"
+	}
+	out, err := exec.CommandContext(ctx, "ip", "netns", "exec", namespace, "curl",
 		"--fail", "--silent", "--max-time", "2", "--interface", "supivpnc0", "http://10.203.0.1:18080").Output()
-	return err == nil && string(out) == "supivpn-vm-tunnel-ok"
+	code := 0
+	if err != nil {
+		code = -1
+		if e, ok := err.(*exec.ExitError); ok {
+			code = e.ExitCode()
+		}
+	}
+	return err == nil && string(out) == "supivpn-vm-tunnel-ok", code, time.Since(started)
 }
 
 func (vpn *vmVPN) traffic(t *testing.T) {
 	t.Helper()
-	if !vpn.canSend() {
+	if ok, code, elapsed := vpn.probe(); !ok {
+		t.Log("payload probe:", vpn.namespace, "exit", code, "elapsed", elapsed.Round(time.Millisecond))
+		for _, marker := range []string{"Initialization Sequence Completed", "AUTH_FAILED", "TLS Error", "AEAD Decrypt error", "Inactivity timeout", "SIGUSR1", "SIGTERM"} {
+			vpn.log.mu.Lock()
+			count := strings.Count(vpn.log.b.String(), marker)
+			vpn.log.mu.Unlock()
+			if count > 0 {
+				t.Log("client diagnostic:", vpn.namespace, marker, count)
+			}
+		}
+		// A recovery sample diagnoses a transient loss but never turns a failed
+		// continuity assertion into a pass. No raw client output is exposed.
+		t.Log("immediate payload retry recovered:", vpn.canSend())
 		t.Fatal("TCP payload did not traverse the real tunnel")
 	}
 }
@@ -98,13 +131,18 @@ func (vpn *vmVPN) traffic(t *testing.T) {
 func (vpn *vmVPN) login(t *testing.T, client *http.Client, signer *saml.ServiceProvider, path string, end time.Time) {
 	t.Helper()
 	before := vpn.connections()
+	defer func() {
+		if t.Failed() {
+			t.Logf("client recovery: namespace=%s initialized=%d before=%d categories=%v", vpn.namespace, vpn.connections(), before, vpn.log.categories())
+		}
+	}()
 	vpn.log.mu.Lock()
 	logOffset := vpn.log.b.Len()
 	vpn.log.mu.Unlock()
 	if vpn.canSend() {
 		t.Fatal("client carried traffic without fresh SAML authorization")
 	}
-	vmLoginUntil(t, client, signer, path, http.StatusAccepted, end)
+	vmLoginAs(t, client, signer, path, http.StatusAccepted, end, vpn.subject)
 	vmWait(t, "new authorized VPN connection", 30*time.Second, func() bool { return vpn.connections() == before+1 })
 	vpn.log.mu.Lock()
 	addresses := regexp.MustCompile(`ifconfig (10\.203\.0\.[0-9]+) 255\.255\.255\.0`).FindAllStringSubmatch(vpn.log.b.String()[logOffset:], -1)
