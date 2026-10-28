@@ -76,6 +76,7 @@ type remoteJob struct {
 	conn                *connection
 	phase               string
 	due, deadline       time.Time
+	retryAt             time.Time
 	decisionID, outcome string
 	failures            uint
 	disconnectConfirmed bool
@@ -186,6 +187,10 @@ func (a *agent) nextRemoteLocked() *remoteJob {
 		if j.phase != "ack" && !a.pendingConnectionLocked(j.conn) {
 			j.phase = "cancel"
 		}
+		if j.phase == "retry-wait" && now.Before(j.retryAt) {
+			i++
+			continue
+		}
 		if !now.Before(j.due) {
 			// Round robin prevents slow browser logins from starving new connections.
 			a.remote.jobs = append(slices.Delete(a.remote.jobs, i, i+1), j)
@@ -244,6 +249,17 @@ func (a *agent) remoteStep(ctx context.Context) {
 		return
 	}
 	c, phase := j.conn, j.phase
+	if phase == "retry-wait" {
+		// No HTTP, sleeping worker or authorization reuse. Heartbeats, other
+		// clients, disconnects and pending expiry remain independently serviced.
+		if ctx.Err() == nil {
+			a.denyConnectionLocked(c, controller.ConnectionRetryReason)
+			a.logEvent("vpn.authorization_denied", c, slog.String("reason", controller.ConnectionRetryReason))
+			a.finishRemoteLocked(j)
+		}
+		a.mu.Unlock()
+		return
+	}
 	previousRegistration := c.registrationMayExist
 	if phase == "register" {
 		// Set before releasing mu: a disconnect during the request must retain
@@ -321,6 +337,12 @@ func (a *agent) remoteStep(ctx context.Context) {
 	j.failures = 0
 	j.due = a.now().Add(time.Second)
 	if phase == "ack" || phase == "cancel" {
+		if phase == "ack" && !j.retryAt.IsZero() && a.pendingConnectionLocked(c) {
+			// The immutable denial is acknowledged while its signed evidence is
+			// still valid. Waiting can only cause a fresh attempt, never a grant.
+			j.phase, j.due, j.deadline = "retry-wait", j.retryAt, c.expires
+			return
+		}
 		a.finishRemoteLocked(j)
 		return
 	}
@@ -353,6 +375,12 @@ func (a *agent) remoteStep(ctx context.Context) {
 			a.logEvent("controller.decision_rejected", c)
 			a.refuseRemoteLocked(c)
 			j.phase = "cancel"
+			return
+		}
+		if d.DenialReason == controller.ConnectionRetryReason {
+			j.retryAt = a.now().Add(controller.ConnectionRetrySeconds * time.Second)
+			j.phase, j.decisionID, j.outcome = "ack", d.ID, "denied"
+			j.deadline = minTime(j.deadline, d.ExpiresAt)
 			return
 		}
 		outcome := "applied"
@@ -394,6 +422,8 @@ func (a *agent) validRemoteDecision(c *connection, d *agentapi.Decision) bool {
 		return agentapi.ValidNode(d.GroupName)
 	case "invalid_groups_claim", "no_vpn_group", "connection_limit", "profile_refused":
 		return d.GroupName == ""
+	case controller.ConnectionRetryReason:
+		return d.GroupName == "" && c.proof.ID != "" && a.config.ProfileBinding == "required"
 	default:
 		return false
 	}

@@ -229,6 +229,9 @@ func TestDebianVMPrepare(t *testing.T) {
 		"admin_cidr":        "198.51.100.10/32", "database_name": "supivpn_test",
 	}
 	setupPath := filepath.Join(fixtures, "setup.json")
+	if os.Getenv("SUPIVPN_TEST_VM_TRANSPORT") == "dual" {
+		setup["tcp_fallback"] = map[string]any{"enabled": true, "port": 443}
+	}
 	if vmRemoteDatabase() {
 		vmConfigureRemoteDatabase(t, setup, setupPath)
 	}
@@ -367,6 +370,21 @@ func vmLoginUntil(t *testing.T, client *http.Client, signer *saml.ServiceProvide
 
 func vmLoginAs(t *testing.T, client *http.Client, signer *saml.ServiceProvider, path string, status int, sessionEnd time.Time, subject string) []byte {
 	t.Helper()
+	data, actual := vmLoginResponse(t, client, signer, path, sessionEnd, subject)
+	if actual != status {
+		// Report fixed categories only; never print a response/profile/assertion.
+		if bytes.Contains(data, []byte("VPN connection limit reached.")) {
+			t.Log("the previous connection still occupies the user's slot")
+		} else if bytes.Contains(data, []byte("SSO refused.")) {
+			t.Log("the signed SAML response was refused")
+		}
+		t.Fatalf("SAML callback returned %d, want %d", actual, status)
+	}
+	return data
+}
+
+func vmLoginResponse(t *testing.T, client *http.Client, signer *saml.ServiceProvider, path string, sessionEnd time.Time, subject string) ([]byte, int) {
+	t.Helper()
 	resp, err := client.Get("https://localhost:8443" + path)
 	if err != nil {
 		t.Fatal("test browser login failed")
@@ -450,16 +468,7 @@ func vmLoginAs(t *testing.T, client *http.Client, signer *saml.ServiceProvider, 
 	if err != nil {
 		t.Fatal("cannot read authorized response")
 	}
-	if callback.StatusCode != status {
-		// Report fixed categories only; never print a response/profile/assertion.
-		if bytes.HasPrefix(data, []byte("VPN connection limit reached.")) {
-			t.Log("the previous connection still occupies the user's slot")
-		} else if bytes.HasPrefix(data, []byte("SSO refused.")) {
-			t.Log("the signed SAML response was refused")
-		}
-		t.Fatalf("SAML callback returned %d, want %d", callback.StatusCode, status)
-	}
-	return data
+	return data, callback.StatusCode
 }
 
 func vmTunnel(t *testing.T, client *http.Client, signer *saml.ServiceProvider) {

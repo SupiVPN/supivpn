@@ -31,6 +31,10 @@ For example:
 One group is selected by priority; limits from different groups are not added.
 Reaching the limit rejects the **new** attempt (`connection_limit`), preserving
 existing sessions. Reducing the limit does not disconnect existing devices.
+An opposite-transport attempt for the same active profile can receive one
+`connection_limit_retry` refusal followed by a bounded automatic retry;
+[transport retry](TRANSPORTS.md#loss-of-an-established-udp-tunnel) describes its
+fresh-SAML requirement and cluster-wide budget. This never grants an extra slot.
 
 Global/per-group `session_seconds` accepts **60..43200 seconds**, default
 **43200 (12 hours)**. Explicit **0** disables the local duration limit.

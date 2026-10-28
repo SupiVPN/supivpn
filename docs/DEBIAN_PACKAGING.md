@@ -102,6 +102,8 @@ make deb-vm-test ARCH=amd64
 # The same real-VM suite with PostgreSQL outside the guest:
 make deb-vm-test ARCH=arm64 VM_DATABASE=remote
 make deb-vm-test ARCH=amd64 VM_DATABASE=remote
+# Start with TCP enabled, then exercise transport lifecycle and outages:
+make deb-vm-test ARCH=arm64 VM_TRANSPORT=dual
 ```
 
 This includes `deb-test`, then boots the pinned official Debian 13 generic image
@@ -171,7 +173,23 @@ The VM suite verifies:
 
 The VM suite is opt-in; ordinary CI's Debian job still runs the faster container
 package checks. A successful `result.json` is written only after all VM phases
-pass. It records image and package digests and both boot IDs.
+pass. It records image and package digests, database/transport mode and both boot IDs.
+
+`VM_TRANSPORT=dual` selects a separate fresh-install acceptance path. Setup
+enables TCP from its input configuration, then the suite checks disabling and
+reenabling it, previously issued profiles, loss of an established UDP tunnel,
+and simultaneous UDP/TCP sessions during controller/database outages. Real TLS
+rekeys and independent signed session expiry must preserve the sibling tunnel
+and release only confirmed closed sessions. Outage and expiry cases keep the
+same client processes running; tests do not shorten installed keepalive or lease
+deadlines. Rekey checks accelerate only the server interval (20 seconds for
+steady traffic, 60 seconds for outages with a new browser login after recovery);
+the issued client's rekey interval and handshake window remain unchanged.
+Established UDP loss separately checks automatic fallback under the
+default one-slot limit. A successful later manual retry does not make that
+automatic-fallback check pass; see the [bounded transport retry](TRANSPORTS.md#loss-of-an-established-udp-tunnel).
+The ordinary `udp` path retains its default-setup and profile-security checks.
+These modes can be combined with `VM_DATABASE=remote`.
 
 ## Files and identities
 

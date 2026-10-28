@@ -35,6 +35,7 @@ POSTGRES_PORT ?= 55432
 POSTGRES_WAIT_TIMEOUT ?= 60
 ARCH ?= $(shell uname -m | sed -e 's/^x86_64$$/amd64/' -e 's/^aarch64$$/arm64/')
 VM_DATABASE ?= local
+VM_TRANSPORT ?= udp
 ifneq ($(words $(ARCH)),1)
 $(error ARCH must be exactly one architecture)
 endif
@@ -105,7 +106,7 @@ deb-test: | $(LOCAL)/go.mod
 	@$(PYTHON) -B tools/debian_packages.py --arch "$(ARCH)" --go "$(GO)" --docker "$(DOCKER)" --test
 
 deb-vm-test: | $(LOCAL)/go.mod
-	@$(PYTHON) -B tools/debian_packages.py --arch "$(ARCH)" --go "$(GO)" --docker "$(DOCKER)" --vm --vm-database "$(VM_DATABASE)"
+	@$(PYTHON) -B tools/debian_packages.py --arch "$(ARCH)" --go "$(GO)" --docker "$(DOCKER)" --vm --vm-database "$(VM_DATABASE)" --vm-transport "$(VM_TRANSPORT)"
 
 setup: | $(LOCAL)/go.mod
 	@test -x "$(LOCAL)/dev-venv/bin/python3" || python3 -m venv "$(LOCAL)/dev-venv"

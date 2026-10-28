@@ -148,6 +148,10 @@ func browserMessage(w http.ResponseWriter, r *http.Request, message string, stat
 		page.Message = "Your organization has verified this sign-in. Return to your VPN client to finish connecting."
 		if status == http.StatusAccepted {
 			page.Message = "Your sign-in is verified. The VPN server is still processing the connection."
+			if message == connectionRetryMessage {
+				page.Kind, page.Title, page.Eyebrow = "waiting", "Waiting for your previous connection.", "One automatic retry"
+				page.Message = message
+			}
 		}
 	}
 	renderBrowserPage(w, status, page)

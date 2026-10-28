@@ -100,3 +100,16 @@ func BenchmarkBrowserPage(b *testing.B) {
 		renderBrowserPage(httptest.NewRecorder(), http.StatusOK, page)
 	}
 }
+
+func TestTransportRetryPageDoesNotClaimAuthorization(t *testing.T) {
+	for _, accept := range []string{"text/html", "text/plain"} {
+		r := httptest.NewRequest("GET", "https://vpn.example.test/", nil)
+		r.Header.Set("Accept", accept)
+		w := httptest.NewRecorder()
+		browserMessage(w, r, connectionRetryMessage, http.StatusAccepted)
+		body := w.Body.String()
+		if w.Code != http.StatusAccepted || !strings.Contains(body, connectionRetryMessage) || strings.Contains(body, "still processing") || strings.Contains(body, "Sign-in verified.") {
+			t.Fatal("retry page did not explain refusal and fresh sign-in")
+		}
+	}
+}

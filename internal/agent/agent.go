@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"net/url"
+	"supivpn/internal/controller"
 	"supivpn/internal/logging"
 	"supivpn/internal/profile"
 	"supivpn/internal/tracecontext"
@@ -139,7 +140,16 @@ func (a *agent) denyConnectionLocked(c *connection, reason string) {
 	c.closing = true
 	c.disconnectReason = reason
 	delete(a.tickets, c.ticket)
-	a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
+	if reason == controller.ConnectionRetryReason {
+		// The agent has already waited; some native clients ignore backoff
+		// over TCP. Never delegate the admission delay to the client.
+		command := fmt.Sprintf("client-deny %d %d \"Connection limit\" \"TEMP[backoff 1,advance no]: Retry with a fresh sign-in\"", c.cid, c.kid)
+		if a.commandLocked(command) != nil {
+			a.management.close()
+		}
+	} else {
+		a.denyLocked(clientEvent{cid: c.cid, kid: c.kid})
+	}
 }
 
 // A successful kill command is not proof of disconnection. Keep the IP/slot

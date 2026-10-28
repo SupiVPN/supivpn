@@ -72,7 +72,7 @@ func publicError(err error) error {
 	}
 	for _, known := range []error{ErrConflict, ErrGeneration, ErrNoDecision,
 		controller.ErrLoginExpired, controller.ErrLoginStarted,
-		controller.ErrDecisionPending, controller.ErrGroupDenied, controller.ErrConnectionLimit} {
+		controller.ErrDecisionPending, controller.ErrGroupDenied, controller.ErrConnectionLimit, controller.ErrConnectionRetry} {
 		if errors.Is(err, known) {
 			return known
 		}
@@ -379,7 +379,7 @@ func (s *Store) withLogin(ctx context.Context, hash []byte, actor *Agent,
 		return publicError(err)
 	}
 	result := fn(tx, r, now)
-	if result != nil && !errors.Is(result, controller.ErrDecisionPending) && !errors.Is(result, controller.ErrGroupDenied) && !errors.Is(result, controller.ErrConnectionLimit) {
+	if result != nil && !errors.Is(result, controller.ErrDecisionPending) && !errors.Is(result, controller.ErrGroupDenied) && !errors.Is(result, controller.ErrConnectionLimit) && !errors.Is(result, controller.ErrConnectionRetry) {
 		return publicError(result)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -537,6 +537,13 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 			}
 			if count >= d.MaxConnections {
 				d.GroupName, d.DenialReason = "", "connection_limit"
+				retry, err := transportRetryAllowed(ctx, tx, r.conn.CID, id, d.SubjectHash)
+				if err != nil {
+					return err
+				}
+				if retry {
+					d.DenialReason = controller.ConnectionRetryReason
+				}
 			}
 		}
 		profileID := id
@@ -570,6 +577,9 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 			if _, err = tx.Exec(ctx, "UPDATE supivpn.logins SET username=$2 WHERE ticket_hash=$1", hash, d.Username); err != nil {
 				return err
 			}
+		}
+		if d.DenialReason == controller.ConnectionRetryReason {
+			return controller.ErrConnectionRetry
 		}
 		if d.DenialReason == "connection_limit" {
 			return controller.ErrConnectionLimit

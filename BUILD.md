@@ -86,6 +86,8 @@ unbound-profile refusal, block/reactivate and Server URL protocol). Reboot and
 live package upgrades cover the single agent with both OpenVPN transports. It uses
 software CPU emulation and needs Internet access for guest prerequisites; VM
 disks and evidence stay in `local/debian-vm/`.
+Use `VM_TRANSPORT=dual` for fresh TCP-enabled setup, disable/reenable, established
+UDP loss, and concurrent UDP/TCP outage, rekey and session-expiry acceptance.
 See [Debian packaging](docs/DEBIAN_PACKAGING.md) for prerequisites and the
 distinction between container checks and clean-VM acceptance.
 Native Connect Server URL acceptance uses the separate

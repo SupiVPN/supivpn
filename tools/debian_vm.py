@@ -98,9 +98,11 @@ def external_database(source, work, docker, vm_container, host_arch):
         raise
 
 
-def run_vm(root, packages, arch, docker, go, *, database="local"):
+def run_vm(root, packages, arch, docker, go, *, database="local", transport="udp"):
     if database not in {"local", "remote"}:
         raise ValueError("Unknown VM database mode")
+    if transport not in {"udp", "dual"}:
+        raise ValueError("Unknown VM transport mode")
     host_arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "AMD64": "amd64"}[platform.machine()]
     cache = root / "local/debian-vm/cache"
     cache.mkdir(parents=True, exist_ok=True)
@@ -180,21 +182,31 @@ def run_vm(root, packages, arch, docker, go, *, database="local"):
             files = [database_fixtures / name for name in ("ca.pem", "runtime.password", "migration.password")]
             run(["scp", *options, "-P", port, *map(str, files), "root@127.0.0.1:/opt/supivpn-test/database/"])
         listed = run(ssh + ["/opt/supivpn-test/agent-vm.test -test.list='^TestDebianVM'"], capture_output=True, text=True)
-        if set(listed.stdout.splitlines()) != {"TestDebianVMPrepare", "TestDebianVMServices", "TestDebianVMProfileBinding", "TestDebianVMAfterReboot", "TestDebianVMPackageLifecycle"}:
+        if set(listed.stdout.splitlines()) != {"TestDebianVMPrepare", "TestDebianVMServices", "TestDebianVMProfileBinding", "TestDebianVMTransportLifecycle", "TestDebianVMAfterReboot", "TestDebianVMPackageLifecycle"}:
             raise ValueError("VM acceptance test binary is incomplete")
         print("VM: installing prerequisites and packages", flush=True)
         with (work / "install.log").open("w") as log:
             run(ssh + ["sh /opt/supivpn-test/setup.sh " + database], stdout=log, stderr=subprocess.STDOUT)
         test = ("SUPIVPN_TEST_DEBIAN_VM=1 SUPIVPN_TEST_VM_DATABASE=" + database +
-                " /opt/supivpn-test/agent-vm.test -test.v -test.timeout=10m -test.run=")
-        run(ssh + [test + "'^TestDebianVM(Prepare|Services)$'"])
-        run(ssh + [test + "'^TestDebianVMProfileBinding$'"])
+                " SUPIVPN_TEST_VM_TRANSPORT=" + transport +
+                " /opt/supivpn-test/agent-vm.test -test.v -test.timeout=14m -test.run=")
+        if transport == "dual":
+            run(ssh + [test + "'^TestDebianVMPrepare$'"])
+            # Bound each independent test group; do not fit the complete matrix
+            # into one timeout by shortening production lease/keepalive timers.
+            for cases in ("disable-and-reenable", "established-UDP-loss|rekey-without-outage",
+                          "outage-supivpn-controller-", "outage-(postgresql|external-database)",
+                          "independent-session-expiry"):
+                run(ssh + [test + "'^TestDebianVMTransportLifecycle/(" + cases + ")'"])
+        else:
+            run(ssh + [test + "'^TestDebianVM(Prepare|Services)$'"])
+            run(ssh + [test + "'^TestDebianVMProfileBinding$'"])
         print("VM: rebooting with services enabled", flush=True)
         run(ssh + ["systemctl reboot"])
         second_boot = wait_boot(first_boot)
         run(ssh + [test + "'^TestDebianVMAfterReboot$'"])
         run(ssh + [test + "'^TestDebianVMPackageLifecycle$'"])
-        report = {"architecture": arch, "database_mode": database,
+        report = {"architecture": arch, "database_mode": database, "transport_mode": transport,
                   "image_version": IMAGE_VERSION, "image_sha512": IMAGE_SHA512[arch],
                   "first_boot_id": first_boot, "second_boot_id": second_boot,
                   "packages_sha256": {p.name: digest(p, "sha256") for p in debs}, "result": "passed"}

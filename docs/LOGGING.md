@@ -301,6 +301,7 @@ or reused CID cannot inherit earlier diagnostics, metrics or reasons.
 | `pending_auth_expired` | A pending authentication deadline expired |
 | `reauthentication_refused` | Rekey was refused for an ineligible tracked connection |
 | `connection_limit` | Local authorization exceeded the user's connection limit |
+| `connection_limit_retry` | Same-profile transport switch refused; one delayed retry requires fresh SAML and a free cluster slot |
 | `invalid_groups_claim`, `no_vpn_group`, `pool_full` | Authorization or allocation was refused |
 | `controller_refused` | The remote-controller path refused a pending login |
 

@@ -15,6 +15,7 @@ import (
 
 	"supivpn/internal/agentapi"
 	"supivpn/internal/agentclient"
+	"supivpn/internal/controller"
 	"supivpn/internal/profile"
 )
 
@@ -238,5 +239,133 @@ func TestRemoteDoesNotServeLocalSAML(t *testing.T) {
 		if w.Code != 404 {
 			t.Fatal("local SAML fallback exposed")
 		}
+	}
+}
+
+func TestRemoteTransportRetryIsOnlyARefusal(t *testing.T) {
+	proof, err := profile.NewCredential()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"", "unbound", "expired", "wrong-node", "with-group"} {
+		t.Run("invalid="+invalid, func(t *testing.T) {
+			d := allowedRemoteDecision("")
+			d.DenialReason, d.SubjectHash = controller.ConnectionRetryReason, strings.Repeat("a", 64)
+			switch invalid {
+			case "expired":
+				d.ExpiresAt = time.Now().Add(-time.Second)
+			case "wrong-node":
+				d.NodeID = "other"
+			case "with-group":
+				d.GroupName = coreGroup
+			}
+			acks := 0
+			a, commands := remoteFixture(t, remoteAPIFunc(func(_ context.Context, op string, q agentclient.Request) (*agentapi.Decision, error) {
+				if op == "fetch" {
+					return d, nil
+				}
+				if op == "ack" {
+					acks++
+					if q.Outcome != "denied" {
+						t.Fatal("retry acknowledged as authorization")
+					}
+				}
+				return nil, nil
+			}))
+			a.config.ProfileBinding = "required"
+			if invalid == "unbound" {
+				a.config.ProfileBinding = ""
+			}
+			connectRemote(t, a, commands, proof)
+			remoteStepNow(a)
+			if invalid == "" {
+				remoteStepNow(a) // ACK the refusal before waiting.
+				if len(commands) != 0 || a.connections[7].active {
+					t.Fatal("retry did not wait without access")
+				}
+				later := a.now().Add(60 * time.Second)
+				a.now = func() time.Time { return later }
+				remoteStepNow(a)
+			}
+			command := <-commands
+			if !strings.HasPrefix(command, "client-deny 7 2 ") || strings.Contains(command, "TEMP[backoff 1,advance no]") != (invalid == "") {
+				t.Fatal("temporary refusal was missing or accepted invalid evidence")
+			}
+			remoteStepNow(a)
+			wantACKs := 0
+			if invalid == "" {
+				wantACKs = 1
+			}
+			if a.connections[7].active || len(a.pools.leases) != 0 || acks != wantACKs {
+				t.Fatal("retry allocated access or failed to acknowledge refusal")
+			}
+		})
+	}
+}
+
+func TestRemoteTransportRetryWaitCannotOutliveConnection(t *testing.T) {
+	for _, action := range []string{"disconnect", "pending-expiry", "lease-expiry", "cancelled-context"} {
+		t.Run(action, func(t *testing.T) {
+			proof, err := profile.NewCredential()
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := allowedRemoteDecision("")
+			d.DenialReason = controller.ConnectionRetryReason
+			calls := 0
+			a, commands := remoteFixture(t, remoteAPIFunc(func(_ context.Context, op string, q agentclient.Request) (*agentapi.Decision, error) {
+				calls++
+				if op == "fetch" {
+					return d, nil
+				}
+				return nil, nil
+			}))
+			a.config.ProfileBinding = "required"
+			connectRemote(t, a, commands, proof)
+			remoteStepNow(a)
+			remoteStepNow(a)
+			if len(commands) != 0 || len(a.remote.jobs) != 1 || a.remote.jobs[0].phase != "retry-wait" {
+				t.Fatal("missing pending refusal")
+			}
+			before := calls
+			for range 10 {
+				remoteStepNow(a)
+			}
+			if calls != before || len(commands) != 0 {
+				t.Fatal("wait polls API or retries early")
+			}
+			later := a.now().Add(61 * time.Second)
+			switch action {
+			case "disconnect":
+				a.handleEvent(clientEvent{kind: "DISCONNECT", cid: 7})
+			case "pending-expiry":
+				later = a.connections[7].expires.Add(time.Second)
+			case "lease-expiry":
+				a.remote.leaseUntil = later
+			}
+			a.now = func() time.Time { return later }
+			if action == "cancelled-context" {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				a.remoteStep(ctx)
+			} else {
+				remoteStepNow(a)
+			}
+			for len(commands) != 0 {
+				if cmd := <-commands; strings.Contains(cmd, "TEMP[") || strings.HasPrefix(cmd, "client-auth") {
+					t.Fatal("obsolete wait reached client")
+				}
+			}
+			if len(a.pools.leases) != 0 {
+				t.Fatal("wait reserved a pool address")
+			}
+			if action == "lease-expiry" {
+				select {
+				case <-a.management.done:
+				default:
+					t.Fatal("retry outlived node lease")
+				}
+			}
+		})
 	}
 }

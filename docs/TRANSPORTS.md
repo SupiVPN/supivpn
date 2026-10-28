@@ -119,6 +119,43 @@ preserve application TCP sessions. TCP-over-TCP can perform poorly under packet
 loss, so UDP remains preferred. A rejected/blocked profile or an owner mismatch
 must never become an authentication bypass on the other transport.
 
+## Loss of an established UDP tunnel
+
+The endpoint polling timeout does not detect loss of an already established
+tunnel. With the packaged `keepalive 10 60`, the client detects silence after
+about 60 seconds, while the server waits about 120 seconds before confirming
+closure. A fast SAML login on TCP can therefore reach the default one-connection
+limit before the old UDP slot is released.
+
+For the **same active profile and verified owner**, a limit caused by a current
+opposite-transport grant permits one bounded retry. The controller commits a
+`connection_limit_retry` refusal, and the agent acknowledges it as **denied**.
+The agent then waits 60 seconds without admitting traffic or reserving an IP.
+Heartbeats, other clients, disconnect processing and the original pending-login
+deadline continue normally. It finally sends the upstream `AUTH_FAILED,TEMP`
+response requesting a fresh attempt on the same endpoint. The delay is enforced
+by the agent because clients do not consistently honor TCP retry backoff hints.
+No OpenVPN patch or client modification is involved.
+
+The new attempt requires a **new ticket, profile proof and SAML login** and repeats
+all current owner, active/blocked, group, validity and cluster-limit checks. The
+old session is never evicted, extended or treated as disconnected by a timer in
+SupiVPN. Only normal disconnect/cancel or fencing releases its slot. With the
+packaged timers, expect roughly two minutes plus browser/network time to recover
+from silent loss of an established UDP tunnel; this is not seamless failover.
+
+The database retains the retry budget across controllers, HA nodes, cancellation
+and node-generation changes. Another automatic retry for that profile is refused
+until five minutes after the retry attempt's original login expiry (at most eight
+minutes from registration with the default 180-second login window). A missing or
+expired proof, blocked profile, wrong owner, same-transport conflict, another
+profile or infrastructure failure does not enable this retry. If the slot is
+still occupied on the fresh attempt, the normal connection-limit refusal applies.
+If the pending login expires or the node lease is lost during the wait, the
+attempt fails closed. Clients that do not handle `AUTH_FAILED,TEMP` need a manual
+reconnect after confirmed closure. Never delete login rows or raise limits to
+force fallback. See [session accounting](SESSIONS.md).
+
 ## Disable TCP again
 
 During a maintenance window, set the controller's `profile.tcp_fallback_port`

@@ -19,6 +19,7 @@ import (
 
 	"supivpn/internal/agentapi"
 	"supivpn/internal/agentclient"
+	"supivpn/internal/controller"
 	"supivpn/internal/profile"
 )
 
@@ -108,6 +109,7 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 	proofs := map[string]profile.Credential{}
 	registered := map[int64]bool{}
 	authorized := map[int64]bool{}
+	retrying := map[int64]bool{}
 	api := remoteAPIFunc(func(_ context.Context, op string, q agentclient.Request) (*agentapi.Decision, error) {
 		switch op {
 		case "register":
@@ -123,6 +125,10 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			d := allowedRemoteDecision(coreGroup)
 			d.CID, d.KID = *q.CID, *q.KID
 			d.ID = fmt.Sprintf("decision-%d", *q.CID)
+			if retrying[*q.CID] {
+				d.GroupName, d.DenialReason = "", controller.ConnectionRetryReason
+				d.SubjectHash = strings.Repeat("a", 64)
+			}
 			return d, nil
 		}
 		return nil, nil
@@ -141,7 +147,8 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 		name      string
 		udp, tcp  uint16
 		transport int
-	}{{"UDP preferred", 12194, 12443, 0}, {"UDP unavailable", 12196, 12443, 1}, {"existing UDP-only bound", 12194, 0, 0}} {
+		retry     bool
+	}{{"TCP temporary refusal", 12196, 12443, 1, true}, {"UDP preferred", 12194, 12443, 0, false}, {"UDP unavailable", 12196, 12443, 1, false}, {"existing UDP-only bound", 12194, 0, 0, false}} {
 		if !t.Run(tc.name, func(t *testing.T) {
 			issue, err := profile.BoundTransportIssuer([]byte(template), "localhost", tc.udp, tc.tcp,
 				func(context.Context) ([]byte, error) { return bytes.Clone(wrapping), nil },
@@ -162,7 +169,9 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			clientArgs := []string{"--config", path, "--dev", fmt.Sprintf("supiClient%d", i), "--dev-type", "tun", "--disable-dco", "--ifconfig-noexec", "--route-noexec", "--setenv", "IV_SSO", "webauth", "--verb", "3"}
 			if linuxClient != "" {
 				clientBinary = linuxClient
-				clientArgs = []string{"session-start", "--config", path, "--timeout", "45", "--dco", "false"}
+				// Keep the foreground CLI timeout longer than the deliberate
+				// server wait, independently of protocol handshake deadlines.
+				clientArgs = []string{"session-start", "--config", path, "--timeout", "120", "--dco", "false"}
 				nodeTest.Cleanup(func() {
 					cmd := exec.Command(linuxClient, "session-manage", "--config", path, "--disconnect")
 					cmd.Stdout, cmd.Stderr = &protocolLog{}, &protocolLog{}
@@ -172,12 +181,32 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			started := time.Now()
 			log := startProtocolProcess(nodeTest, clientBinary, clientArgs...)
 			var e clientEvent
-			select {
-			case e = <-m.events:
-			case <-time.After(30 * time.Second):
-				t.Fatal("transport did not request authentication")
+			deadline := time.After(30 * time.Second)
+			for {
+				select {
+				case e = <-m.events:
+					// OpenVPN 3 can close the old TEMP-refused TCP handshake
+					// after its replacement tunnel is already established.
+					// Process that real disconnect without mistaking it for
+					// the next client's CONNECT or releasing any live tunnel.
+					if e.kind == "DISCONNECT" && retrying[int64(e.cid)] {
+						a.handleEvent(e)
+						remoteStepNow(a)
+						continue
+					}
+				case <-deadline:
+					t.Logf("client protocol categories: %v", log.categories())
+					for _, marker := range []string{"New tunnel did not respond", "Configuration file import failed", "Could not connect to the session"} {
+						if log.contains(marker) {
+							t.Log("Linux client diagnostic:", marker)
+						}
+					}
+					t.Fatal("transport did not request authentication")
+				}
+				break
 			}
 			if e.kind != "CONNECT" || e.transport != tc.transport || !e.proof.Valid() {
+				t.Logf("unexpected event: kind=%s cid=%d transport=%d bound=%t", e.kind, e.cid, e.transport, e.proof.Valid())
 				t.Fatal("wrong transport or missing bound proof")
 			}
 			if tc.transport == 1 {
@@ -196,7 +225,7 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 				marker = a.remote.publicURL + "/login/"
 			}
 			waitProtocol(t, log, marker)
-			if i == 0 {
+			if tc.name == "UDP preferred" {
 				// A responsive endpoint must retain the browser login even after
 				// the three-second unreachable-endpoint timeout has passed.
 				time.Sleep(4 * time.Second)
@@ -210,6 +239,57 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 				t.Fatal("tunnel preceded controller authorization")
 			}
 			authorized[int64(e.cid)] = true
+			if tc.retry {
+				retrying[int64(e.cid)] = true
+				old := e
+				oldTicket := a.connections[e.cid].ticket
+				remoteStepNow(a)
+				live := i
+				if linuxClient != "" {
+					live = 0
+				}
+				if a.connections[e.cid].active || len(a.pools.leases) != live {
+					t.Fatal("temporary refusal granted an address")
+				}
+				retryStart := time.Now()
+				remoteStepNow(a) // ACK refusal, retain pending handshake.
+				tick := time.NewTicker(50 * time.Millisecond)
+				defer tick.Stop()
+				deadline := time.After(85 * time.Second)
+				for {
+					select {
+					case event := <-m.events:
+						if event.kind == "DISCONNECT" {
+							a.handleEvent(event)
+							remoteStepNow(a)
+							continue
+						}
+						if event.kind != "CONNECT" || event.cid == old.cid || event.transport != 1 || !event.proof.Valid() {
+							t.Fatal("temporary refusal did not preserve TCP and bound proof")
+						}
+						e = event
+					case <-tick.C:
+						remoteStepNow(a)
+						continue
+					case <-deadline:
+						t.Fatal("native client did not retry temporary refusal")
+					}
+					break
+				}
+				if time.Since(retryStart) < 59*time.Second {
+					t.Log("exact temporary failure received:", log.contains("AUTH_FAILED,TEMP[backoff 1,advance no]"))
+					t.Log("server temporary reject:", log.contains("auth-temp-failure"))
+					t.Fatal("native client ignored retry backoff")
+				}
+				a.handleEvent(e)
+				remoteStepNow(a)
+				if a.connections[e.cid].ticket == oldTicket || a.connections[e.cid].active {
+					t.Fatal("retry reused authorization")
+				}
+				// The synthetic controller models a second, fresh SAML decision.
+				authorized[int64(e.cid)] = true
+				t.Logf("native client retried on TCP after %s with a fresh browser ticket", time.Since(retryStart).Round(time.Second))
+			}
 			remoteStepNow(a)
 			if linuxClient == "" {
 				waitProtocol(t, log, "Initialization Sequence Completed")
@@ -236,6 +316,56 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			// Linux therefore owns the client address locally. Route selection is
 			// checked with Community clients here and separate namespaces in VM.
 			if linuxClient != "" {
+				// ESTABLISHED comes from the server before the Linux client
+				// finishes its D-Bus interface setup. Require client readiness
+				// before disconnecting or starting another session.
+				untilReady := time.Now().Add(12 * time.Second)
+				ready := false
+				for time.Now().Before(untilReady) {
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					out, err := exec.CommandContext(ctx, linuxClient, "sessions-list").Output()
+					cancel()
+					if err == nil {
+						for _, record := range strings.Split(string(out), "Path:") {
+							if strings.Contains(record, path) && strings.Contains(record, "Client connected") {
+								ready = true
+							}
+						}
+					}
+					if ready {
+						break
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+				if !ready {
+					t.Fatal("Linux client did not report a connected tunnel")
+				}
+				// D-Bus clients configure real interfaces/routes in the same
+				// namespace as these loopback servers. Retire each Linux client
+				// before the next one; simultaneous real payload is tested in
+				// separate VM namespaces and concurrent allocation below with
+				// Community clients that use --ifconfig-noexec/--route-noexec.
+				cmd := exec.Command(linuxClient, "session-manage", "--config", path, "--disconnect")
+				cmd.Stdout, cmd.Stderr = &protocolLog{}, &protocolLog{}
+				if cmd.Run() != nil {
+					t.Fatal("cannot disconnect completed Linux test session")
+				}
+				until := time.After(15 * time.Second)
+				for a.connections[e.cid] != nil {
+					select {
+					case gone := <-m.events:
+						if gone.kind != "DISCONNECT" || gone.cid != e.cid && !retrying[int64(gone.cid)] {
+							t.Fatal("unexpected event while draining Linux test client")
+						}
+						a.handleEvent(gone)
+						remoteStepNow(a)
+					case <-until:
+						t.Fatal("Linux test client did not release its slot")
+					}
+				}
+				if len(a.pools.leases) != 0 || len(a.pools.owners) != 0 {
+					t.Fatal("Linux test client retained a shared-pool address")
+				}
 				return
 			}
 			var routes []hostRoute
@@ -247,7 +377,7 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			t.FailNow()
 		}
 	}
-	if len(a.pools.leases) != 3 || len(a.pools.owners) != 3 {
+	if linuxClient == "" && (len(a.pools.leases) != 4 || len(a.pools.owners) != 4) {
 		t.Fatal("transports reused a live address")
 	}
 }
