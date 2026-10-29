@@ -81,7 +81,7 @@ Existing profiles remain valid without reissue; follow the
 - Shared PostgreSQL state, replay protection, separate migrations, and database reconnection.
 - Structured JSON events with configurable file/stream output and bounded local rotation:
   [logging and collection](docs/LOGGING.md).
-- Opt-in Prometheus metrics are in development (not in v0.9.1):
+- Opt-in Prometheus metrics are available from v0.10.0 and disabled by default:
   [configuration, TLS and Lambda authentication](docs/METRICS.md).
 - Routing to private resources while preserving group IP addresses. The deployment
   configures full tunnel routing, NAT, DNS, return routes, and network rules.
@@ -159,7 +159,7 @@ or exclusive features.
 v0.9.0 adds [optional TCP fallback alongside UDP](docs/TRANSPORTS.md).
 TCP is disabled by default; enabling it preserves the shared address pool and
 uses the same owner-bound profile on both transports. Existing bound UDP-only
-profiles remain valid. **Planned for v0.10.0:** unbound profiles and their legacy
+profiles remain valid. **From v0.10.0:** unbound profiles and their legacy
 configuration are removed after the [transition through v0.9.x](docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x).
 Migrate on v0.9.1+ before upgrading; existing bound profiles need no reissue.
 
