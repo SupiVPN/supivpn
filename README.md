@@ -81,6 +81,8 @@ Existing profiles remain valid without reissue; follow the
 - Shared PostgreSQL state, replay protection, separate migrations, and database reconnection.
 - Structured JSON events with configurable file/stream output and bounded local rotation:
   [logging and collection](docs/LOGGING.md).
+- Opt-in Prometheus metrics are in development (not in v0.9.1):
+  [configuration, TLS and Lambda authentication](docs/METRICS.md).
 - Routing to private resources while preserving group IP addresses. The deployment
   configures full tunnel routing, NAT, DNS, return routes, and network rules.
 

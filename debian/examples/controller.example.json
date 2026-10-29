@@ -1,4 +1,5 @@
 {
+  "metrics": {"enabled": false},
   "logging": {"output": "stderr"},
   "public_url": "https://login.example.test:8443",
   "database_tls": {"mode": "verify-full", "ca_file": "/etc/supivpn/controller/database-ca.pem", "server_name": "database.example.test"},

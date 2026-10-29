@@ -9,6 +9,7 @@ package lambdaruntime
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"supivpn/internal/controlruntime"
 	"supivpn/internal/gateway"
 	"supivpn/internal/logging"
+	"supivpn/internal/metrics"
 )
 
 func MainPublic() { logging.Configure("public"); exitOnError(runHTTP(true)) }
@@ -78,11 +80,18 @@ func runHTTP(public bool) error {
 	if c.Gateway == nil || c.VM != nil {
 		return errors.New("gateway configuration required")
 	}
-    component := "agent_api"
-    if public { component = "public" }
-    closeLogs, err := logging.Setup(component, c.Logging)
-    if err != nil { return err }
-    defer closeLogs()
+	if !public && c.Metrics.IsEnabled() {
+		return errors.New("agent Lambda must not receive metrics configuration")
+	}
+	component := "agent_api"
+	if public {
+		component = "public"
+	}
+	closeLogs, err := logging.Setup(component, c.Logging)
+	if err != nil {
+		return err
+	}
+	defer closeLogs()
 	if !public && os.Getenv("SUPIVPN_TLS_CRYPT_V2_SECRET_ARN") != "" {
 		return errors.New("agent must not receive a profile key")
 	}
@@ -91,6 +100,13 @@ func runHTTP(public bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	var metricsDigest [32]byte
+	if c.Metrics.IsEnabled() {
+		metricsDigest, err = awsruntime.MetricsTokenDigest(ctx, c.Metrics.BearerTokenSecretARN)
+		if err != nil {
+			return err
+		}
+	}
 	user := "supivpn_agent"
 	if public {
 		user = "supivpn_public"
@@ -120,7 +136,11 @@ func runHTTP(public bool) error {
 	defer app.Close()
 	var adapter *gateway.Adapter
 	if public {
-		adapter, err = gateway.NewPublic(*c.Gateway, app.Origin, app.Public)
+		var endpoint http.Handler
+		if c.Metrics.IsEnabled() {
+			endpoint = metrics.Protect(metricsDigest, app.Metrics)
+		}
+		adapter, err = gateway.NewPublic(*c.Gateway, app.Origin, metrics.PublicRoute(app.Origin.Path, app.Public, endpoint))
 	} else {
 		adapter, err = gateway.NewAgent(*c.Gateway, app.Origin, app.Agents)
 	}

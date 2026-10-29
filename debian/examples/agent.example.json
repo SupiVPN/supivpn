@@ -1,4 +1,5 @@
 {
+  "metrics": {"enabled": false},
   "logging": {"output": "stderr"},
   "profile_binding": "required",
   "public_url": "https://vpn.example.test:9443",

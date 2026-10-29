@@ -27,12 +27,14 @@ import (
 
 	"supivpn/internal/controller"
 	"supivpn/internal/logging"
+	"supivpn/internal/metrics"
 	"supivpn/internal/profile"
 	"supivpn/internal/saml"
 	"supivpn/internal/servicenotify"
 )
 
 type config struct {
+	Metrics               *metrics.Config        `json:"metrics,omitempty"`
 	TCPManagementSocket   string                 `json:"tcp_management_socket,omitempty"`
 	ProfileBinding        string                 `json:"profile_binding,omitempty"`
 	VPNLoginConfirmation  *bool                  `json:"vpn_login_confirmation,omitempty"`
@@ -72,6 +74,9 @@ func readConfig(path string) (config, *url.URL, error) {
 		return c, nil, errors.New("configuration must contain one JSON object")
 	}
 	if err := c.Logging.Validate("agent"); err != nil {
+		return c, nil, err
+	}
+	if err := c.Metrics.Validate(false); err != nil {
 		return c, nil, err
 	}
 	if err := c.AssertionEncryption.Validate(); err != nil {
@@ -243,6 +248,11 @@ func run(ctx context.Context, path string) (runErr error) {
 	if c.SAMLGroupsAttribute != "" {
 		a.pools = newPoolAllocator(c)
 	}
+	stopMetrics, err := metrics.Listen(ctx, c.Metrics, a.metricsHandler())
+	if err != nil {
+		return err
+	}
+	defer stopMetrics()
 	var handler http.Handler
 	if c.RemoteController == nil {
 		control, err := newController(a, sp)

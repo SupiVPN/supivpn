@@ -18,6 +18,9 @@ import (
 )
 
 func OpenAgent(ctx context.Context, c Config, dsn string, password func(context.Context) (string, error)) (*Application, error) {
+	if c.Metrics.IsEnabled() {
+		return nil, errors.New("metrics are available only on the public Lambda component")
+	}
 	if err := postgres.ValidateLegacyProfileNodes(c.LegacyProfileNodes); err != nil {
 		return nil, err
 	}

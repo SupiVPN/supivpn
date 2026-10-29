@@ -1,4 +1,5 @@
 {
+  "metrics": {"enabled": false},
   "logging": {"output": "stderr"},
   "public_url": "https://login.example.test",
   "database_tls": {"mode": "require"},

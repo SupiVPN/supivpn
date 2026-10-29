@@ -123,22 +123,28 @@ func (a *agent) startRemote(ctx context.Context) (func(), error) {
 		return nil, err
 	}
 	cleanup := func() { api.Close(); journal.Close() }
+	var calls agentclient.API = api
+	if a.telemetry != nil {
+		calls = measuredAPI{API: api, metrics: a.telemetry}
+	}
 	startup, cancel := context.WithTimeout(ctx, 75*time.Second)
 	defer cancel()
-	generation, err := journal.Begin(startup, api)
+	generation, err := journal.Begin(startup, calls)
 	if err != nil {
 		cleanup()
 		return nil, err
 	}
 	started := a.now()
-	if _, err := api.Call(startup, "heartbeat", agentclient.Request{Generation: generation}); err != nil ||
+	if _, err := calls.Call(startup, "heartbeat", agentclient.Request{Generation: generation}); err != nil ||
 		!a.now().Before(started.Add(40*time.Second)) {
 		cleanup()
 		return nil, errors.New("controller lease unavailable")
 	}
-	a.remote = &remoteAgent{api: api, node: cfg.NodeID, generation: generation, publicURL: cfg.PublicURL}
+	a.mu.Lock()
+	a.remote = &remoteAgent{api: calls, node: cfg.NodeID, generation: generation, publicURL: cfg.PublicURL}
 	a.remote.leaseUntil = started.Add(40 * time.Second)
 	a.remote.heartbeatDue = started.Add(15 * time.Second)
+	a.mu.Unlock()
 	a.logEvent("controller.ready", nil)
 	return cleanup, nil
 }
