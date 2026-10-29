@@ -1,4 +1,5 @@
 {
+  "metrics": {"enabled": false},
   "logging": {
     "output": "file",
     "file": "/var/log/supivpn/agent.jsonl",

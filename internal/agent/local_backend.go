@@ -122,6 +122,9 @@ func (a *agent) applyAuthorizationLocked(c *connection, decision controller.Auth
 				c.groupName = decision.GroupName
 			case errors.Is(err, errPoolFull):
 				reason = "pool_full"
+				if a.telemetry != nil && a.telemetry.groups[decision.GroupName] != nil {
+					a.telemetry.groups[decision.GroupName].poolFailures++
+				}
 			default:
 				reason = "no_vpn_group"
 			}

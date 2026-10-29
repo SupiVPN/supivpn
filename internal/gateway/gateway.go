@@ -134,6 +134,10 @@ func (a *Adapter) Handle(ctx context.Context, e events.APIGatewayV2HTTPRequest) 
 		}
 		publicPath := strings.TrimPrefix(path, a.origin.Path)
 		switch {
+		case publicPath == "/metrics" && rc.HTTP.Method == "GET":
+			if rc.RouteKey != route || e.RawPath != path {
+				return reject(403)
+			}
 		case publicPath == "/saml/launch" && rc.HTTP.Method == "POST":
 			if rc.RouteKey != route || e.RawPath != path {
 				return reject(403)

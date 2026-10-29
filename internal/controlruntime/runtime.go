@@ -23,6 +23,7 @@ import (
 	"supivpn/internal/controller"
 	"supivpn/internal/gateway"
 	"supivpn/internal/logging"
+	"supivpn/internal/metrics"
 	"supivpn/internal/operatorapi"
 	"supivpn/internal/postgres"
 	"supivpn/internal/profile"
@@ -37,6 +38,7 @@ type Group struct {
 	Priority              int    `json:"priority"`
 }
 type Config struct {
+	Metrics               *metrics.Config        `json:"metrics,omitempty"`
 	LegacyProfileNodes    []string               `json:"legacy_profile_nodes,omitempty"`
 	VPNLoginConfirmation  *bool                  `json:"vpn_login_confirmation,omitempty"`
 	AssertionEncryption   *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
@@ -106,12 +108,21 @@ func ParseConfig(value string) (Config, error) {
 	if err := c.DatabaseTLS.Validate(); err != nil {
 		return c, err
 	}
+	if err := c.Metrics.Validate(c.Gateway != nil); err != nil {
+		return c, err
+	}
 	if err := postgres.ValidateLegacyProfileNodes(c.LegacyProfileNodes); err != nil {
 		return c, err
 	}
 	return c, nil
 }
 func (c Config) Policy() (controller.Config, *url.URL, error) {
+	if err := c.Metrics.Validate(c.Gateway != nil); err != nil {
+		return controller.Config{}, nil, err
+	}
+	if c.Metrics.IsEnabled() && (c.Gateway == nil) == (c.VM == nil) {
+		return controller.Config{}, nil, errors.New("metrics require exactly one VM or public Lambda adapter")
+	}
 	if err := postgres.ValidateLegacyProfileNodes(c.LegacyProfileNodes); err != nil {
 		return controller.Config{}, nil, err
 	}
@@ -148,6 +159,7 @@ func (c Config) Policy() (controller.Config, *url.URL, error) {
 
 type Application struct {
 	Public, Agents http.Handler
+	Metrics        http.Handler
 	Operations     func(context.Context, json.RawMessage) (any, error)
 	Origin         *url.URL
 	pool           *pgxpool.Pool
@@ -261,6 +273,9 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 		return nil, err
 	}
 	app := &Application{Public: Bounded(control.Handler()), Origin: origin, pool: pool, store: store}
+	if c.Metrics.IsEnabled() {
+		app.Metrics = databaseMetrics(store.Metrics)
+	}
 	if component == "" {
 		app.Agents = agentapi.New(store, time.Duration(c.PendingSeconds)*time.Second)
 		app.Operations = operatorapi.Handler(store)

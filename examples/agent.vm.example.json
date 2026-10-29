@@ -1,4 +1,5 @@
 {
+  "metrics": {"enabled": false},
   "logging": {"output": "stderr"},
   "public_url": "https://vpn.example.test:9443",
   "listen": "127.0.0.1:9443",

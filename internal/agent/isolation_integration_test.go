@@ -126,6 +126,9 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal("public privileges", err)
 	}
+	if _, err := pub.Metrics(ctx); err != nil {
+		t.Fatal("metrics require privileges beyond the isolated public role")
+	}
 	ag, err := postgres.NewIsolated(ctx, agent, postgres.AgentAPI, nil)
 	if err != nil {
 		t.Fatal("agent privileges", err)

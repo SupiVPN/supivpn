@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"supivpn/internal/controlruntime"
 	"supivpn/internal/logging"
+	"supivpn/internal/metrics"
 	"supivpn/internal/operatorapi"
 	"supivpn/internal/postgres"
 	"supivpn/internal/vm"
@@ -61,6 +62,11 @@ func run(ctx context.Context, path string) error {
 		return err
 	}
 	defer app.Close()
+	stopMetrics, err := metrics.Listen(ctx, c.Metrics, app.Metrics)
+	if err != nil {
+		return err
+	}
+	defer stopMetrics()
 	return vm.Serve(ctx, *c.VM, app.Public, app.Agents)
 }
 

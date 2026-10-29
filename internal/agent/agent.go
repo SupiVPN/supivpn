@@ -49,6 +49,7 @@ type connection struct {
 }
 
 type agent struct {
+	telemetry    *agentMetrics
 	logger       *logging.Logger
 	mu           sync.Mutex
 	config       config
@@ -72,8 +73,12 @@ func (c *connection) sessionValid(now time.Time) bool {
 }
 
 func newAgent(c config, origin *url.URL) *agent {
-	return &agent{config: c, origin: origin, connections: make(map[uint64]*connection),
+	a := &agent{config: c, origin: origin, connections: make(map[uint64]*connection),
 		tickets: make(map[string]*connection), now: time.Now}
+	if c.Metrics.IsEnabled() {
+		a.telemetry = newAgentMetrics(c)
+	}
+	return a
 }
 
 func randomToken() (string, error) {
@@ -105,6 +110,9 @@ func (a *agent) readyLocked() bool {
 func (a *agent) removeLocked(c *connection) {
 	delete(a.tickets, c.ticket)
 	if a.connections[c.cid] == c {
+		if a.telemetry != nil && !c.establishedAt.IsZero() && a.telemetry.groups[c.groupName] != nil {
+			a.telemetry.groups[c.groupName].disconnects++
+		}
 		if a.remote != nil {
 			a.cancelRemoteLocked(c)
 		}
@@ -278,6 +286,9 @@ func (a *agent) handleEvent(e clientEvent) {
 		if c := a.connections[e.cid]; c != nil && c.active && !c.closing {
 			if c.establishedAt.IsZero() {
 				c.establishedAt = a.now()
+				if a.telemetry != nil && a.telemetry.groups[c.groupName] != nil {
+					a.telemetry.groups[c.groupName].sessions++
+				}
 			}
 			if e.peer.IsValid() {
 				c.peer = e.peer
