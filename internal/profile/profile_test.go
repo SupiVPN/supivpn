@@ -30,20 +30,16 @@ func fakeIssuer() Issuer {
 		if args[0] == "--version" {
 			return []byte("OpenVPN 2.7.8 test"), nil
 		}
-		kind := serverType
 		size := 128
-		if args[0] == "--tls-crypt-v2" {
-			kind, size = clientType, 600
-		}
 		data := make([]byte, size)
 		if _, err := rand.Read(data); err != nil {
 			return nil, err
 		}
-		return nil, os.WriteFile(args[len(args)-1], pem.EncodeToMemory(&pem.Block{Type: kind, Bytes: data}), 0600)
+		return nil, os.WriteFile(args[len(args)-1], pem.EncodeToMemory(&pem.Block{Type: serverType, Bytes: data}), 0600)
 	}}
 }
 
-func TestPrivateProfilesAndPersistentServerKey(t *testing.T) {
+func TestPrivatePersistentServerKey(t *testing.T) {
 	dir := t.TempDir()
 	os.Chmod(dir, 0700)
 	key := filepath.Join(dir, "server.key")
@@ -71,29 +67,9 @@ func TestPrivateProfilesAndPersistentServerKey(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("initialization rotated the wrapping key")
 	}
-	template := []byte("client\n<tls-crypt-v2>\n" + Placeholder + "\n</tls-crypt-v2>\n")
-	first, second := filepath.Join(dir, "first.ovpn"), filepath.Join(dir, "second.ovpn")
-	for _, path := range []string{first, second} {
-		if err := i.Issue(ctx, key, template, path); err != nil {
-			t.Fatal(err)
-		}
-		info, _ := os.Stat(path)
-		data, _ := os.ReadFile(path)
-		if info.Mode().Perm() != 0600 || bytes.Contains(data, before) || bytes.Contains(data, []byte(serverType)) {
-			t.Fatal("profile permissions or wrapping-key isolation failed")
-		}
-	}
-	a, _ := os.ReadFile(first)
-	b, _ := os.ReadFile(second)
-	if bytes.Equal(a, b) {
-		t.Fatal("profiles shared their key")
-	}
-	if err := i.Issue(ctx, key, template, first); err == nil {
-		t.Fatal("existing profile overwritten")
-	}
-	unchanged, _ := os.ReadFile(first)
-	if !bytes.Equal(a, unchanged) {
-		t.Fatal("profile changed after refused overwrite")
+	info, err := os.Stat(key)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("wrapping key permissions", err)
 	}
 }
 

@@ -2,7 +2,7 @@
 // Licensed under AGPL-3.0-only. See LICENSE and COPYRIGHT.md.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package profile provides OpenVPN key bootstrap/CLI issuance and a portable
+// Package profile provides OpenVPN key bootstrap and a portable
 // in-memory profile issuer for browser downloads.
 package profile
 
@@ -136,25 +136,21 @@ func publish(path string, data []byte) error {
 	return dir.Sync()
 }
 
-func (i Issuer) generate(ctx context.Context, parent, kind, serverKey string) ([]byte, error) {
+func (i Issuer) generate(ctx context.Context, parent string) ([]byte, error) {
 	dir, err := os.MkdirTemp(parent, ".supivpn-key-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
 	target := filepath.Join(dir, "generated.key")
-	args := []string{"--genkey", "tls-crypt-v2-server", target}
-	if kind == clientType {
-		args = []string{"--tls-crypt-v2", serverKey, "--genkey", "tls-crypt-v2-client", target}
-	}
-	if _, err := i.command(ctx, args...); err != nil {
+	if _, err := i.command(ctx, "--genkey", "tls-crypt-v2-server", target); err != nil {
 		return nil, errors.New("OpenVPN key generation failed")
 	}
 	// The directory is 0700 even if the caller's umask is permissive.
 	if err := os.Chmod(target, 0600); err != nil {
 		return nil, err
 	}
-	return readPrivateKey(target, kind)
+	return readPrivateKey(target, serverType)
 }
 
 // EnsureServerKey preserves an existing key, including concurrent initialization.
@@ -175,7 +171,7 @@ func (i Issuer) EnsureServerKey(ctx context.Context, path string) error {
 	if err := i.checkVersion(ctx); err != nil {
 		return err
 	}
-	data, err := i.generate(ctx, parent, serverType, "")
+	data, err := i.generate(ctx, parent)
 	if err != nil {
 		return err
 	}
@@ -213,7 +209,7 @@ func (i Issuer) EnsureServerKeyInStore(ctx context.Context, path, secretID strin
 	if errors.Is(err, ErrSecretNotFound) {
 		candidate := local
 		if localErr != nil {
-			candidate, err = i.generate(ctx, parent, serverType, "")
+			candidate, err = i.generate(ctx, parent)
 			if err != nil {
 				return err
 			}
@@ -267,33 +263,4 @@ func validTemplate(source string) bool {
 	return strings.Count(source, Placeholder) == 1 && strings.Count(source, "<tls-crypt-v2>") == 1 &&
 		strings.Count(source, "</tls-crypt-v2>") == 1 &&
 		strings.Contains(source, "<tls-crypt-v2>\n"+Placeholder+"\n</tls-crypt-v2>")
-}
-
-// Issue creates one new per-profile key. The wrapping key never leaves its path
-// except for OpenVPN reading it. The result is not an authorization credential:
-// SAML must still approve the user and group for every VPN session.
-func (i Issuer) Issue(ctx context.Context, serverKey string, template []byte, output string) error {
-	if output == "" {
-		return errors.New("profile output path is required")
-	}
-	if _, err := os.Lstat(output); err == nil {
-		return errors.New("profile output already exists; choose a new filename")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if _, err := readPrivateKey(serverKey, serverType); err != nil {
-		return err
-	}
-	if err := i.checkVersion(ctx); err != nil {
-		return err
-	}
-	key, err := i.generate(ctx, filepath.Dir(serverKey), clientType, serverKey)
-	if err != nil {
-		return err
-	}
-	result, err := Render(template, key)
-	if err != nil {
-		return err
-	}
-	return publish(output, result)
 }

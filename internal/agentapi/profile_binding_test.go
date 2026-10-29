@@ -71,13 +71,13 @@ type migrationStore struct{ proofStore }
 
 func (s *migrationStore) LegacyProfilesAllowed(node string) bool { return node == "legacy-node" }
 
-func TestLegacyAdmissionRequiresTrustedNodeAndNoProofFields(t *testing.T) {
+func TestRemovedLegacyAdmissionRejectsOldStorePolicy(t *testing.T) {
 	base := `{"generation":"g1","cid":7,"kid":2,"ticket":"` + strings.Repeat("x", 43) + `"`
 	for _, tc := range []struct {
 		node, suffix string
 		want         int
 	}{
-		{"legacy-node", "}", 204}, {"bound-node", "}", 400},
+		{"legacy-node", "}", 400}, {"bound-node", "}", 400},
 		{"legacy-node", `,"profile_id":null}`, 400},
 		{"legacy-node", `,"profile_id":""}`, 400},
 		{"legacy-node", `,"profile_secret":""}`, 400},

@@ -159,9 +159,9 @@ or exclusive features.
 v0.9.0 adds [optional TCP fallback alongside UDP](docs/TRANSPORTS.md).
 TCP is disabled by default; enabling it preserves the shared address pool and
 uses the same owner-bound profile on both transports. Existing bound UDP-only
-profiles remain valid. v0.9.0 refuses unbound profiles; the planned v0.9.1 patch
-restores an [explicit transition through v0.9.x](docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x).
-Final removal is scheduled for v0.10.0; new installations remain bound-only.
+profiles remain valid. **Planned for v0.10.0:** unbound profiles and their legacy
+configuration are removed after the [transition through v0.9.x](docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x).
+Migrate on v0.9.1+ before upgrading; existing bound profiles need no reissue.
 
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** for a fresh Debian 13 server:
 install `supivpn-node`, `supivpn-controller` and the `supivpn` metapackage,

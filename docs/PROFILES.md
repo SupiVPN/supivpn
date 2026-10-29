@@ -23,9 +23,9 @@ The template no longer requires explicit KU/EKU extensions through these
 directives; TLS-library validation is client-specific. Continue provisioning
 VPN server certificates for TLS server authentication.
 
-The controller issues only bound profiles. The planned v0.9.1 patch restores
-explicit acceptance of existing unbound profiles through v0.9.x; migrate them
-before v0.10.0. Published v0.9.0 does not support that exception.
+The controller issues only bound profiles. v0.10.0 removes acceptance of
+unbound profiles and legacy configuration. Migrate on v0.9.1+ before upgrading;
+existing bound profiles, including UDP-only profiles, remain valid.
 See [required ownership and migration](PROFILE_BINDING.md).
 DNS SAN verification remains a separate [client limitation](TLS_CRYPT_V2.md#planned-dns-san-verification).
 

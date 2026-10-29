@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"supivpn/internal/awsruntime"
-	"supivpn/internal/profile"
 	"supivpn/internal/logging"
+	"supivpn/internal/profile"
 )
 
 func run() error {
@@ -21,33 +21,21 @@ func run() error {
 	openvpn := flag.String("openvpn", "/usr/sbin/openvpn", "absolute path to OpenVPN "+profile.Version)
 	server := flag.String("server-key", "/var/lib/supivpn/tls-crypt-v2-server.key", "server wrapping key path")
 	secretARN := flag.String("secret-arn", "", "AWS Secrets Manager ARN for the cluster wrapping key")
-	template := flag.String("template", "/etc/supivpn/client.ovpn.template", "client profile template")
-	output := flag.String("out", "", "new client profile file (0600); never stdout")
 	flag.Parse()
-	if flag.NArg() != 0 || (*initialize == (*output != "")) {
-		return fmt.Errorf("use either -init or -out FILE")
-	}
-	if *secretARN != "" && !*initialize {
-		return fmt.Errorf("-secret-arn is only valid with -init")
+	if flag.NArg() != 0 || !*initialize {
+		return fmt.Errorf("use -init; client profiles require SAML-authorized download")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	issuer := profile.Issuer{OpenVPN: *openvpn}
-	if *initialize {
-		if *secretARN != "" {
-			store, err := awsruntime.NewSecretsManagerStore(ctx, *secretARN)
-			if err != nil {
-				return err
-			}
-			return issuer.EnsureServerKeyInStore(ctx, *server, *secretARN, store)
+	if *secretARN != "" {
+		store, err := awsruntime.NewSecretsManagerStore(ctx, *secretARN)
+		if err != nil {
+			return err
 		}
-		return issuer.EnsureServerKey(ctx, *server)
+		return issuer.EnsureServerKeyInStore(ctx, *server, *secretARN, store)
 	}
-	data, err := os.ReadFile(*template)
-	if err != nil {
-		return err
-	}
-	return issuer.Issue(ctx, *server, data, *output)
+	return issuer.EnsureServerKey(ctx, *server)
 }
 
 func main() {

@@ -105,9 +105,7 @@ func TestOpenVPNCancelledLoginReleasesSlot(t *testing.T) {
 			start, end := strings.Index(template, "<ca>"), strings.Index(template, "</ca>")
 			template = template[:start] + "<ca>\n" + string(ca) + "</ca>" + template[end+len("</ca>"):]
 			clientConfig := filepath.Join(dir, "client.ovpn")
-			if err := issuer.Issue(context.Background(), key, []byte(template), clientConfig); err != nil {
-				t.Fatal(err)
-			}
+			nativeProfileFixture(t, binary, key, template, clientConfig)
 			auth := filepath.Join(dir, "test-auth")
 			writeTestFile(t, auth, []byte("unused-test\nunused-test\n"))
 			startClient := func() (*protocolLog, func(), func(bool)) {

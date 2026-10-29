@@ -151,11 +151,7 @@ func TestProfileBindingAdmission(t *testing.T) {
 		t.Fatal("combined VM fixture unexpectedly has isolated function privileges")
 	}
 	s := postgres.New(runtime)
-	t.Run("legacy-migration", func(t *testing.T) { testLegacyMigrationLifecycle(t, s, s) })
-	s, err = s.WithLegacyProfiles([]string{"separate-legacy-node"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Run("removed-unbound", func(t *testing.T) { testRemovedUnboundAdmission(t, pool, s, s) })
 	for _, scenario := range []string{"owner", "wrong-owner", "bad-secret", "unknown-profile", "blocked-register", "blocked-complete", "blocked-fetch", "blocked-ack", "legacy", "downgrade", "upgrade", "label-lock-contention", "existing-label"} {
 		t.Run(scenario, func(t *testing.T) {
 			if _, err := pool.Exec(ctx, "TRUNCATE supivpn.nodes,supivpn.assertions,supivpn.issued_profiles CASCADE"); err != nil {

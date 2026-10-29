@@ -2,26 +2,20 @@
 .\" SPDX-License-Identifier: AGPL-3.0-only
 .TH SUPIVPN-PROFILE 8 "October 2026" "SupiVPN" "System Administration"
 .SH NAME
-supivpn-profile \- initialize a wrapping key or create a VPN client profile
+supivpn-profile \- initialize a VPN wrapping key
 .SH SYNOPSIS
 .B supivpn-profile
 .B \-init
 .BI \-server-key " file"
 .RI [ options ]
-.br
-.B supivpn-profile
-.BI \-out " file"
-.BI \-server-key " file"
-.BI \-template " file"
-.RI [ options ]
 .SH DESCRIPTION
 Explicitly initializes a tls-crypt-v2 server wrapping key, preserving an
-existing key, or issues a client profile into a new mode-0600 file.
-Profile contents are never written to standard output.
+existing key. Client profiles require SAML-authorized download or Connect import
+through the controller. Offline unbound issuance was removed in v0.10.0.
 .SH OPTIONS
 .TP
 .B \-init
-Initialize or validate the server wrapping key. Mutually exclusive with \-out.
+Initialize or validate the server wrapping key.
 .TP
 .BI \-server-key " file"
 Wrapping key path. Default: /var/lib/supivpn/tls-crypt-v2-server.key.
@@ -30,14 +24,6 @@ For the combined Debian installation, explicitly select
 .TP
 .BI \-openvpn " file"
 Absolute OpenVPN executable path. Default: /usr/sbin/openvpn.
-.TP
-.BI \-template " file"
-Client template. Default: /etc/supivpn/client.ovpn.template.
-.TP
-.BI \-out " file"
-Create a historical unbound client profile at this path.
-This output is refused by v0.9.0 listeners. Current users must obtain a
-SAML-authorized bound profile through the controller.
 .TP
 .BI \-secret-arn " arn"
 Use an AWS Secrets Manager cluster wrapping key. Only valid with \-init.

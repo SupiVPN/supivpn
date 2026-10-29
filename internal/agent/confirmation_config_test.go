@@ -95,7 +95,7 @@ func TestTransportConfigurationDefaultsAndBoundaries(t *testing.T) {
 		{"same socket", "/run/supivpn/management.sock", "required", false},
 		{"other directory", "/run/other/management.sock", "required", false},
 		{"noncanonical", "/run/supivpn/../supivpn/tcp.sock", "required", false},
-		{"legacy", "", "legacy", true},
+		{"legacy", "", "legacy", false},
 		{"legacy TCP", "/run/supivpn/management-tcp.sock", "legacy", false},
 		{"unknown binding", "", "optional", false},
 	} {

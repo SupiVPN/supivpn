@@ -20,10 +20,10 @@ The [existing cluster capabilities](docs/HA.md) describe the runtime and network
 requirements; the production guide and IaC are not delivered by this walkthrough.
 
 **Evaluation status:** this setup uses bound profiles and verifies the VPN
-server's exact certificate common name. The planned v0.9.1
-[legacy transition](docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x)
-is an explicit exception for existing deployments through v0.9.x, removed in
-v0.10.0; first-time setup does not enable it. This is not DNS SAN matching;
+server's exact certificate common name. v0.10.0 removes the
+[legacy transition](docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x);
+migrate unbound profiles on v0.9.1+ before upgrading. Existing bound profiles
+remain valid; first-time setup is bound-only. This is not DNS SAN matching;
 [DNS SAN verification](docs/TLS_CRYPT_V2.md#planned-dns-san-verification)
 remains a production blocker. The helper does not remove that limitation.
 
