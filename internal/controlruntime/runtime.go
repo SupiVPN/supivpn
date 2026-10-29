@@ -39,7 +39,6 @@ type Group struct {
 }
 type Config struct {
 	Metrics               *metrics.Config        `json:"metrics,omitempty"`
-	LegacyProfileNodes    []string               `json:"legacy_profile_nodes,omitempty"`
 	VPNLoginConfirmation  *bool                  `json:"vpn_login_confirmation,omitempty"`
 	AssertionEncryption   *saml.EncryptionConfig `json:"assertion_encryption,omitempty"`
 	Logging               *logging.Config        `json:"logging,omitempty"`
@@ -111,9 +110,6 @@ func ParseConfig(value string) (Config, error) {
 	if err := c.Metrics.Validate(c.Gateway != nil); err != nil {
 		return c, err
 	}
-	if err := postgres.ValidateLegacyProfileNodes(c.LegacyProfileNodes); err != nil {
-		return c, err
-	}
 	return c, nil
 }
 func (c Config) Policy() (controller.Config, *url.URL, error) {
@@ -122,9 +118,6 @@ func (c Config) Policy() (controller.Config, *url.URL, error) {
 	}
 	if c.Metrics.IsEnabled() && (c.Gateway == nil) == (c.VM == nil) {
 		return controller.Config{}, nil, errors.New("metrics require exactly one VM or public Lambda adapter")
-	}
-	if err := postgres.ValidateLegacyProfileNodes(c.LegacyProfileNodes); err != nil {
-		return controller.Config{}, nil, err
 	}
 	if err := c.AssertionEncryption.Validate(); err != nil {
 		return controller.Config{}, nil, err
@@ -252,11 +245,6 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 		pool.Close()
 		return nil, errors.New("mandatory profile ownership requires schema 12")
 	}
-	store, err = store.WithLegacyProfiles(c.LegacyProfileNodes)
-	if err != nil {
-		pool.Close()
-		return nil, err
-	}
 	var downloads []controller.ProfileDownloads
 	if c.Profile != nil {
 		download, profileErr := profileDownload(c.Profile, key, store)
@@ -280,7 +268,6 @@ func openPublic(ctx context.Context, c Config, dsn string, password func(context
 		app.Agents = agentapi.New(store, time.Duration(c.PendingSeconds)*time.Second)
 		app.Operations = operatorapi.Handler(store)
 	}
-	logLegacyProfiles(ctx, c.LegacyProfileNodes)
 	return app, nil
 }
 
@@ -328,7 +315,7 @@ func profileIssuer(c *ProfileConfig, key func(context.Context) ([]byte, error)) 
 func profileDownload(c *ProfileConfig, key func(context.Context) ([]byte, error), s *postgres.Store) (controller.ProfileDownloads, error) {
 	var d controller.ProfileDownloads
 	if c.Binding != "" && c.Binding != "required" {
-		return d, errors.New("new profiles require binding required; legacy migration permits existing profiles only")
+		return d, errors.New("unbound profiles are no longer supported; use binding required")
 	}
 	if c.Port == 0 {
 		return d, errors.New("bound profiles require an explicit UDP port")

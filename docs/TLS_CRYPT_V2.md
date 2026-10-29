@@ -4,8 +4,8 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
 Flow: **tls-crypt-v2 → TLS without client certificate → SAML → group/IP**.
-OpenVPN Community **2.7.8** handles tunnels. Bootstrap and CLI issuance use its
-native `--genkey tls-crypt-v2-server/client`.
+OpenVPN Community **2.7.8** handles tunnels. Wrapping-key bootstrap uses its
+native `--genkey tls-crypt-v2-server`.
 For [HTTPS issuance](PROFILES.md), the controller generates client keys in memory
 using Go `crypto/rand`, AES-256-CTR, and HMAC-SHA256, in tls-crypt-v2 format with
 timestamp metadata. Lambda does not need an OpenVPN binary.
@@ -40,7 +40,7 @@ separately in the chosen deployment.
 - `supivpn-profile -init` without ARN creates or validates a local key.
   This supports local environments; never run it independently on two empty
   cluster nodes.
-- `supivpn-profile -out FILE` reads the installed local key without contacting AWS.
+- Client profiles are issued by the controller after SAML authorization.
   Keys never enter process arguments, stdout, or error messages.
 
 Other clouds may provision the same private file or implement another adapter.
@@ -97,11 +97,10 @@ requires new SAML login and IP, interrupting TCP sessions.
 Deployment installs `supivpn-profile` and `client.ovpn.template`.
 Set your VPN endpoint in the template. Using standard CLI paths:
 
-For v0.9.0, obtain a profile through the controller's SAML-authorized
-[download or Connect import](PROFILES.md). The retained `supivpn-profile -out`
-utility generates only a historical unbound format; it cannot verify a SAML
-owner and its output is refused by v0.9.0 listeners. Do not use it to provision
-current users. The `-init` wrapping-key bootstrap remains supported.
+Obtain a profile through the controller's SAML-authorized
+[download or Connect import](PROFILES.md). v0.10.0 removes the historical
+unbound `supivpn-profile -out` and `-template` options. The `-init` wrapping-key
+bootstrap remains supported. Existing bound profiles require no reissue.
 
 Bound downloads check CA, certificate validity and the exact server CN.
 No explicit KU/EKU directives are included for client compatibility.

@@ -34,6 +34,36 @@ import (
 	"supivpn/internal/saml"
 )
 
+// Native keys remain test fixtures for interoperability and rejection of the
+// retired format; production issuance requires a verified SAML owner.
+func nativeProfileFixture(t *testing.T, binary, key, template, output string) {
+	t.Helper()
+	clientKey := filepath.Join(t.TempDir(), "native-client.key")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, binary, "--tls-crypt-v2", key, "--genkey", "tls-crypt-v2-client", clientKey).Run(); err != nil {
+		t.Fatal("native fixture generation failed")
+	}
+	data, err := os.ReadFile(clientKey)
+	if err != nil {
+		t.Fatal("native fixture key unavailable")
+	}
+	defer clear(data)
+	rendered, err := profile.Render([]byte(template), data)
+	if err != nil {
+		t.Fatal("native fixture render failed")
+	}
+	defer clear(rendered)
+	f, err := os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal("native fixture output unavailable")
+	}
+	defer f.Close()
+	if _, err := f.Write(rendered); err != nil {
+		t.Fatal("native fixture write failed")
+	}
+}
+
 //go:embed testdata/server.conf.example
 var openVPNServerTemplate string
 
@@ -204,8 +234,8 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 		{"expanded-core", []string{devGroup, coreGroup}, "10.203.0.129"},
 		{"no-group", []string{unrelatedGroup}, ""},
 		{"go-core", []string{coreGroup}, "10.203.0.2"},
-		{"go-legacy-gated", []string{coreGroup}, "10.203.0.2"},
-		{"native-legacy-gated", []string{coreGroup}, "10.203.0.2"},
+		{"go-legacy-gated", nil, ""},
+		{"native-legacy-gated", nil, ""},
 		{"go-delayed-auth", []string{coreGroup}, "10.203.0.2"},
 		{"go-no-group", []string{unrelatedGroup}, ""},
 		{"go-bound", []string{coreGroup}, "10.203.0.2"},
@@ -316,9 +346,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			}
 			issue := func(path string) {
 				if !strings.HasPrefix(tc.name, "go-") {
-					if err := issuer.Issue(context.Background(), key, []byte(template), path); err != nil {
-						t.Fatal("native profile issuance failed")
-					}
+					nativeProfileFixture(t, binary, key, template, path)
 					return
 				}
 				serverKey, err := os.ReadFile(key)
@@ -370,7 +398,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 				credentials = proof.ID + "\n" + proof.Secret + "\n"
 			}
 			writeTestFile(t, authFile, []byte(credentials))
-			invalidKey := tc.name == "missing-key" || strings.HasSuffix(tc.name, "wrong-key") || tc.name == "go-tampered" || strings.HasSuffix(tc.name, "on-legacy") || tc.name == "go-legacy-on-bound"
+			invalidKey := tc.name == "missing-key" || strings.HasSuffix(tc.name, "wrong-key") || tc.name == "go-tampered" || strings.HasSuffix(tc.name, "on-legacy") || strings.HasSuffix(tc.name, "legacy-gated") || tc.name == "go-legacy-on-bound"
 			if tc.name == "go-bound-stripped-on-legacy" {
 				writeTestFile(t, authFile, []byte("unused-test\nunused-test\n"))
 			}

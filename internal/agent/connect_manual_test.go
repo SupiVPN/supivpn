@@ -101,7 +101,7 @@ func TestOpenVPNConnectExpiryManual(t *testing.T) {
     client=client[:start]+"<ca>\n"+string(ca)+"</ca>"+client[end+len("</ca>"):]
     client="verify-x509-name localhost name\n"+client
     out:="/out/connect-test.ovpn"
-    if err=issuer.Issue(context.Background(),key,[]byte(client),out);err!=nil{t.Fatal("test profile issuance failed")}
+    nativeProfileFixture(t,binary,key,client,out)
     defer os.Remove(out)
     t.Log("READY_FOR_CONNECT: import local/connect-test/connect-test.ovpn; connect, then authorize in the browser.")
     t.Log("Session=120s. Wait for disconnect, then authorize the SECOND automatic browser window.")

@@ -129,10 +129,10 @@ func (s *Store) CreateProfile(ctx context.Context, c profile.Credential, owner p
 }
 
 func (s *Store) RegisterProfile(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration, proof profile.Credential) error {
-	if !proof.Valid() || s.LegacyProfilesAllowed(a.NodeID) {
+	if !proof.Valid() {
 		return ErrConflict
 	}
-	return s.register(ctx, a, c, ticket, lifetime, &proof)
+	return s.register(ctx, a, c, ticket, lifetime, proof)
 }
 
 func loginProfile(ctx context.Context, tx pgx.Tx, hash []byte) (string, error) {
@@ -151,15 +151,12 @@ func loginProfile(ctx context.Context, tx pgx.Tx, hash []byte) (string, error) {
 	return id, err
 }
 
-func (s *Store) activeLoginProfile(ctx context.Context, tx pgx.Tx, hash []byte, node string) error {
+func (s *Store) activeLoginProfile(ctx context.Context, tx pgx.Tx, hash []byte) error {
 	id, err := loginProfile(ctx, tx, hash)
 	if err != nil {
 		return err
 	}
 	if id == "" {
-		if s.LegacyProfilesAllowed(node) {
-			return nil
-		}
 		return controller.ErrLoginExpired
 	}
 	var active bool

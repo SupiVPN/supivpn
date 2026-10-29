@@ -28,8 +28,6 @@ type definition struct {
 // Event names and schema_version are the machine-readable contract. Messages
 // are for humans. Never derive an event name or message from request data.
 var events = map[string]definition{
-	"profile.legacy_enabled":          {slog.LevelWarn, "Legacy profiles enabled until v0.10.0; profile ownership is not enforced on this node", ""},
-	"profile.legacy_login":            {slog.LevelWarn, "Legacy login registered without profile ownership; migrate before v0.10.0", ""},
 	"vpn.connection_requested":        {slog.LevelInfo, "VPN connection requested", ""},
 	"vpn.tls_reauthenticated":         {slog.LevelInfo, "Existing VPN session accepted a TLS rekey", ""},
 	"agent.login_registered":          {slog.LevelInfo, "Agent login registration committed", ""},

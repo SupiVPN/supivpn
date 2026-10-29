@@ -58,10 +58,6 @@ type groupLifecycleFixture struct {
 }
 
 func newGroupLifecycleFixture(t *testing.T, policy, first, second []string) *groupLifecycleFixture {
-	return groupLifecycleWithLegacy(t, policy, first, second, false)
-}
-
-func groupLifecycleWithLegacy(t *testing.T, policy, first, second []string, legacy bool) *groupLifecycleFixture {
 	t.Helper()
 	pool, replica := integrationDatabase(t)
 	if _, err := pool.Exec(context.Background(),
@@ -71,15 +67,6 @@ func groupLifecycleWithLegacy(t *testing.T, policy, first, second []string, lega
 	signer, metadata := testIdP(t)
 	app, _ := testApp(t, metadata)
 	f := &groupLifecycleFixture{pool: pool, stores: [2]*postgres.Store{postgres.New(pool), postgres.New(replica)}, signer: signer, app: app}
-	if legacy {
-		for i := range f.stores {
-			var err error
-			f.stores[i], err = f.stores[i].WithLegacyProfiles([]string{"lifecycle-node-0"})
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
 	f.setPolicy(t, policy)
 	for index, names := range [][]string{first, second} {
 		node := fmt.Sprintf("lifecycle-node-%d", index)
@@ -102,9 +89,6 @@ func groupLifecycleWithLegacy(t *testing.T, policy, first, second []string, lega
 		a.remote.node = node
 		a.config = lifecycleConfig(index, names...)
 		a.config.ProfileBinding = "required"
-		if legacy && index == 0 {
-			a.config.ProfileBinding = "legacy"
-		}
 		if err := validateAuthorization(a.config); err != nil {
 			t.Fatal(err)
 		}

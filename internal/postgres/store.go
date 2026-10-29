@@ -53,10 +53,9 @@ type Decision struct {
 }
 
 type Store struct {
-	pool               *pgxpool.Pool
-	fencer             Fencer
-	component          Component
-	legacyProfileNodes map[string]bool
+	pool      *pgxpool.Pool
+	fencer    Fencer
+	component Component
 }
 
 var _ controller.Backend = (*Store)(nil)
@@ -189,19 +188,13 @@ func (s *Store) lockNode(ctx context.Context, tx pgx.Tx, nodeID string) (string,
 	return generation, err
 }
 
-// Register retains the unbound protocol only for explicitly configured migration nodes.
+// Register refuses the removed unbound protocol, including callers using an
+// older API adapter. RegisterProfile is the only supported admission path.
 func (s *Store) Register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration) error {
-	if !s.LegacyProfilesAllowed(a.NodeID) {
-		return ErrConflict
-	}
-	err := s.register(ctx, a, c, ticket, lifetime, nil)
-	if err == nil {
-		logConnection(ctx, "profile.legacy_login", ticketHash(ticket), a, c)
-	}
-	return err
+	return ErrConflict
 }
 
-func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration, proof *profile.Credential) error {
+func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket string, lifetime time.Duration, proof profile.Credential) error {
 	if !validAgent(a) || !validTicket(ticket) || c.CID < 0 || c.KID < 0 ||
 		lifetime < 30*time.Second || lifetime > 180*time.Second {
 		return ErrConflict
@@ -240,38 +233,34 @@ func (s *Store) register(ctx context.Context, a Agent, c Connection, ticket stri
 	if r.agent != a || r.conn != c {
 		return ErrConflict
 	}
-	profileID := ""
-	if proof != nil {
-		digest, e := proof.Digest()
-		if e != nil {
-			return ErrConflict
-		}
-		var valid bool
-		query := "SELECT state='active' AND secret_hash=$2 FROM supivpn.issued_profiles WHERE profile_id=$1 FOR SHARE"
-		if s.component != "" {
-			query = "SELECT supivpn.profile_proof_valid($1,$2)"
-		}
-		err = tx.QueryRow(ctx, query, proof.ID, digest[:]).Scan(&valid)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return controller.ErrLoginExpired
-		}
-		if err != nil {
-			return publicError(err)
-		}
-		if !valid {
-			return controller.ErrLoginExpired
-		}
-		profileID = proof.ID
+	digest, e := proof.Digest()
+	if e != nil {
+		return ErrConflict
 	}
-	if profileID != "" && inserted.RowsAffected() == 1 {
-		if _, err = tx.Exec(ctx, "INSERT INTO supivpn.profile_bindings(ticket_hash,profile_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", hash, profileID); err != nil {
+	var valid bool
+	query := "SELECT state='active' AND secret_hash=$2 FROM supivpn.issued_profiles WHERE profile_id=$1 FOR SHARE"
+	if s.component != "" {
+		query = "SELECT supivpn.profile_proof_valid($1,$2)"
+	}
+	err = tx.QueryRow(ctx, query, proof.ID, digest[:]).Scan(&valid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return controller.ErrLoginExpired
+	}
+	if err != nil {
+		return publicError(err)
+	}
+	if !valid {
+		return controller.ErrLoginExpired
+	}
+	if inserted.RowsAffected() == 1 {
+		if _, err = tx.Exec(ctx, "INSERT INTO supivpn.profile_bindings(ticket_hash,profile_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", hash, proof.ID); err != nil {
 			return publicError(err)
 		}
 	}
 	// Do not allow an idempotent retry to change the profile or downgrade it.
 	if bound, e := loginProfile(ctx, tx, hash); e != nil {
 		return publicError(e)
-	} else if bound != profileID {
+	} else if bound != proof.ID {
 		return ErrConflict
 	}
 	now, err := dbNow(ctx, tx)
@@ -500,9 +489,8 @@ func (s *Store) Complete(ctx context.Context, p controller.Pending, d controller
 		if err != nil {
 			return err
 		} else if id == "" {
-			if !s.LegacyProfilesAllowed(r.agent.NodeID) {
-				d.GroupName, d.DenialReason = "", "profile_refused"
-			}
+			// Also reject pending unbound logins created before the upgrade.
+			d.GroupName, d.DenialReason = "", "profile_refused"
 		} else {
 			ok, err := s.profileOwnerActive(ctx, tx, id, d.SubjectHash)
 			if err != nil {

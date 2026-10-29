@@ -190,9 +190,7 @@ func testOpenVPNClusterFailover(t *testing.T, cause string) {
 	start, end := strings.Index(template, "<ca>"), strings.Index(template, "</ca>")
 	template = template[:start] + "<ca>\n" + string(ca) + "</ca>" + template[end+len("</ca>"):]
 	out := filepath.Join(dir, "client.ovpn")
-	if err = issuer.Issue(context.Background(), key, []byte(template), out); err != nil {
-		t.Fatal(err)
-	}
+	nativeProfileFixture(t, binary, key, template, out)
 	auth := filepath.Join(dir, "test-auth")
 	writeTestFile(t, auth, []byte("unused-test\nunused-test\n"))
 	// Bound handshake recovery when the test kills a peer during TLS rekey.

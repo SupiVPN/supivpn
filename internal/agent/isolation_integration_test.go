@@ -133,7 +133,7 @@ func TestComponentDatabaseIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal("agent privileges", err)
 	}
-	t.Run("legacy-migration", func(t *testing.T) { testLegacyMigrationLifecycle(t, pub, ag) })
+	t.Run("removed-unbound", func(t *testing.T) { testRemovedUnboundAdmission(t, admin, pub, ag) })
 	t.Run("heartbeat-after-row-lock", func(t *testing.T) {
 		testHeartbeatRechecksConcurrentNodeChange(t, admin, ag)
 	})

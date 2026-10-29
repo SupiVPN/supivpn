@@ -36,26 +36,28 @@ a profile stops new admission and incomplete admission checked by the controller
 it does not continuously revoke an already admitted tunnel. Use the existing
 operator session-disconnect action for immediate termination.
 
-## Required ownership in v0.9.0
+## Required ownership in v0.10.0
 
-v0.9.0 removed unbound admission prematurely. **Planned for v0.9.1:** an explicit
-legacy migration path restores the originally announced transition. It is not
-available in the published v0.9.0 binaries; the v0.9.0 tag remains unchanged.
+**Planned for v0.10.0:** unbound admission and its temporary configuration are
+removed after the two-minor transition. Until this release is published, use
+the versioned documentation matching your installed binaries.
 
 | Milestone | Compatibility |
 | --- | --- |
 | v0.8.0 | Bound format introduced; unbound format deprecated |
 | v0.8.x | Original two-listener transition |
-| v0.9.0 | Unbound profiles refused; migrate before installing this exact version |
+| v0.9.0 | Unbound profiles refused prematurely |
 | v0.9.1 through the rest of v0.9.x | Explicit legacy listener and controller allowlist; last compatible series |
-| v0.10.0 | Final removal of unbound admission and legacy configuration |
+| v0.10.0 | Unbound admission and legacy configuration removed |
 
-The v0.9.0 safe defaults remain: omitted `profile_binding` means `required`,
-omitted `legacy_profile_nodes` means no legacy nodes, and new downloads always
-use `profile.binding: "required"` (also its default). The embedded controller
-remains unsupported. There is no calendar-triggered shutdown; removal happens
-when upgrading to v0.10.0. Do not describe a deployment with a legacy listener
-as enforcing ownership everywhere.
+Omitted `profile_binding` still means `required`; new downloads always use
+`profile.binding: "required"` (also its default). The embedded controller
+remains unsupported. `profile_binding: "legacy"` and the
+`-verify-profile-metadata legacy` hook are rejected. Remove
+`legacy_profile_nodes` from every controller configuration, including empty or
+null values: it is now an unknown field and prevents startup. Both public and
+agent Lambda configurations use this strict parser. There is no automatic
+downgrade or calendar-triggered shutdown on older binaries.
 
 **Bound UDP-only profiles issued by v0.8.x remain valid.** They do not need new
 secrets or tls-crypt-v2 keys. Keep their UDP endpoint/port and trust material.
@@ -67,9 +69,9 @@ and infrastructure errors never trigger a less restrictive path.
 ## VM and systemd configuration
 
 1. Back up the database and use schema 12. A deployment already on v0.8.1 or
-   later needs no schema change for v0.9.0. Keep the restricted runtime grants.
+   later needs no schema change for v0.10.0. Keep the restricted runtime grants.
    Upgrade the controller and agent together in a maintenance window; mixed
-   v0.8/v0.9 server components are not a supported rolling-upgrade combination.
+   v0.9/v0.10 server components are not a supported rolling-upgrade combination.
 2. While still on v0.8.x, or using the explicit v0.9.1 transition below, issue
    bound profiles to every user. Verify owner match,
    blocked-profile refusal and reconnect. Preserve the existing bound listener's
@@ -113,7 +115,7 @@ The v0.9.0 setup helper creates a bound UDP-only deployment by default. Optional
 TCP fallback uses a second unchanged OpenVPN process controlled by the **same
 agent and node**, with the same address pools and security checks. See
 [UDP and optional TCP fallback](TRANSPORTS.md) for configuration and host routing.
-The two transports are unrelated to the separate legacy migration listener.
+TCP is optional and does not provide a legacy admission path.
 
 For Lambda/EC2, upgrade both controller Lambdas and the agent on each VPN host;
 a Lambda update alone cannot enforce the host's metadata gate or create TCP.
@@ -122,104 +124,47 @@ transport arrangement applies; no additional EC2 identity is needed for TCP.
 
 ## Explicit legacy transition through v0.9.x
 
-**Requires the planned v0.9.1 patch, not v0.9.0.** This accepts existing unbound
-profiles without reissue while their users download replacements through SAML.
-It does not issue new unbound profiles. Keep browser login confirmation enabled:
-an old profile proves possession of a key, not ownership by the SAML user.
-Blocking a bound profile cannot revoke an old unbound key held by that user.
+The migration window is v0.8.x and v0.9.x. v0.9.1 restored the explicit
+legacy listener removed prematurely in v0.9.0. Existing deployments that still
+need unbound profiles must complete migration on **v0.9.1 or a later v0.9.x
+patch before upgrading to v0.10.0**. See the
+[v0.9.1 migration instructions](https://github.com/SupiVPN/supivpn/blob/v0.9.1/docs/PROFILE_BINDING.md#explicit-legacy-transition-through-v09x)
+for the old two-listener configuration. Those instructions do not apply to
+v0.10.0 binaries.
 
-Retain separate listeners and identities. For example, keep existing unbound
-UDP/1194 on `vm-legacy` and bound UDP/1195 on `vm-bound`. Preserve the actual
-existing ports, wrapping key and TLS trust. Each migration node has its own
-agent, management socket, generation/state directory, TUN and nonoverlapping
-VPN pools. This separation is for the two security policies; bound UDP/TCP
-continues to share one agent and pool. Legacy mode does not support the new TCP
-fallback. Do not move a bound profile to the legacy port.
+Before upgrading:
 
-1. Upgrade the controller and agents together in a maintenance window. Keep
-   schema 12 and its existing grants. No schema downgrade or profile-secret
-   rotation is needed. Set the old agent explicitly:
+1. Issue bound replacements through SAML and verify owner match, wrong-owner
+   refusal, block/reactivate and reconnect for all users. An unused profile may
+   never have appeared in login logs; quiet logs do not prove migration is done.
+2. Drain and stop the old unbound OpenVPN listener **and its agent**. Disable
+   their systemd instance units, or remove the legacy EC2 targets from service,
+   and close the old port/target-group route. Updating Lambda alone does not
+   terminate already admitted tunnels. Do not delete live login rows to free
+   slots; use normal disconnect and node recovery procedures.
+3. Remove `legacy_profile_nodes` from every combined/public/agent controller
+   configuration and replica/alias. Retire legacy agent configuration and
+   hooks. Keep the bound listener on its existing port with `required`.
+4. Upgrade all server components together in a maintenance window. Keep schema
+   12 and its grants; no database migration or bound-profile reissue is needed.
+   Mixed v0.9/v0.10 agents/controllers are not a supported rolling-upgrade
+   combination. Database records, revocations, replay history and node
+   generations must be preserved.
+5. Check configuration and readiness before restoring traffic. Confirm that
+   old unbound connections fail on UDP and TCP; a historical unbound login
+   cannot complete SAML authorization, deliver a grant or acknowledge it after
+   the upgrade. Existing bound profiles must still connect and rekey.
 
-   ```json
-   "profile_binding": "legacy"
-   ```
+The offline `supivpn-profile -out` and `-template` options are removed with
+unbound issuance. `supivpn-profile -init` still initializes or validates the
+wrapping key. Users obtain profiles only through SAML-authorized download or
+Connect import.
 
-2. Install the authenticated format gate on the old OpenVPN listener **before
-   exposing it**, preserving all other security directives:
-
-   ```text
-   script-security 2
-   tls-crypt-v2-verify "/usr/sbin/supivpn -verify-profile-metadata legacy"
-   ```
-
-   The bound listener keeps `required`. Legacy accepts only historical type-1
-   eight-byte timestamps; required accepts only the versioned bound marker.
-   Removing a bound profile's proof cannot turn its key into a legacy key.
-   Unknown, missing or malformed metadata is refused, as are timestamps outside
-   the permitted clock skew or configured age limit. The optional
-   `-profile-max-age` applies to either gate; zero means no age limit.
-
-3. Add only the old node's authenticated identity to the top-level controller
-   configuration. Do not use a hostname, client ID, group or wildcard:
-
-   ```json
-   "legacy_profile_nodes": ["vm-legacy"]
-   ```
-
-   On a combined VM this belongs in `controller.json`. For Lambda, configure
-   the **same allowlist in both public and agent API configurations**, on every
-   replica/alias receiving traffic. Recovery needs no change. The agent API
-   derives the node from trusted Unix peer/IAM mapping, never request JSON.
-   Missing entries fail closed at registration, SAML completion, fetch or ACK.
-   Limits: 256 distinct valid node IDs; no automatic discovery or fallback.
-
-4. On Debian, the installed `supivpn-node@legacy.service` and
-   `supivpn-openvpn@legacy.service` can use reviewed files under
-   `/etc/supivpn/nodes/legacy/{agent.json,openvpn.conf}`. The node unit creates
-   `/run/supivpn-legacy` and `/var/lib/supivpn-node-legacy`; use these private
-   paths for its management socket and state. Give its health HTTPS listener a
-   distinct address/port. Configure the controller's existing `vm` socket for
-   one node and `vm.additional_agents` for the other, for example:
-
-   ```json
-   "additional_agents": [
-     {"socket": "/run/supivpn-controller/agent-legacy.sock", "uid": 0, "node_id": "vm-legacy"}
-   ]
-   ```
-
-   The legacy agent's `remote_controller` uses that socket/node and the common
-   browser login URL. Keep sockets under the controller-owned 0700 directory.
-   Configure forwarding, return routes and firewall policy for both pools.
-   Do not run first-time setup over an existing installation: setup remains
-   bound-only and does not automate the migration pair.
-
-   For Lambda/EC2, use distinct legacy and bound EC2 nodes with separately
-   authenticated IAM identities and target-group routing. Two agents sharing
-   one EC2 IAM/fencing identity are not supported. All HA replicas must use
-   matching policy; route the two profile formats only to their intended nodes.
-
-5. Verify signed SAML, group refusal, expiry/rekey, global session limits across
-   both modes and all negative bound checks. `profile.legacy_enabled` warns at
-   startup; `profile.legacy_login` records use with node/connection correlation.
-   Neither event logs keys or assertions. Quiet logs alone do not prove that
-   every occasionally used profile has migrated.
-6. Before v0.10.0, finish issuing bound replacements, verify them, drain and
-   disable the legacy listener, remove its allowlist entries from all controller
-   replicas, and close its firewall/target-group route. Removing the allowlist
-   prevents new/incomplete admission; it does not terminate established tunnels.
-
-Missing or wrong new-format proofs, unknown/blocked profiles, owner mismatch
-and controller/database failures never trigger legacy admission. New-format
-registration on a legacy node is also refused; node policy cannot be selected
-by a VPN client. Legacy logins still require verified SAML, current group policy,
-replay prevention, node leases and the same global per-user connection limits.
-
-Supported upgrade: coordinated v0.8.1+ or v0.9.0 to v0.9.1 with schema 12 and
-reviewed configuration. Arbitrary mixed agent/controller versions are not a
-supported rolling upgrade. A v0.9.0 rollback cannot serve unbound users and does
-not understand `legacy_profile_nodes`; restore the matching saved configuration
-only after draining legacy sessions. Do not roll back the database or restore
-stale authorization records. Test the complete rollback pair before deployment.
+Rollback requires a tested, matching v0.9.1+ server pair and its saved
+configuration. Keep bound-only policy when possible; re-enabling legacy
+restores the old profile-sharing/relay risk. Do not down-migrate schema 12 or
+restore stale authorization records. Published v0.9.0 cannot serve unbound
+profiles and does not understand `legacy_profile_nodes`.
 
 ## Server URL and Linux import
 
@@ -255,7 +200,7 @@ this Server URL/SAML flow. No separate SupiVPN import helper is required.
 
 The automated compatibility fixture uses unmodified OpenVPN 2.7.8 and OpenVPN 3
 Linux 27.1: file import, browser challenge, delayed signed SAML, tunnel traffic,
-proof transport and cross-port format rejection. Connect 3.9.0 on macOS accepted
+proof transport and unbound-format rejection. Connect 3.9.0 on macOS accepted
 the generated bound file through its CLI importer. On 2026-10-24, Connect 3.9.0
 (6050) on macOS arm64 also passed native Server URL import: discovery, browser
 handoff, signed synthetic SAML, the one-use HTTPS grant and successful UI import.
@@ -323,9 +268,8 @@ reinstalls, lost devices, rotation and administrative recovery.
 
 1. A SAML-authorized download contains an opaque proof, connects as its owner
    and is rejected after login as a different user.
-2. Unbound, stripped, unknown and blocked profiles fail on every bound
-   transport. With the transition enabled, only historical keys work on the
-   explicitly allowlisted legacy node. A bound key moved there still fails.
+2. Unbound, stripped, unknown and blocked profiles fail on every transport.
+   Removed legacy configuration and metadata-hook modes fail closed.
    Wrong proof or controller/database failure never opens access.
 3. Existing bound UDP-only profiles reconnect and rekey. New dual-transport
    profiles prefer UDP and can authenticate over TCP when UDP is unavailable.

@@ -55,8 +55,10 @@ real stop operations and IAM/EC2/database failures need deployment testing.
    CA and validity period, but does not verify a specific VPN server. Explicit
    KU/EKU directives are omitted for [client compatibility](PROFILES.md#client-template-compatibility).
    Bound downloads additionally enforce an exact CN match before sending their
-   profile proof. From v0.9.0, all supported admission requires these bound
-   profiles; the raw template alone is not an issued profile.
+   profile proof. From v0.10.0, all supported admission requires these bound
+   profiles; the explicit v0.9.1 legacy exception ends with v0.9.x. Follow the
+   [migration procedure](PROFILE_BINDING.md#explicit-legacy-transition-through-v09x)
+   before upgrading. The raw template alone is not an issued profile.
    The selected direction (2026-10-05) is a public CA plus client-side DNS SAN
    verification, without CN fallback. This is not implemented: stock OpenVPN
    Connect profile support is a blocker. See the [client compatibility evidence
@@ -86,9 +88,12 @@ real stop operations and IAM/EC2/database failures need deployment testing.
    needs a separately designed client-assisted mechanism; neither MFA nor
    assertion encryption establishes that binding.
 4. **Keys and compromise response.** Verify procedures for lost wrapping/TLS/IdP/
-   database/agent credentials. Individual profile revocation and automatic wrapping-key
-   rotation with overlap are not implemented. A profile alone cannot authorize VPN
-   access without SAML, but enables the pre-auth control channel, so theft matters.
+   database/agent credentials. Individual bound profiles can be blocked for new
+   and incomplete admission; blocking does not terminate an established tunnel
+   or prevent use of its wrapping key at the OpenVPN pre-auth layer. Use the
+   session-disconnect action when immediate termination is needed. Automatic
+   wrapping-key rotation with overlap is not implemented. A profile alone cannot
+   authorize VPN access without matching SAML ownership, but theft still matters.
 5. **Live network and operational checks.** Test group isolation, metadata/management
    endpoints, DNS/IPv6 leaks, origin bypass, recovery/rolling rollback, resource limits,
    and alerting in the target environment. Review OS/OpenVPN/container versions and
