@@ -38,9 +38,9 @@ operator session-disconnect action for immediate termination.
 
 ## Required ownership in v0.10.0
 
-**Planned for v0.10.0:** unbound admission and its temporary configuration are
-removed after the two-minor transition. Until this release is published, use
-the versioned documentation matching your installed binaries.
+**From v0.10.0:** unbound admission and its temporary configuration
+are removed after the two-minor transition. Use the versioned documentation
+matching your installed binaries when migrating from an older release.
 
 | Milestone | Compatibility |
 | --- | --- |

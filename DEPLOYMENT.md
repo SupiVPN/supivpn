@@ -55,7 +55,7 @@ opening access to private resources:
 | Put PostgreSQL on a separate host | [Private endpoint, verified TLS, setup and existing-data cutover](docs/REMOTE_DATABASE.md). The setup-helper extension is available from v0.6.1. |
 | Inspect services or block a bound profile | [Local operator CLI](docs/CLI.md), available from v0.8.0 on a combined Debian node/controller host; PostgreSQL may be external. Blocking prevents new admission and does not disconnect established tunnels. |
 | Customize logging or grow beyond one VM | [Logging](docs/LOGGING.md#destinations-and-defaults) and [active-active architecture](docs/HA.md). The one-host helper does not provision an HA deployment. |
-| Monitor sessions, address pools and controller availability | [Prometheus metrics](docs/METRICS.md). Unreleased; disabled by default, with separate TLS listeners on VM and Bearer authentication for Lambda. |
+| Monitor sessions, address pools and controller availability | [Prometheus metrics](docs/METRICS.md). Available from v0.10.0; disabled by default, with separate TLS listeners on VM and Bearer authentication for Lambda. |
 
 For the Debian file paths and a safe point to customize them, see
 [configuration after setup](#customize-the-generated-configuration).

@@ -2,8 +2,10 @@
 
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN). See LICENSE.
 
-**Availability:** unreleased. Existing v0.9.1 packages do not accept this
-configuration. No database migration or profile reissue is required.
+**Availability:** v0.10.0 and later. Upgrade before adding this configuration;
+v0.9.x packages do not accept it. No database migration or bound-profile reissue
+is required. Follow the [profile migration guide](PROFILE_BINDING.md#explicit-legacy-transition-through-v09x)
+before upgrading a deployment that still uses unbound profiles.
 
 Metrics are **disabled by default** in every component. An absent block,
 `{}` or `{"enabled": false}` opens no metrics socket, reads no metrics TLS
