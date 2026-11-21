@@ -1,9 +1,9 @@
 # Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 # SPDX-License-Identifier: AGPL-3.0-only
-ARG BASE_IMAGE=supivpn-openvpn-test:2.7.8-arm64
+ARG BASE_IMAGE=supivpn-openvpn-test:2.7.9-arm64
 FROM ${BASE_IMAGE}
 USER root
-ARG CLIENT_VERSION=27.1-1+4.1
+ARG CLIENT_VERSION=27.2-1+1.1
 RUN install -d /etc/apt/keyrings && \
     curl --fail --silent --show-error --location --proto '=https' \
       https://packages.openvpn.net/packages-repo.gpg -o /etc/apt/keyrings/openvpn.asc && \

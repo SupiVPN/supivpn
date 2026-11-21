@@ -238,10 +238,11 @@ class SetupTests(unittest.TestCase):
         local_config = self.load()
         def read(path, limit):
             return b"13.1" if str(path) == "/etc/debian_version" else b"systemd\n"
+        openvpn_version = b"OpenVPN 2.7.8 test"
         def command(args):
             if args[0] == "dpkg-query":
                 return b"install ok installed 0.6.0\n" * 3
-            return b"OpenVPN 2.7.8 test"
+            return openvpn_version
         user = SimpleNamespace(pw_uid=987, pw_dir="/nonexistent", pw_shell="/usr/sbin/nologin")
         with patch.object(setup, "read", side_effect=read), patch.object(setup, "run", side_effect=command), \
                 patch("os.geteuid", return_value=0), patch("sys.platform", "linux"), \
@@ -251,7 +252,14 @@ class SetupTests(unittest.TestCase):
                 patch.object(Path, "stat", return_value=SimpleNamespace(st_mode=stat.S_IFCHR)), \
                 patch.object(setup.pwd, "getpwnam", return_value=user), \
                 patch.object(setup.socket, "socket") as socket:
-            self.assertEqual(setup.preflight(c), user)
+            for version in ("2.7.8", "2.7.9"):
+                openvpn_version = f"OpenVPN {version} test".encode()
+                self.assertEqual(setup.preflight(c), user)
+            for version in ("2.7.7", "2.7.80", "2.7.90", "2.7.9_rc1", "2.7.10"):
+                openvpn_version = f"OpenVPN {version} test".encode()
+                with self.assertRaisesRegex(setup.SetupError, "OpenVPN"):
+                    setup.preflight(c)
+            openvpn_version = b"OpenVPN 2.7.9 test"
             binds = socket.return_value.__enter__.return_value.bind.call_args_list
             self.assertNotIn((("127.0.0.1", setup.PORT),), [call.args for call in binds])
             with self.assertRaisesRegex(setup.SetupError, "Existing"):

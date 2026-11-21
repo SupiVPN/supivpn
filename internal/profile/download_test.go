@@ -30,7 +30,7 @@ func TestPortableClientKeysAndFailurePaths(t *testing.T) {
         bytes.Contains(first, server) || bytes.Contains(first, []byte(serverType)) {
         t.Fatal("client key uniqueness or server-key isolation failed")
     }
-    // Real OpenVPN 2.7.8 tests independently check unwrap/interoperability;
+    // Real OpenVPN tests independently check unwrap/interoperability;
     // do not duplicate the production cryptographic algorithm in this test.
     for _, invalid := range [][]byte{nil, testKey(clientType), append(bytes.Clone(server), server...)} {
         if _, err := GenerateClientKey(invalid, now); err == nil { t.Fatal("invalid server key accepted") }
@@ -85,4 +85,3 @@ func TestDownloadConfigurationAndSecretErrors(t *testing.T) {
         t.Fatal("loader details exposed")
     }
 }
-

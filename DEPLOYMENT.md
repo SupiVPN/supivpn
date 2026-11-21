@@ -191,7 +191,9 @@ For remote PostgreSQL, install `postgresql-client-18` in place of `postgresql-18
 and complete the [database preparation](docs/REMOTE_DATABASE.md#1-prepare-a-private-database-endpoint).
 Use v0.6.1 or later for the helper extension, or the manual path on v0.6.0.
 
-The current agent requires upstream OpenVPN **2.7.8**. If the Debian revision above is superseded,
+Published v0.10.0 packages require upstream OpenVPN **2.7.8**. The unreleased
+[dependency refresh](docs/OPENVPN_UPGRADE.md) also accepts **2.7.9** while keeping
+this Debian installation path working. If the Debian revision above is superseded,
 select the available revision of that same upstream version after review;
 never force dependencies or install the CI test fixture. See the
 [manual package section](docs/DEPLOYMENT_MANUAL.md#2-obtain-and-install-the-packages)

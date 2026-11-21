@@ -198,8 +198,8 @@ Linux uses the existing browser `/profile` download after SAML, followed by loca
 `.ovpn` import. OpenVPN 3 Linux's native Access Server importer does not implement
 this Server URL/SAML flow. No separate SupiVPN import helper is required.
 
-The automated compatibility fixture uses unmodified OpenVPN 2.7.8 and OpenVPN 3
-Linux 27.1: file import, browser challenge, delayed signed SAML, tunnel traffic,
+The automated compatibility fixture uses unmodified OpenVPN 2.7.9 and OpenVPN 3
+Linux (27.2 in the current test fixture): file import, browser challenge, delayed signed SAML, tunnel traffic,
 proof transport and unbound-format rejection. Connect 3.9.0 on macOS accepted
 the generated bound file through its CLI importer. On 2026-10-24, Connect 3.9.0
 (6050) on macOS arm64 also passed native Server URL import: discovery, browser

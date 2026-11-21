@@ -8,7 +8,7 @@ using [SECURITY.md](SECURITY.md).
 
 ## Local development
 
-Use Go **1.27.3 or newer**, Python **3.11 or newer**, Git, Make and a C compiler for Go's
+Use Go **1.27.4 or newer**, Python **3.11 or newer**, Git, Make and a C compiler for Go's
 race detector. macOS on Apple Silicon is supported. Docker is optional for unit
 tests and required for the disposable PostgreSQL, OpenVPN and XMLSec suites.
 No cloud account, real IdP, deployment repository or production credential is required.
@@ -34,7 +34,7 @@ make setup
 make test
 ```
 
-`make setup` downloads Go modules and installs PyYAML 6.0.3 in the ignored
+`make setup` downloads Go modules and installs PyYAML 6.0.4 in the ignored
 `local/dev-venv/`. Make uses that environment automatically; shell activation
 and global Python-package installation are unnecessary. It does not install
 Go, Docker or GnuPG. Re-run it after dependency updates.

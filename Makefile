@@ -11,7 +11,7 @@ DOCKER ?= docker
 ROOT := $(CURDIR)
 LOCAL := $(ROOT)/local
 PYTHON ?= $(if $(wildcard $(LOCAL)/dev-venv/bin/python3),$(LOCAL)/dev-venv/bin/python3,python3)
-PYYAML_VERSION := 6.0.3
+PYYAML_VERSION := 6.0.4
 export GOPATH := $(LOCAL)/go
 export GOCACHE := $(LOCAL)/build-cache
 export GOTOOLCHAIN := local
@@ -23,13 +23,13 @@ TEST_VERBOSE ?=
 TIMEOUT ?= 300s
 FUZZ_TIME ?= 20s
 FUZZ_SAML_TIME ?= $(FUZZ_TIME)
-GOVULNCHECK_VERSION := v1.9.0
+GOVULNCHECK_VERSION := v1.10.0
 VULNCHECK := $(LOCAL)/tools/$(GOVULNCHECK_VERSION)/govulncheck
-OPENVPN_IMAGE ?= supivpn-openvpn-test:2.7.8-$(ARCH)
+OPENVPN_IMAGE ?= supivpn-openvpn-test:2.7.9-$(ARCH)
 OPENVPN_RUN ?= TestOpenVPN
 LINUX_CLIENT_IMAGE ?= supivpn-linux-client-test:$(ARCH)
 XMLSEC_IMAGE ?= supivpn-xmlsec-test:$(ARCH)
-POSTGRES_IMAGE ?= postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
+POSTGRES_IMAGE ?= postgres:18.7-bookworm@sha256:194e55feb2597b1465dbee81cc9fd8d204566cd2eb42c8d22fd6c931a38781b1
 POSTGRES_CONTAINER ?= supivpn-pg18-test
 POSTGRES_PORT ?= 55432
 POSTGRES_WAIT_TIMEOUT ?= 60
@@ -83,7 +83,7 @@ help:
 	 'vet               Go vet, including integration test code' \
 	 'integration       PostgreSQL 18 tests; requires local test DB + opt-in env' \
 	 'test-xmlsec       Independent XMLSec interoperability (Docker)' \
-	 'test-openvpn      Real OpenVPN 2.7.8 / two-node failover (Docker)' \
+	 'test-openvpn      Real OpenVPN 2.7.9 / two-node failover (Docker)' \
 	 'test-connect      Interactive local OpenVPN Connect expiry/reconnect test' \
 	 'fuzz              XML/C14N + signed-claim mutation fuzzing; FUZZ_TIME=20s each' \
 	 'fuzz-xml / fuzz-saml  Run one fuzz target' \

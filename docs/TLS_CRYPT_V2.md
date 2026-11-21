@@ -4,7 +4,7 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
 Flow: **tls-crypt-v2 → TLS without client certificate → SAML → group/IP**.
-OpenVPN Community **2.7.8** handles tunnels. Wrapping-key bootstrap uses its
+Unmodified OpenVPN Community handles tunnels; see the [tested versions](OPENVPN_UPGRADE.md). Wrapping-key bootstrap uses its
 native `--genkey tls-crypt-v2-server`.
 For [HTTPS issuance](PROFILES.md), the controller generates client keys in memory
 using Go `crypto/rand`, AES-256-CTR, and HMAC-SHA256, in tls-crypt-v2 format with

@@ -91,8 +91,9 @@ Outbound DNS, time synchronization, HTTPS and APT access must work.
 
 ### OpenVPN
 
-The current agent and package dependency require **OpenVPN Community 2.7.8**.
-Broader version support is deferred; installing Debian's default OpenVPN without
+Published v0.10.0 packages require **OpenVPN Community 2.7.8**. This source branch
+also accepts **2.7.9**; that change is not yet released. See the
+[upgrade review](OPENVPN_UPGRADE.md). Installing Debian's default OpenVPN without
 checking its version is insufficient.
 
 At the time of writing, Debian provides `2.7.8-1~bpo13+1` for both supported
@@ -614,7 +615,7 @@ OpenVPN/management and lease readiness.
 On an external computer, use a current OpenVPN Connect release supporting the
 SAML browser flow (`IV_SSO=webauth`) and `tls-crypt-v2`. A generally supported
 minimum client version has not yet been established; record the exact client
-version and OS you test. The automated VM suite uses a Community 2.7.8 test
+version and OS you test. The automated VM suite uses a Community 2.7.9 test
 client and synthetic SAML; it does not prove your Connect UI or real IdP works.
 
 1. Open `https://login.example.test:8443/profile` in the browser. Check that the

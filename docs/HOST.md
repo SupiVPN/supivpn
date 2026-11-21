@@ -3,16 +3,18 @@
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
-A node runs OpenVPN Community 2.7.8 and the `supivpn` Go agent.
-This document defines the deployment contract; VM creation, systemd services,
+A node runs OpenVPN Community and the `supivpn` Go agent. This source branch
+accepts 2.7.8 and 2.7.9; published v0.10.0 requires 2.7.8.
+This document describes the deployment layout; VM creation, systemd services,
 firewall rules, and DNS belong to the operator's infrastructure.
 
-For the 2.7.8 transition, see the [upgrade review and contract](OPENVPN_UPGRADE.md).
+For accepted versions, package availability and open issues, see the
+[upgrade review](OPENVPN_UPGRADE.md).
 The OpenVPN package must be updated separately from the SupiVPN release bundle.
 
 ## Processes and files
 
-- Install OpenVPN 2.7.8 and the built Linux binary `local/arm64/supivpn`.
+- Install a [supported OpenVPN version](OPENVPN_UPGRADE.md) and the built Linux binary `local/arm64/supivpn`.
 - Start from [server.conf.example](../examples/server.conf.example):
   `topology subnet`, `server ... nopool`, `management-client-auth`,
   `management-hold`, `verify-client-cert none`, and `tls-crypt-v2`.

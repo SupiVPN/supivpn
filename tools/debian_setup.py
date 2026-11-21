@@ -303,8 +303,8 @@ def preflight(c=None):
     versions = run(["dpkg-query", "-W", "-f=${Status} ${Version}\n", "supivpn", "supivpn-node", "supivpn-controller"]).decode().splitlines()
     if len(versions) != 3 or len(set(versions)) != 1 or not versions[0].startswith("install ok installed "):
         raise SetupError("Install matching versions of all three SupiVPN packages")
-    if not run(["/usr/sbin/openvpn", "--version"]).startswith(b"OpenVPN 2.7.8 "):
-        raise SetupError("OpenVPN 2.7.8 is required by this package version")
+    if not run(["/usr/sbin/openvpn", "--version"]).startswith((b"OpenVPN 2.7.8 ", b"OpenVPN 2.7.9 ")):
+        raise SetupError("OpenVPN 2.7.8 or 2.7.9 is required by this package version")
     if remote:
         if not Path(PSQL).is_file():
             raise SetupError("Install postgresql-client-18 for remote database setup")

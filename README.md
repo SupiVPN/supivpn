@@ -19,7 +19,7 @@ Open-source SAML single sign-on and access control for OpenVPN Community.
 Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 Licensed under [AGPL-3.0-only](LICENSE). Copyright ownership: [COPYRIGHT.md](COPYRIGHT.md).
 
-SupiVPN combines a separate OpenVPN Community 2.7.8 process, a Go agent, and
+SupiVPN combines a separate OpenVPN Community process, a Go agent, and
 a SAML authorization controller. Client profiles include `tls-crypt-v2`;
 no client certificate is required. A verified SAML assertion determines access
 and group membership.
