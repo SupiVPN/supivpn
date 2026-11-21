@@ -172,7 +172,12 @@ func (a *agent) closeClientLocked(c *connection, reason string) {
 	c.closing = true
 	c.closeBy = a.now().Add(30 * time.Second)
 	delete(a.tickets, c.ticket)
-	if err := a.commandLocked(fmt.Sprintf("client-kill %d", c.cid)); err != nil {
+	command := fmt.Sprintf("client-kill %d", c.cid)
+	if reason == "pending_auth_expired" {
+		// An unanswered browser request must stop, not open another login on retry.
+		command += ` "HALT,Browser authentication timed out; reconnect manually"`
+	}
+	if err := a.commandLocked(command); err != nil {
 		// The CID may have disappeared without DISCONNECT. A rejection alone
 		// is not proof; retain the slot until the ordered snapshot is handled.
 		if errors.Is(err, errManagementRejected) {
@@ -230,9 +235,7 @@ func (a *agent) handleEvent(e clientEvent) {
 			a.remote.enqueue(c)
 			return
 		}
-		command := fmt.Sprintf("client-pending-auth %d %d \"WEB_AUTH:external:%s/login/%s\" %d",
-			c.cid, c.kid, a.origin.String(), token, a.config.PendingSeconds)
-		if a.commandLocked(command) != nil {
+		if a.requestBrowserLocked(c, a.origin.String()) != nil {
 			a.removeLocked(c)
 			a.management.close()
 			return

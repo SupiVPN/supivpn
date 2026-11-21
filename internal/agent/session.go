@@ -5,21 +5,27 @@
 package agent
 
 import (
-    "fmt"
-    "time"
+	"fmt"
+	"time"
 )
 
 // Browser authentication belongs only to a new connection.
 func (a *agent) requestBrowserLocked(c *connection, origin string) error {
-    remaining := int(c.expires.Sub(a.now()).Seconds())
-    if c.active || remaining <= 0 { return fmt.Errorf("browser authorization expired") }
-    return a.commandLocked(fmt.Sprintf("client-pending-auth %d %d \"WEB_AUTH:external:%s/login/%s\" %d",
-        c.cid, c.kid, origin, c.ticket, remaining))
+	remaining := int(c.expires.Sub(a.now()).Seconds())
+	if c.active || remaining <= 0 {
+		return fmt.Errorf("browser authorization expired")
+	}
+	// Keep TLS alive for HALT delivery; the authorization deadline is unchanged.
+	return a.commandLocked(fmt.Sprintf("client-pending-auth %d %d \"WEB_AUTH:external:%s/login/%s\" %d",
+		c.cid, c.kid, origin, c.ticket, remaining+10))
 }
 
 func validSessionDecision(now, delivery, expires time.Time, unlimited bool, limit int) bool {
-    if unlimited { return limit == 0 && expires.IsZero() }
-    if expires.IsZero() || !now.Before(expires) || delivery.After(expires) { return false }
-    return limit == 0 || !expires.After(now.Add(time.Duration(limit)*time.Second))
+	if unlimited {
+		return limit == 0 && expires.IsZero()
+	}
+	if expires.IsZero() || !now.Before(expires) || delivery.After(expires) {
+		return false
+	}
+	return limit == 0 || !expires.After(now.Add(time.Duration(limit)*time.Second))
 }
-

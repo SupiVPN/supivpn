@@ -49,6 +49,7 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 	}
 	defer clear(wrapping)
 	var managers []*management
+	var serverLogs []*protocolLog
 	for i := range 2 {
 		dev := fmt.Sprintf("supiTransport%d", i)
 		socket := filepath.Join(dir, fmt.Sprintf("m%d.sock", i))
@@ -66,8 +67,13 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			"/var/lib/supivpn/tls-crypt-v2-server.key", key,
 			"/run/supivpn/management.sock", socket,
 			"/opt/supivpn/supivpn", hook,
+			"verb 2", "verb 3",
 			"-learn-address\"", "-learn-address -route-device "+dev+" -route-network 10.203.0.0/24\"",
 		).Replace(openVPNServerTemplate)
+		if linuxClient == "" {
+			// Routing-only clients leave TUN down while the longer fixture exercises browser expiry.
+			cfg = strings.Replace(cfg, "keepalive 10 60", "keepalive 10 120", 1)
+		}
 		if i == 1 {
 			cfg = strings.ReplaceAll(cfg, "proto udp4", "proto tcp4-server")
 			cfg = strings.ReplaceAll(cfg, "port 12194", "port 12443")
@@ -75,7 +81,7 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 		cfg += "\ntls-crypt-v2-verify \"" + hook + " -verify-profile-metadata required\"\nclient-disconnect \"" + hook + " -route-disconnect -route-device " + dev + " -route-network 10.203.0.0/24\"\n"
 		path := filepath.Join(dir, fmt.Sprintf("server%d.conf", i))
 		writeTestFile(t, path, []byte(cfg))
-		startProtocolProcess(t, binary, "--config", path)
+		serverLogs = append(serverLogs, startProtocolProcess(t, binary, "--config", path))
 		listener.SetDeadline(time.Now().Add(8 * time.Second))
 		conn, err := listener.AcceptUnix()
 		if err != nil {
@@ -120,7 +126,7 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			registered[*q.CID] = true
 		case "fetch":
 			if !registered[*q.CID] || !authorized[*q.CID] {
-				return nil, &agentclient.Error{Status: 204}
+				return nil, nil
 			}
 			d := allowedRemoteDecision(coreGroup)
 			d.CID, d.KID = *q.CID, *q.KID
@@ -134,6 +140,7 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 		return nil, nil
 	})
 	a, _ := remoteFixture(t, api)
+	captureAudit(t, a)
 	a.management.close()
 	a.attach(m)
 	a.config.ProfileBinding = "required"
@@ -143,12 +150,21 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 	start, end := strings.Index(template, "<ca>"), strings.Index(template, "</ca>")
 	template = template[:start] + "<ca>\n" + string(ca) + "</ca>" + template[end+len("</ca>"):]
 	nodeTest := t
+	connectedClients := 0
 	for i, tc := range []struct {
 		name      string
 		udp, tcp  uint16
 		transport int
 		retry     bool
-	}{{"TCP temporary refusal", 12196, 12443, 1, true}, {"UDP preferred", 12194, 12443, 0, false}, {"UDP unavailable", 12196, 12443, 1, false}, {"existing UDP-only bound", 12194, 0, 0, false}} {
+		pending   bool
+	}{
+		{"TCP temporary refusal", 12196, 12443, 1, true, false},
+		{"UDP preferred", 12194, 12443, 0, false, false},
+		{"UDP unavailable", 12196, 12443, 1, false, false},
+		{"existing UDP-only bound", 12194, 0, 0, false, false},
+		{"UDP unanswered browser", 12194, 12443, 0, false, true},
+		{"TCP unanswered browser", 12196, 12443, 1, false, true},
+	} {
 		if !t.Run(tc.name, func(t *testing.T) {
 			issue, err := profile.BoundTransportIssuer([]byte(template), "localhost", tc.udp, tc.tcp,
 				func(context.Context) ([]byte, error) { return bytes.Clone(wrapping), nil },
@@ -218,6 +234,11 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 					t.Fatal("client did not apply the short endpoint timeout")
 				}
 			}
+			pendingSeconds := a.config.PendingSeconds
+			if tc.pending {
+				a.config.PendingSeconds = 5 // Shorten only this isolated browser deadline.
+				defer func() { a.config.PendingSeconds = pendingSeconds }()
+			}
 			a.handleEvent(e)
 			remoteStepNow(a)
 			marker := "WEB_AUTH:external:"
@@ -225,6 +246,57 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 				marker = a.remote.publicURL + "/login/"
 			}
 			waitProtocol(t, log, marker)
+			if tc.pending {
+				old := a.connections[e.cid]
+				leases, owners := len(a.pools.leases), len(a.pools.owners)
+				// Cover the native five-second RESTART delay and a second login
+				// deadline; a client-wide timeout must not hide a retry loop.
+				until := old.expires.Add(12 * time.Second)
+				tick := time.NewTicker(time.Second)
+				defer tick.Stop()
+				for time.Now().Before(until) {
+					select {
+					case event := <-m.events:
+						if event.kind != "DISCONNECT" || event.cid != old.cid {
+							t.Fatalf("unanswered browser login produced an unexpected %s event", event.kind)
+						}
+						a.handleEvent(event)
+					case <-tick.C:
+						// Exercise both worker-first and expiry-ticker-first ordering.
+						if tc.transport == 0 {
+							remoteStepNow(a)
+						}
+						a.expire()
+					}
+					remoteStepNow(a)
+					if old.active || old.address.IsValid() || len(a.pools.leases) != leases || len(a.pools.owners) != owners {
+						t.Fatal("unanswered browser login obtained a tunnel address")
+					}
+				}
+				if !serverLogs[tc.transport].contains("HALT,") {
+					t.Fatal("pending expiry did not send terminal HALT")
+				}
+				if a.connections[old.cid] != nil || a.tickets[old.ticket] != nil || log.contains("Initialization Sequence Completed") {
+					t.Fatal("expired pending login survived or established a tunnel")
+				}
+				// A new user-initiated attempt must still authenticate normally.
+				a.config.PendingSeconds = pendingSeconds
+				log = startProtocolProcess(nodeTest, clientBinary, clientArgs...)
+				select {
+				case e = <-m.events:
+					if e.kind != "CONNECT" || e.cid == old.cid || e.transport != tc.transport || !e.proof.Valid() {
+						t.Fatal("manual reconnect did not create a fresh bound connection")
+					}
+				case <-time.After(15 * time.Second):
+					t.Fatal("manual reconnect did not request authentication")
+				}
+				a.handleEvent(e)
+				remoteStepNow(a)
+				waitProtocol(t, log, marker)
+				if a.connections[e.cid].ticket == old.ticket {
+					t.Fatal("manual reconnect reused the expired browser ticket")
+				}
+			}
 			if tc.name == "UDP preferred" {
 				// A responsive endpoint must retain the browser login even after
 				// the three-second unreachable-endpoint timeout has passed.
@@ -373,11 +445,12 @@ func TestOpenVPNTransportFallback(t *testing.T) {
 			if err != nil || json.Unmarshal(out, &routes) != nil || len(routes) != 1 || routes[0].Device != fmt.Sprintf("supiTransport%d", tc.transport) {
 				t.Fatal("authenticated client route selected wrong daemon")
 			}
+			connectedClients++
 		}) {
 			t.FailNow()
 		}
 	}
-	if linuxClient == "" && (len(a.pools.leases) != 4 || len(a.pools.owners) != 4) {
+	if linuxClient == "" && (len(a.pools.leases) != connectedClients || len(a.pools.owners) != connectedClients) {
 		t.Fatal("transports reused a live address")
 	}
 }

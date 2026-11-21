@@ -58,6 +58,12 @@ func TestTransportManagementIsolatesDuplicateClientIDs(t *testing.T) {
 		if command := <-commands; command != "client-kill 7" || len(other) != 0 {
 			t.Fatal("kill reached another daemon")
 		}
+		if err := m.command(fmt.Sprintf(`client-kill %d "HALT,Browser authentication timed out; reconnect manually"`, want)); err != nil {
+			t.Fatal(err)
+		}
+		if command := <-commands; command != `client-kill 7 "HALT,Browser authentication timed out; reconnect manually"` || len(other) != 0 {
+			t.Fatal("halt message changed or reached another daemon")
+		}
 	}
 	if m.tunnelsInitialized() {
 		t.Fatal("uninitialized transports became ready")

@@ -44,8 +44,18 @@ of the previous session. The container exited with code 0 and was removed automa
 
 The harness uses a local controller. PostgreSQL integration tests cover cluster
 slots/cancel; real IdP policy is tested in deployment.
-For a negative check, do not authorize the second login: VPN access must remain
-unavailable, and the harness's positive scenario will not report PASS.
+For a negative check with the unreleased pending-timeout fix, do not authorize
+the second login. After the pending window, Connect should stop the connection
+attempt without opening another browser window. Leave the client and its
+network awake for at least two more pending windows; VPN access must remain
+unavailable. The existing tab may remain open. Then reconnect manually: a new
+login must be required, and completing it should restore the tunnel. The
+harness's positive scenario will not report PASS for the unanswered attempt.
+Record the client version/platform and the observed stop/retry behavior
+separately; the historical PASS above does not cover this negative scenario.
+The reported affected client is macOS Connect **3.9.0 (6050)**; its fixed UI
+behavior still needs manual acceptance. See [delivery limits](SESSIONS.md#expiry-and-new-login)
+for sleep, network loss, and failover.
 
 UDP/11194 and HTTPS/18443 are published only on loopback; the Mac default route
 and DNS are unchanged. The container is removed on completion or after the
