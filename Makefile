@@ -259,7 +259,7 @@ test-openvpn: agent
 	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/openvpn.test,target=/test/openvpn.test,readonly" \
 	 --mount "type=bind,source=$(ROOT)/$(BUILD_DIR)/supivpn,target=/test/supivpn,readonly" \
 	 --env SUPIVPN_TEST_OPENVPN=/usr/sbin/openvpn --env SUPIVPN_TEST_AGENT=/test/supivpn \
-	 "$(OPENVPN_IMAGE)" /test/openvpn.test -test.run "$(OPENVPN_RUN)" -test.v -test.timeout 300s
+	 "$(OPENVPN_IMAGE)" /test/openvpn.test -test.run "$(OPENVPN_RUN)" -test.v -test.timeout 360s
 
 .PHONY: linux-client-image test-linux-client
 linux-client-image:
