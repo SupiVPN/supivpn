@@ -19,7 +19,7 @@ implementation and automated acceptance.
 
 | Package | Contents | Runtime requirements |
 | --- | --- | --- |
-| `supivpn-node` | Agent, profile/key bootstrap CLI, dedicated agent and OpenVPN units | OpenVPN Community 2.7.8, CA certificates, systemd |
+| `supivpn-node` | Agent, profile/key bootstrap CLI, dedicated agent and OpenVPN units | OpenVPN Community 2.7.8 or 2.7.9, CA certificates, systemd |
 | `supivpn-controller` | Controller, explicit migration CLI, matching SQL and profile example | CA certificates, systemd, a reachable PostgreSQL 18 database |
 | `supivpn-cli` (from v0.8.0) | Local root-only operator frontend; no daemon | Matching node and controller on the same host, systemd; PostgreSQL may be external |
 | `supivpn` | Matching node, controller and CLI, `supivpn-setup` and its configuration templates | All three component packages, Python 3, OpenSSL, curl; PostgreSQL 18 for setup |
@@ -29,10 +29,10 @@ does not require a local controller; AWS transport remains available. The local
 Unix transport works only on a shared host: separate packages do not imply
 authenticated agent transport between arbitrary machines.
 
-OpenVPN backward compatibility is deferred. The dependency accepts 2.7.8
-distribution revisions and rejects other upstream versions until tested. Do not
-force installation around this dependency. Debian's default repository may not
-provide this version; provision a separately verified OpenVPN package first.
+This source branch accepts OpenVPN 2.7.8 and 2.7.9 distribution revisions;
+published v0.10.0 packages still accept only 2.7.8. Other upstream versions are
+rejected until tested. Do not force installation around this dependency.
+Debian 13 backports currently supplies 2.7.8 for both supported architectures.
 The OpenVPN package built in `ci/debian` is only a test fixture, not a supported
 distribution channel. See [OpenVPN requirements](OPENVPN_UPGRADE.md).
 
@@ -79,7 +79,7 @@ dependencies, `.dsc`, `.changes`, `.buildinfo` and an input SHA-256 inventory.
 These development outputs are unsigned. Distribute matching source with binaries;
 the release workflow described above supplies signing/provenance for official assets.
 
-The source package uses debhelper 13. Its build environment must supply Go 1.27.3
+The source package uses debhelper 13. Its build environment must supply Go 1.27.4
 and `vendor/`; `debian/rules` verifies the SDK and never downloads dependencies.
 The provided builder supplies this SDK explicitly because the stable Debian Go
 package need not match the project. Maintainer scripts never download software.

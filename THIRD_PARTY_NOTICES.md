@@ -5,7 +5,7 @@ Original SupiVPN materials: AGPL-3.0-only. See [LICENSE](LICENSE) and [COPYRIGHT
 
 This document distinguishes original SupiVPN materials from third-party
 components. Third-party copyrights and license texts remain with their owners.
-Dependency inventory and packaging reviewed on 20 October 2026 against
+Dependency inventory and packaging reviewed on 21 November 2026 against
 `go.mod`, the retained license texts and the current packaging code.
 
 ## Original SupiVPN materials
@@ -28,7 +28,7 @@ retained in their headers. Those headers preserve released SQL checksums and
 impose no additional restriction on these files in this distribution.
 The source tree records the same override in `REUSE.toml`.
 
-## OpenVPN Community 2.7.8
+## OpenVPN Community 2.7.8 and 2.7.9
 
 OpenVPN Community is a separate third-party VPN daemon, copyright OpenVPN Inc
 and other contributors, under GPL version 2 with the exceptions and
@@ -45,7 +45,7 @@ Current integration:
   The release archive and Lambda ZIP contain SupiVPN executables and their
   compiled Go dependencies, not the OpenVPN daemon.
 - The separate CI image defined by `ci/Dockerfile` builds and installs OpenVPN
-  2.7.8 from an upstream archive with a pinned SHA-256, recorded after verifying
+  2.7.9 from an upstream archive with a pinned SHA-256, recorded after verifying
   the upstream detached OpenPGP signature.
   An image built from this recipe contains OpenVPN and other system packages;
   its distribution has separate obligations described below.
@@ -58,7 +58,7 @@ linking exceptions do not change the license of OpenVPN itself.
 
 Sources:
 
-- [OpenVPN COPYING, release v2.7.8](https://github.com/OpenVPN/openvpn/blob/v2.7.8/COPYING).
+- [OpenVPN COPYING, release v2.7.9](https://github.com/OpenVPN/openvpn/blob/v2.7.9/COPYING).
 - [OpenVPN management interface](https://openvpn.net/community-docs/management-interface.html).
 - [GPLv2 terms, especially sections 1, 2, 3 and 6](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html).
 - [FSF guidance on separate programs and aggregation](https://www.gnu.org/licenses/old-licenses/gpl-2.0-faq.html#MereAggregation).
@@ -105,30 +105,30 @@ cache. Different executables may compile different subsets of these modules.
 | Module | Version | Upstream license |
 | --- | --- | --- |
 | `github.com/aws/aws-lambda-go` | `v1.55.1` | Apache-2.0; MIT-0 for material identified by LICENSE-SUMMARY |
-| `github.com/aws/aws-sdk-go-v2` | `v1.47.3` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/config` | `v1.33.9` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/credentials` | `v1.20.9` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/feature/ec2/imds` | `v1.20.3` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/ec2` | `v1.339.0` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/secretsmanager` | `v1.50.5` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2` | `v1.48.0` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/config` | `v1.33.21` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/credentials` | `v1.21.3` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/feature/ec2/imds` | `v1.20.9` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/ec2` | `v1.350.0` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/secretsmanager` | `v1.51.0` | Apache-2.0 |
 | `github.com/beevik/etree` | `v1.8.1` | BSD-2-Clause |
-| `github.com/jackc/pgx/v5` | `v5.11.0` | MIT |
-| `golang.org/x/sys` | `v0.49.0` | BSD-3-Clause |
-| `github.com/aws/aws-sdk-go-v2/internal/configsources` | `v1.5.6` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/internal/endpoints/v2` | `v2.8.6` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/internal/v4a` | `v1.5.6` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding` | `v1.13.21` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/internal/presigned-url` | `v1.14.6` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/signin` | `v1.10.4` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/sso` | `v1.38.4` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/ssooidc` | `v1.43.4` | Apache-2.0 |
-| `github.com/aws/aws-sdk-go-v2/service/sts` | `v1.51.4` | Apache-2.0 |
-| `github.com/aws/smithy-go` | `v1.28.5` | Apache-2.0 |
+| `github.com/jackc/pgx/v5` | `v5.13.0` | MIT |
+| `golang.org/x/sys` | `v0.50.0` | BSD-3-Clause |
+| `github.com/aws/aws-sdk-go-v2/internal/configsources` | `v1.5.12` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/internal/endpoints/v2` | `v2.8.12` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/internal/v4a` | `v1.5.12` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding` | `v1.13.25` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/internal/presigned-url` | `v1.14.12` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/signin` | `v1.14.0` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/sso` | `v1.39.5` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/ssooidc` | `v1.44.5` | Apache-2.0 |
+| `github.com/aws/aws-sdk-go-v2/service/sts` | `v1.53.0` | Apache-2.0 |
+| `github.com/aws/smithy-go` | `v1.28.9` | Apache-2.0 |
 | `github.com/jackc/pgpassfile` | `v1.0.0` | MIT |
 | `github.com/jackc/pgservicefile` | `v0.0.0-20240606120523-5a60cdf6a761` | MIT |
-| `github.com/jackc/puddle/v2` | `v2.2.3` | MIT |
-| `golang.org/x/sync` | `v0.24.0` | BSD-3-Clause |
-| `golang.org/x/text` | `v0.43.0` | BSD-3-Clause |
+| `github.com/jackc/puddle/v2` | `v2.2.4` | MIT |
+| `golang.org/x/sync` | `v0.25.0` | BSD-3-Clause |
+| `golang.org/x/text` | `v0.44.0` | BSD-3-Clause |
 
 AWS SDK and Smithy also contain Go-derived subcomponents under BSD terms.
 The AWS Lambda module's own LICENSE-SUMMARY distinguishes its Apache-2.0 code
@@ -143,7 +143,7 @@ their source paths listed. It does not relicense these components.
 ## Build, test and deployment components
 
 The Go runtime and standard library are compiled into the executables.
-`THIRD_PARTY_LICENSES.txt` includes the Go 1.27.3 LICENSE/PATENTS and discovered
+`THIRD_PARTY_LICENSES.txt` includes the Go 1.27.4 LICENSE/PATENTS and discovered
 source-tree LICENSE, NOTICE and COPYING texts, with their upstream paths.
 This conservative inventory includes toolchain components beyond those compiled
 into a particular executable. Recheck it when changing the build toolchain.

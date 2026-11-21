@@ -19,7 +19,7 @@ require the full checks. Main, tag, scheduled and manual runs always run them.
 | Security | ARM64 | Go vet, module integrity, source vulnerability checks for both deployment targets |
 | Fuzz | ARM64, one job per target | XML/C14N and signed SAML mutations |
 | Build | ARM64 and AMD64 | Binaries, Lambda ZIPs and binary vulnerability scans |
-| OpenVPN | ARM64 and AMD64 | Real OpenVPN 2.7.8 authentication, rejection, expiry and failover |
+| OpenVPN | ARM64 and AMD64 | Real OpenVPN 2.7.9 authentication, rejection, expiry and failover |
 
 Executable jobs depend only on the short scope job, so an image build, fuzz run
 or database test does not hold up unrelated work. Both matrix legs run even if

@@ -7,7 +7,7 @@ This isolated harness checks automatic reconnection after **120 seconds**.
 It uses no AWS, Okta, or deployment keys. Connect itself opens the browser;
 the harness neither opens URLs nor confirms SAML automatically.
 
-Requirements: Docker/TUN and the local OpenVPN 2.7.8 image from [BUILD.md](../BUILD.md).
+Requirements: Docker/TUN and the local OpenVPN image from [BUILD.md](../BUILD.md).
 Run from the project root:
 
 ```sh

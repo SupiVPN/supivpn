@@ -4,7 +4,7 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](LICENSE) for copyright ownership and licensing terms.
 
 Run `make <target>` from the SupiVPN root, or `make -C /path/to/supivpn <target>`.
-Requirements: GNU Make, the Go version in `go.mod` (currently 1.27.3) or newer Go,
+Requirements: GNU Make, the Go version in `go.mod` (currently 1.27.4) or newer Go,
 and a C compiler for the race detector.
 Docker is required only for PostgreSQL/XMLSec/OpenVPN. `make help` lists all targets.
 For a first contribution, follow [CONTRIBUTING.md](CONTRIBUTING.md): `make setup`
@@ -103,7 +103,7 @@ do not substitute for importing through the client UI.
 | `make vet` | `go vet`, including integration code |
 | `make integration` | PostgreSQL 18 migrations, roles, TLS, reconnect, replay, remote controller, profiles, and clustering |
 | `make test-xmlsec` | Independent XML signature checks using XMLSec in Docker |
-| `make test-openvpn` | Real OpenVPN 2.7.8: foreground/daemon startup, tls-crypt-v2, SAML, IP pools, and two-node failover |
+| `make test-openvpn` | Real OpenVPN 2.7.9: foreground/daemon startup, tls-crypt-v2, SAML, IP pools, and two-node failover |
 | `make test-connect` | Interactive OpenVPN Connect on Mac: expiry, automatic reconnect, and a new browser login; [instructions](docs/CONNECT_TEST.md) |
 | `make fuzz` | Two 20-second runs: XML/C14N and signed SAML mutations; `FUZZ_TIME=60s` sets the duration of **each** |
 | `make fuzz-xml` / `make fuzz-saml` | Parser/C14N only, or preservation of verified claims under signed SAML mutations |
@@ -178,7 +178,7 @@ create their own TLS endpoint. Deployment connections continue to use TLS.
 `postgres-stop` accepts only a container bearing the test label. Docker removes
 the container and its anonymous volume after stopping it. Override
 `POSTGRES_CONTAINER`, `POSTGRES_PORT`, or `POSTGRES_IMAGE` as needed; update the
-test URL when changing the port. The default is `postgres:18.6-bookworm`, pinned
+test URL when changing the port. The default is `postgres:18.7-bookworm`, pinned
 by digest in the Makefile; review and refresh that digest with dependency updates.
 
 A separate **interactive** test covers a real PostgreSQL restart:
@@ -207,7 +207,7 @@ make openvpn-image
 make test-openvpn
 ```
 
-The checked-in `ci/Dockerfile` builds OpenVPN **2.7.8** from a checksum-pinned
+The checked-in `ci/Dockerfile` builds OpenVPN **2.7.9** from a checksum-pinned
 upstream archive. No private installer or deployment repository is required.
 See [native tests](testdata/openvpn/README.md).
 Use `OPENVPN_IMAGE` to select an existing image matching `ARCH`. Docker suites
@@ -216,7 +216,7 @@ Test containers have no network; OpenVPN receives TUN/NET_ADMIN only inside the
 container. Tests generate temporary keys and a synthetic IdP.
 
 Startup checks the management handshake and readiness after `state on` /
-`hold release`. OpenVPN 2.7.8 acknowledges `version 5` separately; receive that
+`hold release`. OpenVPN 2.7.9 acknowledges `version 5` separately; receive that
 ACK before sending the next command. A unit test ensures the ACK cannot mask
 a subsequent command failure. Raw management transcripts are never printed.
 
@@ -241,7 +241,7 @@ Review **all** direct and transitive dependencies, AWS SDK, the Go toolchain,
 OpenVPN, and base-image packages. `deps-check` also lists test/tool modules in
 the graph; presence in that graph does not imply inclusion in a binary.
 
-The Makefile pins `govulncheck` (`v1.9.0`); its vulnerability database is refreshed
+The Makefile pins `govulncheck` (`v1.10.0`); its vulnerability database is refreshed
 during checks. Source analysis runs locally; modules and the
 [Go vulnerability database](https://go.dev/doc/security/vuln/) are downloaded.
 `deps-check` changes nothing. For accepted updates, review changelogs, update

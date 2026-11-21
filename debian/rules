@@ -15,7 +15,7 @@ export GOOS = linux
 	dh $@
 
 override_dh_auto_configure:
-	@test "$$(go env GOVERSION)" = go1.27.3
+	@test "$$(go env GOVERSION)" = go1.27.4
 	@test -f vendor/modules.txt
 
 override_dh_auto_build:

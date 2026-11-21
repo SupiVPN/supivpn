@@ -1,69 +1,102 @@
-# Dependency upgrade for v0.4.1
+# Dependency refresh
 
-Reviewed on 20 October 2026. The database schema remains at version 9 and the
-release bundle contract remains at version 3. No application configuration
-migration is required. Developers and source builders need Go 1.27.3 or newer.
+Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
+See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
+
+Reviewed on 21 November 2026. **Unreleased:** these versions describe this source
+branch, not the published v0.10.0 packages. No release is scheduled by this
+change. The database schema remains 12; configuration, profiles and signing
+roles remain unchanged.
 
 ## Updated components
 
-| Component | Version | Review |
+| Component | Previous | Updated |
 | --- | --- | --- |
-| Release/CI Go toolchain | 1.27.3 | Latest stable release at review time. CI reads the minimum from `go.mod`; the official container image remains digest-pinned. |
-| AWS SDK core | 1.47.3 | Updated together with its config and service modules. |
-| AWS config / credentials / IMDS | 1.33.9 / 1.20.9 / 1.20.3 | Stable updates within the existing module major versions. |
-| EC2 / Secrets Manager clients | 1.339.0 / 1.50.5 | Existing recovery operations remain covered by tests. |
-| Smithy | 1.28.5 | Updated with the AWS SDK dependency graph. |
-| Go sync / sys / text | 0.24.0 / 0.49.0 / 0.43.0 | Latest stable versions of the declared modules. |
-| govulncheck | 1.9.0 | Updated scanner; its vulnerability database is refreshed when it runs. |
-| Local Python audit | PyYAML 6.0.3 | Pinned installation through `make setup` in a local virtual environment. |
-| Disposable PostgreSQL / OpenVPN | 18.6 / 2.7.8 | Already current; retain the verified image/source pins. Production components are managed separately. |
-| XMLSec test base | Debian 13 slim | Pin the current official multi-architecture image digest. |
+| Go build toolchain | 1.27.3 | 1.27.4 |
+| OpenVPN test daemon | 2.7.8 | 2.7.9; 2.7.8 remains accepted |
+| OpenVPN 3 Linux test client | 27.1 | 27.2 (`27.2-1+1.1`) |
+| PostgreSQL test server | 18.6 | 18.7 |
+| AWS SDK core | 1.47.3 | 1.48.0 |
+| AWS config / credentials / IMDS | 1.33.9 / 1.20.9 / 1.20.3 | 1.33.21 / 1.21.3 / 1.20.9 |
+| EC2 / Secrets Manager | 1.339.0 / 1.50.5 | 1.350.0 / 1.51.0 |
+| Smithy | 1.28.5 | 1.28.9 |
+| pgx / puddle | 5.11.0 / 2.2.3 | 5.13.0 / 2.2.4 |
+| Go sync / sys / text | 0.24.0 / 0.49.0 / 0.43.0 | 0.25.0 / 0.50.0 / 0.44.0 |
+| govulncheck | 1.9.0 | 1.10.0 |
+| PyYAML | 6.0.3 | 6.0.4 |
+| Playwright | 1.62.1 | 1.65.1 |
+| setup-go / setup-node actions | 7.0.0 / 6 | 7.1.0 / 7.1.0 |
+| CodeQL action | 4.39.1 | 4.39.4 |
 
-`pgx/v5` 5.11.0, `aws-lambda-go` 1.55.1, etree 1.8.1 and puddle 2.2.3 were
-already current. No declared module is retracted. Full versions and retained
-license texts are in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and
-[THIRD_PARTY_LICENSES.txt](../THIRD_PARTY_LICENSES.txt). The 32 retained module
-license/notice paths were checked against the updated module cache; their text
-is unchanged. The Go 1.27.3 SDK notices are also covered by the retained texts.
+AWS indirect modules are updated together. The declared Go module set is
+unchanged. `aws-lambda-go` 1.55.1, etree 1.8.1, pgpassfile and pgservicefile are
+already current. Versions and license attribution are in
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Upstream-only test/tool modules
+that do not build into SupiVPN or its tests are not promoted into `go.mod` merely
+to suppress update output.
 
-The full module graph lists newer versions of `kr/pretty`, `objx`, `testify`,
-`x/mod` and `x/tools`. These are upstream test/unused graph dependencies, not
-packages compiled into SupiVPN or its tests. They are not promoted to explicit
-requirements merely to suppress update output. Vulnerability checks inspect
-the application and its tests.
+Go, PostgreSQL and Debian 13 test/build images retain exact multi-architecture
+digest pins. OS packages come from the signed distribution repositories when
+those images are rebuilt. GitHub Actions retain full commit pins; their permissions,
+publication triggers and protected signing environments are unchanged. Other
+pinned actions were already current. Node tooling stays on maintained Node 24
+LTS; setup-node resolves its current patch. PostgreSQL 19 adoption and migration
+testing are separate work; this change updates the supported 18 series.
 
-Official Actions remain SHA-pinned: checkout 7.0.1, setup-go 7.0.0, cache 6.1.0,
-upload-artifact 7.0.2, download-artifact 8.0.2, setup-buildx-action 4.4.1 and
-build-push-action 7.4.0. Their Node 24 runtime is supported by the hosted runners.
-Artifact uploads retain ZIP archives; downloads reject digest mismatches.
-The existing attest 4.2.2 action was already current. Workflow permissions and
-the separate tag/commit/artifact signing roles are preserved.
+## Compatibility and upstream review
 
-## Contributor workflow
+- [Go 1.27.4](https://go.dev/doc/devel/release#go1.27.4) includes security and
+  correctness fixes. Source builds and Debian builders now use that toolchain.
+- [OpenVPN review](OPENVPN_UPGRADE.md) records the signed source, relevant open
+  issues, client distinctions and the bounded 2.7.8/2.7.9 version check.
+- [pgx 5.13.0 changelog](https://github.com/jackc/pgx/blob/v5.13.0/CHANGELOG.md)
+  includes the 5.12 security fixes for simple-protocol batches and authentication
+  requirements, and 5.13 malformed-response validation. SupiVPN does not use
+  simple-protocol batches. Remote deployments should still use `verify-full`:
+  encryption-only `require` does not authenticate the database server.
+- pgx now reloads file-backed client certificates on new TLS requests. Certificate
+  and key files supplied through `sslcert`/`sslkey` must remain readable. SupiVPN
+  preserves pgx's TLS configuration and does not introduce statement retries.
+- [AWS SDK 1.48.0](https://github.com/aws/aws-sdk-go-v2/blob/v1.48.0/CHANGELOG.md)
+  changes the default retry backoff and retry-quota accounting. Existing request
+  deadlines and explicit attempt limits remain in force. A local HTTP fixture
+  exercises the real Secrets Manager SDK for retry limits, access denial and
+  cancellation without accessing AWS or working credentials.
+- [PostgreSQL 18.7 notes](https://www.postgresql.org/docs/release/18.7/) include
+  index and incremental-backup repair guidance. This PR updates disposable tests;
+  it does not upgrade a working database or perform reindexing/backups.
+- [OpenVPN 3 Linux 27.2](https://github.com/OpenVPN/openvpn3-linux/compare/v27.1...v27.2)
+  updates its core library with a security fix. This is separate from OpenVPN
+  Community 2.7.9 and from OpenVPN Connect.
 
-`make setup` prepares project-local Python tools and downloads Go dependencies.
-`make test` is the initial code-development check; documentation-only changes do
-not need a product build. Hosted CI runs the full architecture matrix. Make
-selects the host's ARM64/AMD64 architecture by default, with an explicit `ARCH`
-override for cross-builds. `postgres-start` waits for its own newly created
-container to become healthy, with a bounded timeout and no automatic cleanup of
-pre-existing resources. The local Go module boundary is preserved.
+## Verification and upgrade boundaries
 
-## Validation
+Completed locally with Go 1.27.4:
 
-Release validation includes unit/race tests, vet, PostgreSQL integration,
-XMLSec interoperability, SAML/XML fuzzing, real OpenVPN tests on ARM64 and AMD64,
-module integrity, and source/binary vulnerability scans. Mock-Docker tests cover
-readiness, failed creation, exited/missing/unhealthy containers and timeouts.
-Tag checks must pass before the separate release workflow verifies provenance
-and signs the checksum manifest. Known-vulnerability scans are point-in-time
-results, not proof that dependencies contain no flaws.
+- Unit/race, vet, PostgreSQL 18.7 integration, TLS rejection, role-isolation and
+  setup-helper tests; the AWS retry/deadline fixture uses no working credentials.
+- Module integrity and source/binary vulnerability checks for both Linux
+  architectures, with no reported vulnerabilities. No Go modules were added.
+- Independent XMLSec interoperability and two 20-second XML/SAML fuzz runs.
+- Real OpenVPN 2.7.9 on ARM64 and AMD64, plus a retained 2.7.8 ARM64 image:
+  SAML, bound-profile rejection, TLS failures, cancellation, expiry/rekey,
+  two-node failover, shared-pool routing and UDP/TCP fallback passed.
+- OpenVPN 3 Linux 27.2 profile, SAML and UDP/TCP tests on ARM64.
+- Debian package build and install/reconfigure/upgrade/remove/purge checks on
+  ARM64 and AMD64, plus Lambda builds for both architectures. These container
+  checks do not establish booted-systemd, reboot or full VM acceptance.
+- APT and artifact-signing tests with disposable keys, CI tooling tests,
+  repository audit, license inventory and local documentation links.
 
-## Upstream sources
+Hosted CI runs after the approved push; its result is recorded on the PR.
 
-- [Go release history](https://go.dev/doc/devel/release#go1.27.0).
-- [AWS SDK changelog at v1.47.3](https://github.com/aws/aws-sdk-go-v2/blob/v1.47.3/CHANGELOG.md).
-- [Smithy changelog at v1.28.5](https://github.com/aws/smithy-go/blob/v1.28.5/CHANGELOG.md).
-- [OpenVPN 2.7.8 review](OPENVPN_UPGRADE.md).
-- [PostgreSQL 18.6 release notes](https://www.postgresql.org/docs/release/18.6/).
-- [GitHub Actions](https://github.com/actions) and [Docker Actions](https://github.com/docker).
+Existing bound profile secrets, wrapping keys and server-name checks are
+unchanged. Keep the existing keys and profiles. Do not use a dependency upgrade
+as a reason to regenerate them. Updating SupiVPN does not update an independently
+installed OpenVPN daemon, a client application, or a managed database.
+
+For rollback, retain the prior SupiVPN/OpenVPN package pair and configuration;
+schema 12 does not change. Drain a VPN node before changing its daemon, then
+check readiness and a fresh bound login before proceeding to the next node.
+Native Connect/Windows/DCO, live AWS/Okta and a full booted Debian VM were not
+retested for this refresh.

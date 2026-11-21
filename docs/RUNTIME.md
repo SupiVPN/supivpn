@@ -4,7 +4,7 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../LICENSE) for copyright ownership and licensing terms.
 
 This Go module contains the agent, SAML controller, PostgreSQL backend, migrator,
-profile issuance, and VM/AWS adapters. OpenVPN Community 2.7.8 runs separately
+profile issuance, and VM/AWS adapters. OpenVPN Community runs separately
 and communicates with the agent through a management Unix socket.
 
 ## Entry points

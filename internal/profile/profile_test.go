@@ -171,7 +171,7 @@ func TestGeneratorFailureLeavesNoFileOrSecrets(t *testing.T) {
 }
 
 func TestWrongOpenVPNVersionRefused(t *testing.T) {
-	for _, version := range []string{"2.6.14", "2.7.7", "2.7.80", "2.7.8_rc1"} {
+	for _, version := range []string{"2.6.14", "2.7.7", "2.7.80", "2.7.90", "2.7.8_rc1", "2.7.9_rc1", "2.7.10"} {
 		t.Run(version, func(t *testing.T) {
 			dir := t.TempDir()
 			os.Chmod(dir, 0700)
@@ -180,6 +180,19 @@ func TestWrongOpenVPNVersionRefused(t *testing.T) {
 			}}
 			if i.EnsureServerKey(context.Background(), filepath.Join(dir, "key")) == nil {
 				t.Fatal("unpinned OpenVPN accepted")
+			}
+		})
+	}
+}
+
+func TestSupportedOpenVPNVersions(t *testing.T) {
+	for _, version := range []string{"2.7.8", "2.7.9"} {
+		t.Run(version, func(t *testing.T) {
+			i := Issuer{run: func(context.Context, ...string) ([]byte, error) {
+				return []byte("OpenVPN " + version + " test"), nil
+			}}
+			if err := i.checkVersion(context.Background()); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

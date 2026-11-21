@@ -11,7 +11,7 @@ deployments. Infrastructure defines endpoints, networks, secrets, and process st
 
 | Component | Responsibility |
 | --- | --- |
-| OpenVPN Community 2.7.8 | TLS, tunnels, and traffic forwarding |
+| OpenVPN Community (see [tested versions](OPENVPN_UPGRADE.md)) | TLS, tunnels, and traffic forwarding |
 | Go agent | Management protocol, browser auth, decision application, local IP leases |
 | Public controller | SAML verification, group policy, one-time decisions, profile download |
 | Agent API | Authenticated node registration, decisions, ACK/cancel and heartbeat |

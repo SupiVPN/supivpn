@@ -135,7 +135,7 @@ Use Linux with the project's Go version, Node 24, OpenSSL and NSS certutil.
 Install tooling before supplying test credentials to the execution process:
 
 ```bash
-npm install --prefix local/okta-ci --no-save --ignore-scripts --no-audit --no-fund playwright@1.62.1
+npm install --prefix local/okta-ci --no-save --ignore-scripts --no-audit --no-fund playwright@1.65.1
 local/okta-ci/node_modules/.bin/playwright install firefox
 node --test ci/okta/run.test.cjs
 make okta-probe

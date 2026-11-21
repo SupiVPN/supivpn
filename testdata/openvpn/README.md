@@ -4,9 +4,9 @@ Copyright (c) 2026 Stanislav Kazachkov (SupiVPN).
 See [LICENSE](../../LICENSE) for copyright ownership and licensing terms.
 
 Run from the repository root. Tests need a disposable Linux environment with OpenVPN
-2.7.8, TUN support and NET_ADMIN. They do not need a cloud account or a live IdP.
+2.7.9, TUN support and NET_ADMIN. They do not need a cloud account or a live IdP.
 
-The checked-in `ci/Dockerfile` builds OpenVPN 2.7.8 from a checksum-pinned
+The checked-in `ci/Dockerfile` builds OpenVPN 2.7.9 from a checksum-pinned
 upstream source archive. The build context contains only CI tooling; no private
 installer, cloud credentials or deployment configuration is required.
 
@@ -25,7 +25,7 @@ dumped, including on failure.
 Coverage:
 
 - Real native key generation, independent client keys, persistent server key.
-- Go-generated timestamp keys accepted by real OpenVPN 2.7.8; wrong wrapping key
+- Go-generated timestamp keys accepted by real OpenVPN; wrong wrapping key
   and tampered tag rejected before TLS/SAML, valid key still requires a VPN group.
   Rebuild the test binary after changes to the suite or agent.
 - Missing/wrong keys cannot reach TLS, management CONNECT or WEB_AUTH.

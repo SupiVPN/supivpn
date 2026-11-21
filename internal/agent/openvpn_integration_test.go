@@ -212,7 +212,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 	binary := os.Getenv("SUPIVPN_TEST_OPENVPN")
 	linuxClient := os.Getenv("SUPIVPN_TEST_OPENVPN3")
 	if binary == "" {
-		t.Skip("requires isolated Linux container with OpenVPN 2.7.8 and /dev/net/tun")
+		t.Skip("requires isolated Linux container with supported OpenVPN and /dev/net/tun")
 	}
 	agentBinary := os.Getenv("SUPIVPN_TEST_AGENT")
 	if agentBinary == "" {
@@ -601,7 +601,7 @@ func TestOpenVPNTLSCryptV2(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("tunnel establishment unconfirmed")
 			}
-			// Management version 5 and disconnect command must work on 2.7.8.
+			// Management version 5 and disconnect must work on supported daemons.
 			if err := m.command(fmt.Sprintf("client-kill %d", e.cid)); err != nil {
 				t.Fatal(err)
 			}

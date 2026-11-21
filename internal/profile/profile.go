@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const Version = "2.7.8"
+const Version = "2.7.9"
 const Placeholder = "{{TLS_CRYPT_V2_CLIENT_KEY}}"
 const serverType = "OpenVPN tls-crypt-v2 server key"
 const clientType = "OpenVPN tls-crypt-v2 client key"
@@ -54,8 +54,9 @@ func (i Issuer) command(ctx context.Context, args ...string) ([]byte, error) {
 
 func (i Issuer) checkVersion(ctx context.Context) error {
 	out, err := i.command(ctx, "--version")
-	if err != nil || !bytes.HasPrefix(out, []byte("OpenVPN "+Version+" ")) {
-		return errors.New("OpenVPN " + Version + " is required")
+	if err != nil || (!bytes.HasPrefix(out, []byte("OpenVPN "+Version+" ")) &&
+		!bytes.HasPrefix(out, []byte("OpenVPN 2.7.8 "))) {
+		return errors.New("OpenVPN 2.7.8 or " + Version + " is required")
 	}
 	return nil
 }

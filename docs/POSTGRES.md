@@ -340,7 +340,7 @@ From `runtime`, using local Docker:
 docker run --detach --rm --name supivpn-pg18-test \
   --publish 127.0.0.1:55432:5432 \
   --env POSTGRES_DB=supivpn_test --env POSTGRES_HOST_AUTH_METHOD=trust \
-  --mount type=volume,destination=/var/lib/postgresql postgres:18.6-bookworm
+  --mount type=volume,destination=/var/lib/postgresql postgres:18.7-bookworm
 docker exec supivpn-pg18-test pg_isready -U postgres -d supivpn_test
 ```
 
