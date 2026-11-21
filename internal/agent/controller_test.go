@@ -230,7 +230,11 @@ func TestPendingLoginLifetimeAcrossTransports(t *testing.T) {
 			tc.invalidate(remote, remote.connections[7])
 			remoteStepNow(remote)
 			for len(remoteCommands) > 0 {
-				if !strings.HasPrefix(<-remoteCommands, "client-deny ") {
+				command := <-remoteCommands
+				if tc.name == "expired" && command == `client-kill 7 "HALT,Browser authentication timed out; reconnect manually"` {
+					continue
+				}
+				if !strings.HasPrefix(command, "client-deny ") {
 					t.Fatal("stale remote login authorized")
 				}
 			}

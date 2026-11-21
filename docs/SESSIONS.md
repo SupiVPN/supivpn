@@ -86,9 +86,26 @@ the risk that opening a relayed link can authorize someone else's VPN connection
 Only approve the login opened by your own OpenVPN Connect; see the
 [configuration and login-link limitations](IDENTITY_PROVIDER.md#vpn-login-confirmation).
 
-If the user does not complete the new login, no new VPN access is granted.
-Old tickets/assertions/callbacks cannot restore the previous tunnel.
-Expiring one user does not disconnect other users on the node.
+If the user does not complete the new login within `pending_seconds`, no new
+VPN access is granted. The pending connection receives `HALT` instead of another
+`RESTART`: a client that receives it stops retrying, so leaving the confirmation
+or IdP page unanswered does not repeatedly open browser tabs. The user can start
+a fresh connection manually. This agent fix is **unreleased**; update the agent
+on each VPN node when available. It applies to VM and Lambda controllers without
+changing their APIs, database schema, or existing profiles.
+
+The OpenVPN pending control channel receives ten extra seconds for delivery of
+the stop message. This does **not** extend the agent/controller login deadline,
+accept a late SAML result, or grant tunnel access. Old tickets/assertions/callbacks
+cannot restore the previous tunnel. Expiring one user does not disconnect other
+users on the node; addresses and cluster slots still await confirmed disconnect.
+
+This stops retries on the current reachable connection, not every possible
+future attempt. Sleep, lost connectivity, failover, an unusually slow initial
+TLS handshake, or custom OpenVPN limits can prevent delivery before the control
+channel closes. A later fresh connection can open another login; the server
+cannot distinguish it from a manual reconnect. Existing browser tabs cannot be
+closed by the VPN server.
 
 The agent reconciles its CIDs with a complete OpenVPN `status 3` snapshot every
 five seconds while connections exist. The local IP is released after
@@ -304,6 +321,8 @@ Unit/race checks cover group duration, omitted/0/null configuration, signed IdP
 deadlines, expired IdP rejection, TLS rekey without extension, heartbeat, and
 isolation when terminating one user.
 Native OpenVPN verifies real DISCONNECT and new SAML after expiry.
+UDP/TCP tests also leave browser authentication unanswered, check that clients
+stop without receiving tunnel access, and allow a fresh manual connection.
 Operators verify automatic browser opening and the specific Connect UI with
 [CONNECT_TEST.md](CONNECT_TEST.md).
 AWS APIs are mocked; real Stop/StartInstances and failover also require operator

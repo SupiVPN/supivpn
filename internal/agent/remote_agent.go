@@ -103,6 +103,10 @@ func (a *agent) refuseRemoteLocked(c *connection) {
 	if a.connections[c.cid] != c || c.closing || c.active {
 		return
 	}
+	if !a.now().Before(c.expires) {
+		a.closeClientLocked(c, "pending_auth_expired")
+		return
+	}
 	a.denyConnectionLocked(c, "controller_refused")
 }
 
@@ -353,6 +357,12 @@ func (a *agent) remoteStep(ctx context.Context) {
 		return
 	}
 	if !a.pendingConnectionLocked(c) {
+		if a.connections[c.cid] == c && !c.active && !a.now().Before(c.expires) {
+			// Let HALT reach the client; confirmed disconnect will enqueue cancellation.
+			a.refuseRemoteLocked(c)
+			a.finishRemoteLocked(j)
+			return
+		}
 		j.phase = "cancel"
 		return
 	}

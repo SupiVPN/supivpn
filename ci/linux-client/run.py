@@ -36,7 +36,7 @@ def main():
                                                stderr=subprocess.DEVNULL))
         time.sleep(1)
         return subprocess.run(['/test/openvpn.test', '-test.run', '^TestOpenVPN(TLSCryptV2|TransportFallback)$',
-                               '-test.v', '-test.timeout', '180s'], check=False).returncode
+                               '-test.v', '-test.timeout', '240s'], check=False).returncode
     finally:
         for process in reversed(processes):
             if process.poll() is not None:
